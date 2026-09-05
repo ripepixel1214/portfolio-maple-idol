@@ -8,9 +8,7 @@
 
 [![메이플 아이돌 키우기 PV](https://img.youtube.com/vi/ICh-ejmLbco/hqdefault.jpg)](https://www.youtube.com/watch?v=ICh-ejmLbco)
 
-[YouTube에서 PV 보기](https://www.youtube.com/watch?v=ICh-ejmLbco)
-
-게임 소개용 PV입니다. 개별 기능의 입력과 결과를 보여주는 상세 플레이 시연과는 구분합니다.
+메이플 아이돌 키우기 PV
 
 | 구분 | 내용 |
 | --- | --- |
@@ -29,7 +27,6 @@
 
 단계 검증뿐 아니라 시작 도중 실패한 요청의 정리 범위도 나누었습니다. 첫 이벤트 실행 전 내부 오류인 경우에만 활동에 소모한 자원을 되돌리는 경로를 두었습니다.
 
-- [요청 검증과 진행 상태 설명](Docs/NpcInteraction.md)
 - [NpcEventManager](Source/RootDesk/MyDesk/Event/NpcEventManager.mlua)
 - [상호작용 진입점](Source/RootDesk/MyDesk/Event/NpcEventTriggerComponent.mlua)
 
@@ -37,9 +34,8 @@
 
 연속 입력, 타이밍 판정, 방향 입력, 드래그처럼 입력 방식이 다른 미니게임을 공통 실행 흐름으로 연결했습니다. 입력 수집과 목표 판정, 시간 제한, 결과 처리를 분리하여 입력이 다른 게임도 시작과 종료 처리를 공유하도록 했습니다.
 
-PC와 모바일에서의 동작을 확인했고, 일반 이벤트와 연출 중 실행되는 미니게임에 공통 구조를 사용했습니다. 현재 소스는 출시 이후 리팩터링한 버전이므로 최초 출시 버전과는 구분합니다.
+PC와 모바일에서의 동작을 확인했고, 일반 이벤트와 연출 중 실행되는 미니게임에 공통 구조를 사용했습니다.
 
-- [실행 구조와 책임 분리](Docs/MiniGame.md)
 - [세션 관리](Source/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua)
 - [입력 전달](Source/RootDesk/MyDesk/MiniGame/MiniGameInputHubLogic.mlua)
 - [규칙 실행](Source/RootDesk/MyDesk/MiniGame/Rule/MiniGameRuleEngine.mlua)
@@ -48,14 +44,6 @@ PC와 모바일에서의 동작을 확인했고, 일반 이벤트와 연출 중 
 
 기획자와 팀원이 복잡한 연출 데이터를 직접 편집할 수 있도록 웹 기반 시퀀서 도구를 제작했습니다. 도구와 게임의 연동 규칙을 맞추고, 기존 연출 유형의 편집 작업을 도구에서 처리할 수 있도록 했습니다.
 
-[시퀀서 화면과 편집 코드](Source/tools/performance-sequencer/index.html)를 함께 공개했습니다. 연동 규칙과 도구의 동작을 설계하고 검토, 통합했으며, 웹 UI 코드 작성에는 AI 보조를 활용했습니다. 게임 데이터의 직접 저장과 불러오기는 원본 프로젝트의 로컬 서버에 의존하므로 이 발췌본의 단독 실행 기능으로 안내하지 않습니다.
+[시퀀서 화면과 편집 코드](Source/tools/performance-sequencer/index.html)를 함께 공개했습니다. 연동 규칙과 도구의 동작을 설계하고 검토, 통합했으며, 웹 UI 코드 작성에는 AI 보조를 활용했습니다.
 
 언어 변경 시 표시 텍스트를 갱신하는 다국어 처리도 구현했습니다. [다국어 처리 코드](Source/RootDesk/MyDesk/Localization/LocalizationLogic.mlua)에서 캐시와 텍스트 처리 흐름을 확인할 수 있습니다.
-
-## 코드 확인 안내
-
-이 저장소는 담당 시스템의 소스 발췌본입니다. 게임 리소스, 플랫폼 설정과 전체 팀 코드를 포함하지 않으므로 독립 실행할 수 없습니다. 실행은 위 게임 링크를 이용해 주세요.
-
-[파일별 원본 경로와 기준 커밋](Docs/SourceMap.md), [공개 범위와 권리 안내](NOTICE.md)
-
-<!-- DEMO_VIDEO: 촬영 완료 후 PC와 모바일 비교 영상 삽입 -->
