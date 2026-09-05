@@ -2,14 +2,6 @@
 
 활동과 미니게임을 통해 캐릭터를 성장시키는 육성 시뮬레이션입니다. MapleStory Worlds에서 PC와 모바일로 출시했고, 출시 이후 사용자 피드백과 플레이 중 확인한 문제를 반영해 개선했습니다.
 
-**[게임 플레이](https://maplestoryworlds.nexon.com/ko/play/5264b689de3f40ecbf786ca024daea82/)**
-
-## 게임 소개 영상 (PV)
-
-[![메이플 아이돌 키우기 PV](https://img.youtube.com/vi/ICh-ejmLbco/hqdefault.jpg)](https://www.youtube.com/watch?v=ICh-ejmLbco)
-
-메이플 아이돌 키우기 PV
-
 | 구분 | 내용 |
 | --- | --- |
 | 개발 | 2026.06 시작, 출시 후 개선 |
@@ -18,6 +10,17 @@
 | 플랫폼 | PC, 모바일 |
 | 수상 | 2026 메커톤 일반인 2회차 대상 |
 | 주요 담당 | NPC 이벤트 진행, 미니게임, 연출 제작 도구, 다국어 처리 |
+| 게임 실행 | [MapleStory Worlds](https://maplestoryworlds.nexon.com/ko/play/5264b689de3f40ecbf786ca024daea82/) |
+
+## 게임 소개 영상
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=ICh-ejmLbco">
+    <img src="https://img.youtube.com/vi/ICh-ejmLbco/hqdefault.jpg" alt="메이플 아이돌 키우기 소개 영상">
+  </a>
+  <br>
+  <sub>메이플 아이돌 키우기 PV</sub>
+</p>
 
 ## 핵심 구현
 
