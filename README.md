@@ -44,6 +44,8 @@ PC와 모바일에서의 동작을 확인했고, 일반 이벤트와 연출 중 
 
 기획자와 팀원이 복잡한 연출 데이터를 직접 편집할 수 있도록 웹 기반 시퀀서 도구를 제작했습니다. 도구와 게임의 연동 규칙을 맞추고, 기존 연출 유형의 편집 작업을 도구에서 처리할 수 있도록 했습니다.
 
-[시퀀서 화면과 편집 코드](Source/tools/performance-sequencer/index.html)를 함께 공개했습니다. 연동 규칙과 도구의 동작을 설계하고 검토, 통합했으며, 웹 UI 코드 작성에는 AI 보조를 활용했습니다.
+- [시퀀서 화면과 편집 코드](Source/tools/performance-sequencer/index.html): 연동 규칙 설계, 검토 및 통합, 웹 UI 코드 작성에 AI 보조 활용
 
-언어 변경 시 표시 텍스트를 갱신하는 다국어 처리도 구현했습니다. [다국어 처리 코드](Source/RootDesk/MyDesk/Localization/LocalizationLogic.mlua)에서 캐시와 텍스트 처리 흐름을 확인할 수 있습니다.
+언어 변경 시 표시 텍스트를 갱신하는 다국어 처리도 구현했습니다.
+
+- [다국어 처리 코드](Source/RootDesk/MyDesk/Localization/LocalizationLogic.mlua)
