@@ -6,6 +6,7 @@ Git 작성자 목록은 공동 수정 여부를 확인하는 보조 정보입니
 
 | 공개 파일 | 원본 커밋 | Git 작성자 |
 | --- | --- | --- |
+| [tools/performance-sequencer/index.html](../Source/tools/performance-sequencer/index.html) | `83faf19ae758` | Jinwon |
 | [RootDesk/MyDesk/Event/NpcEventManager.mlua](../Source/RootDesk/MyDesk/Event/NpcEventManager.mlua) | `83faf19ae758` | Jinwon |
 | [RootDesk/MyDesk/Event/NpcEventTriggerComponent.mlua](../Source/RootDesk/MyDesk/Event/NpcEventTriggerComponent.mlua) | `83faf19ae758` | HGM2695, Jinwon |
 | [RootDesk/MyDesk/MiniGame/MiniGameManager.mlua](../Source/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua) | `83faf19ae758` | HGM2695, Jinwon |
