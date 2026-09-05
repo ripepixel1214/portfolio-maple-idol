@@ -4,6 +4,14 @@
 
 **[게임 플레이](https://maplestoryworlds.nexon.com/ko/play/5264b689de3f40ecbf786ca024daea82/)**
 
+## 게임 소개 영상 (PV)
+
+[![메이플 아이돌 키우기 PV](https://img.youtube.com/vi/ICh-ejmLbco/hqdefault.jpg)](https://www.youtube.com/watch?v=ICh-ejmLbco)
+
+[YouTube에서 PV 보기](https://www.youtube.com/watch?v=ICh-ejmLbco)
+
+게임 소개용 PV입니다. 개별 기능의 입력과 결과를 보여주는 상세 플레이 시연과는 구분합니다.
+
 | 구분 | 내용 |
 | --- | --- |
 | 개발 | 2026.06 시작, 출시 후 개선 |
