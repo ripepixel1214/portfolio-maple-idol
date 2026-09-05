@@ -1,0 +1,12 @@
+@Struct
+script MiniGameStartOptions
+
+	property string miniGameId = ""
+	property string ownerUserId = ""
+	property integer contextType = 0
+	property string contextId = ""
+	property string presentationActorId = ""
+	property integer betAmount = 0
+	property boolean isBettingRequest = false
+
+end

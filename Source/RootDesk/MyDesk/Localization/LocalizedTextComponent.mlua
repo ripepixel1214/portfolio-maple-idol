@@ -1,0 +1,111 @@
+@Component
+@ExecSpace("ClientOnly")
+script LocalizedTextComponent extends Component
+
+	property string localizationKey = ""
+
+	property string fallbackText = ""
+
+	property any languageChangedHandler = nil
+
+	property integer refreshTimerId = 0
+
+	property integer refreshAttemptCount = 0
+
+	property integer MAX_REFRESH_ATTEMPTS = 20
+
+	method void OnBeginPlay()
+		-- 언어 변경 구독과 최초 텍스트 적용
+		if _LocalizationLogic ~= nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+
+		self.refreshAttemptCount = 0
+		if self:RefreshText() == false then
+			self:ScheduleRefreshRetry()
+		end
+	end
+
+	method void OnEndPlay()
+		-- 언어 변경 구독 해제
+		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
+			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+		end
+		self.languageChangedHandler = nil
+		self:ClearRefreshRetry()
+	end
+
+	method void OnLanguageChanged(LanguageChangedEvent event)
+		-- 변경된 언어의 텍스트 반영
+		if event == nil then
+			return
+		end
+		if self:RefreshText() == false then
+			self:ScheduleRefreshRetry()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ScheduleRefreshRetry()
+		-- LocalizationLogic 초기화 지연 보정
+		if self.refreshTimerId ~= nil and self.refreshTimerId > 0 then
+			return
+		end
+
+		if self.refreshAttemptCount >= self.MAX_REFRESH_ATTEMPTS then
+			return
+		end
+
+		self.refreshAttemptCount = self.refreshAttemptCount + 1
+		self.refreshTimerId = _TimerService:SetTimerOnce(function() self:OnRefreshRetry() end, 0.2)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnRefreshRetry()
+		-- 초기화 완료 후 정적 텍스트 재적용
+		self.refreshTimerId = 0
+		if _LocalizationLogic ~= nil and self.languageChangedHandler == nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+
+		if self:RefreshText() == false then
+			self:ScheduleRefreshRetry()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearRefreshRetry()
+		-- 정적 텍스트 재시도 타이머 해제
+		if self.refreshTimerId ~= nil and self.refreshTimerId > 0 then
+			_TimerService:ClearTimer(self.refreshTimerId)
+		end
+		self.refreshTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean RefreshText()
+		-- 현재 locale 기준 정적 텍스트 갱신
+		local textComponent = self.Entity.TextComponent
+		local textGuiRendererComponent = self.Entity.TextGUIRendererComponent
+		if textComponent == nil and textGuiRendererComponent == nil then
+			log_warning("[LocalizedTextComponent] text renderer not found entity=" .. tostring(self.Entity.Name))
+			return false
+		end
+
+		if _LocalizationLogic == nil or _LocalizationLogic.IsLoaded ~= true then
+			return false
+		end
+
+		local localizedText = self.fallbackText
+		localizedText = _LocalizationLogic:GetText(self.localizationKey, self.fallbackText)
+
+		if textComponent ~= nil then
+			textComponent.Text = localizedText
+		else
+			textGuiRendererComponent.Text = localizedText
+		end
+
+		return true
+	end
+
+end

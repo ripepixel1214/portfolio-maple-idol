@@ -1,0 +1,121 @@
+@Logic
+@ExecSpace("ClientOnly")
+script MashInputLogic extends Logic
+
+	property string PC_INPUT_NAME = "Space"
+	property string MOBILE_INPUT_NAME = "Touch"
+
+	-- 모듈 활성 여부
+	property boolean 	isActive = false
+
+	-- 입력 채널 식별자
+	property string channelId = ""
+	-- KeyDownEvent 핸들러
+	property any 		keyDownHandler = nil
+	-- 카운트로 인정할 키
+	property any 		targetKey = nil
+	-- 카운트로 인정할 키 이름 (이벤트 표기용)
+	property string 	targetKeyName = ""
+	-- 누적 입력 카운트
+	property integer 	count = 0
+
+	@ExecSpace("ClientOnly")
+	method void StartModule(string sessionId, any config)
+		-- 연타 입력을 받기 시작한다.
+		self:Cleanup()
+
+		self.count = 0
+		self.channelId = config.channelId or ""
+		self.targetKey = KeyboardKey.Space
+		self.targetKeyName = self.PC_INPUT_NAME
+
+		if config.targetKey ~= nil then
+			self.targetKey = config.targetKey
+		end
+		if config.targetKeyName ~= nil then
+			self.targetKeyName = config.targetKeyName
+		end
+
+		if Environment:IsPCPlatform() == true then
+			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+		end
+		self.isActive = true
+
+		local inputName = self.targetKeyName
+		if Environment:IsMobilePlatform() == true then
+			inputName = self.MOBILE_INPUT_NAME
+		end
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Start, {
+			keyName = inputName
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- PC 지정 키 입력을 공통 입력 처리로 전달
+		if event.key ~= self.targetKey then
+			return
+		end
+
+		self:SubmitInput(self.targetKeyName)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SubmitMobileInput()
+		-- 모바일 UI 버튼 입력을 공통 입력 처리로 전달
+		self:SubmitInput(self.MOBILE_INPUT_NAME)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SubmitInput(string inputName)
+		-- 입력 장치와 무관한 연타 입력 유효성 검사
+		if self.isActive == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		local resolvedInputName = inputName
+		if resolvedInputName == nil or resolvedInputName == "" then
+			resolvedInputName = self.targetKeyName
+		end
+
+		self:AddCount(resolvedInputName)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddCount(string keyName)
+		-- 카운트를 증가시키고 입력 이벤트를 발행한다.
+		self.count = self.count + 1
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Input, {
+			keyName = keyName,
+			value = self.count,
+			successCount = self.count
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CancelModule()
+		-- 외부 중단 요청 시 핸들러만 정리한다. (종료 이벤트는 허브가 발행)
+		self:Cleanup()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Cleanup()
+		-- 입력 핸들러 연결을 해제하고 비활성화한다.
+		if self.keyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
+			self.keyDownHandler = nil
+		end
+
+		self.isActive = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 핸들러 누수를 막는다.
+		self:Cleanup()
+	end
+
+end

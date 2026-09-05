@@ -1,0 +1,489 @@
+@Logic
+@ExecSpace("ClientOnly")
+script LocalizationLogic extends Logic
+
+	property string DEFAULT_LOCALE = "ko"
+
+	property string LOCALE_KO = "ko"
+
+	property string LOCALE_EN = "en"
+
+	property string TABLE_CONTENT = "LocalizationContentTable"
+
+	property string TABLE_EVENT = "LocalizationEventTable"
+
+	property string TABLE_DIALOG = "LocalizationDialogTable"
+
+	property string TABLE_UI = "LocalizationUITable"
+
+	property string TABLE_SYSTEM = "LocalizationSystemTable"
+
+	property string CurrentLocaleId = "ko"
+
+	property any tTextByKey = {}
+
+	property boolean IsLoaded = false
+
+	property integer missingTableCount = 0
+
+	property integer reloadTimerId = 0
+
+	property integer reloadAttemptCount = 0
+
+	property integer MAX_RELOAD_ATTEMPTS = 20
+
+	property integer duplicateKeyCount = 0
+
+	property integer invalidRowCount = 0
+
+	property integer missingRequiredKeyCount = 0
+
+	property integer duplicateDialogLineIdCount = 0
+
+	property integer LINT_DETAIL_LOG_LIMIT = 50
+
+	property integer lintDetailLogCount = 0
+
+	method void OnBeginPlay()
+		-- 엔진 locale 정규화와 번역 캐시 준비
+		local engineLocaleId = ""
+		if _LocalizationService ~= nil then
+			engineLocaleId = _LocalizationService.CurrentLocaleId or ""
+		end
+
+		self.CurrentLocaleId = self:NormalizeLocale(engineLocaleId)
+		self.reloadAttemptCount = 0
+		if self:Reload() == true then
+			self:SendLanguageChangedEvent("", self.CurrentLocaleId)
+			log("[LocalizationLogic] initialized locale=" .. self.CurrentLocaleId)
+		else
+			self:ScheduleReloadRetry()
+		end
+	end
+
+	method void OnEndPlay()
+		-- 번역 테이블 재로드 타이머 해제
+		self:ClearReloadRetry()
+	end
+
+	method string NormalizeLocale(any localeId)
+		-- 지원 언어 코드로 정규화하고 미지원 언어는 한국어로 fallback
+		if localeId == nil or localeId == "" then
+			return self.DEFAULT_LOCALE
+		end
+
+		local normalizedLocaleId = string.lower(tostring(localeId))
+		local replacedLocaleId, _ = string.gsub(normalizedLocaleId, "_", "-")
+		normalizedLocaleId = replacedLocaleId
+		if normalizedLocaleId == self.LOCALE_EN or string.sub(normalizedLocaleId, 1, 3) == "en-" then
+			return self.LOCALE_EN
+		end
+		if normalizedLocaleId == self.LOCALE_KO or string.sub(normalizedLocaleId, 1, 3) == "ko-" then
+			return self.LOCALE_KO
+		end
+
+		return self.DEFAULT_LOCALE
+	end
+
+	method boolean Reload()
+		-- 도메인별 번역 테이블 병합 캐시 재구성
+		self.tTextByKey = {}
+		self.duplicateKeyCount = 0
+		self.invalidRowCount = 0
+		self.missingRequiredKeyCount = 0
+		self.duplicateDialogLineIdCount = 0
+		self.lintDetailLogCount = 0
+		self.missingTableCount = 0
+		self.IsLoaded = false
+
+		self:MergeTranslationTable(self.TABLE_CONTENT)
+		self:MergeTranslationTable(self.TABLE_EVENT)
+		self:MergeTranslationTable(self.TABLE_DIALOG)
+		self:MergeTranslationTable(self.TABLE_UI)
+		self:MergeTranslationTable(self.TABLE_SYSTEM)
+		self.IsLoaded = self.missingTableCount == 0
+		return self.IsLoaded
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ScheduleReloadRetry()
+		-- DataSet 등록 지연 보정
+		if self.reloadTimerId ~= nil and self.reloadTimerId > 0 then
+			return
+		end
+
+		if self.reloadAttemptCount >= self.MAX_RELOAD_ATTEMPTS then
+			return
+		end
+
+		self.reloadAttemptCount = self.reloadAttemptCount + 1
+		self.reloadTimerId = _TimerService:SetTimerOnce(function() self:OnReloadRetry() end, 0.2)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnReloadRetry()
+		-- DataSet 등록 완료 후 번역 캐시 재구성
+		self.reloadTimerId = 0
+		if self:Reload() == true then
+			self.reloadAttemptCount = 0
+			self:SendLanguageChangedEvent("", self.CurrentLocaleId)
+			return
+		end
+
+		self:ScheduleReloadRetry()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearReloadRetry()
+		-- 번역 테이블 재로드 타이머 해제
+		if self.reloadTimerId ~= nil and self.reloadTimerId > 0 then
+			_TimerService:ClearTimer(self.reloadTimerId)
+		end
+		self.reloadTimerId = 0
+	end
+
+	method void MergeTranslationTable(string tableName)
+		-- 번역 DataSet 한 개를 전역 key 캐시에 병합
+		if _DataService == nil then
+			self.missingTableCount = self.missingTableCount + 1
+			log_warning("[LocalizationLogic] DataService is nil table=" .. tableName)
+			return
+		end
+
+		local dataSet = _DataService:GetTable(tableName)
+		if dataSet == nil then
+			self.missingTableCount = self.missingTableCount + 1
+			log_warning("[LocalizationLogic] table not found table=" .. tableName)
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local key = _DataTableUtil:SafeGetString(dataSet, rowIndex, "key", "")
+			local ko = _DataTableUtil:SafeGetString(dataSet, rowIndex, "ko", "")
+			local en = _DataTableUtil:SafeGetString(dataSet, rowIndex, "en", "")
+			if key == "" and ko == "" and en == "" then
+				-- 헤더만 있는 DataSet이 생성하는 완전 빈 행 무시
+			elseif key == "" or ko == "" or en == "" then
+				self.invalidRowCount = self.invalidRowCount + 1
+				log_warning("[LocalizationLogic] invalid translation row table=" .. tableName .. " row=" .. tostring(rowIndex))
+			elseif self:IsValidLocalizationKey(key) == false then
+				self.invalidRowCount = self.invalidRowCount + 1
+				self:LogLintDetail("invalid translation key format key=" .. key .. " table=" .. tableName)
+			elseif self.tTextByKey[key] ~= nil then
+				self.duplicateKeyCount = self.duplicateKeyCount + 1
+				log_warning("[LocalizationLogic] duplicate key=" .. key .. " table=" .. tableName)
+			else
+				self.tTextByKey[key] = {
+					ko = ko,
+					en = en,
+					context = _DataTableUtil:SafeGetString(dataSet, rowIndex, "context", ""),
+					tableName = tableName,
+					rowIndex = rowIndex
+				}
+			end
+		end
+	end
+
+	method string GetText(string key, string fallbackText)
+		-- 현재 locale 번역과 한국어 fallback 순서로 조회
+		if key == nil or key == "" then
+			return fallbackText or ""
+		end
+
+		local tEntry = self.tTextByKey[key]
+		if tEntry == nil then
+			return fallbackText or key
+		end
+
+		local localizedText = tEntry[self.CurrentLocaleId]
+		if localizedText ~= nil and localizedText ~= "" then
+			return localizedText
+		end
+		if tEntry.ko ~= nil and tEntry.ko ~= "" then
+			return tEntry.ko
+		end
+
+		return fallbackText or key
+	end
+
+	method string Format(string key, string fallbackText, any value1, any value2, any value3, string characterName)
+		-- 번역 문자열에 공통 value와 character 토큰 반영
+		return self:FormatRaw(self:GetText(key, fallbackText), value1, value2, value3, characterName)
+	end
+
+	method string FormatRaw(string text, any value1, any value2, any value3, string characterName)
+		-- 원문 문자열에 공통 placeholder 반영
+		local formattedText = text or ""
+		formattedText = self:FormatValue(formattedText, 1, value1)
+		formattedText = self:FormatValue(formattedText, 2, value2)
+		formattedText = self:FormatValue(formattedText, 3, value3)
+		if characterName ~= nil and characterName ~= "" then
+			formattedText = _TemplateTextFormatter:FormatText(formattedText, "{character}", characterName)
+		end
+		return formattedText
+	end
+
+	method string FormatValue(string text, integer valueIndex, any value)
+		-- 일반값과 퍼센트 placeholder 동시 반영
+		if value == nil then
+			return text
+		end
+
+		local numberValue = tonumber(value)
+		if numberValue ~= nil then
+			text = _TemplateTextFormatter:FormatNumberValue(text, valueIndex, numberValue)
+			return _TemplateTextFormatter:FormatPercentValue(text, valueIndex, numberValue)
+		end
+
+		return _TemplateTextFormatter:FormatText(text, "{value" .. tostring(valueIndex) .. "}", tostring(value))
+	end
+
+	method boolean IsKorean()
+		-- 현재 표시 언어의 한국어 여부 반환
+		return self.CurrentLocaleId == self.LOCALE_KO
+	end
+
+	method void SetLocale(string localeId)
+		-- 언어 변경과 번역 의존 캐시 갱신
+		local normalizedLocaleId = self:NormalizeLocale(localeId)
+		if normalizedLocaleId == self.CurrentLocaleId then
+			return
+		end
+
+		local oldLocaleId = self.CurrentLocaleId
+		self.CurrentLocaleId = normalizedLocaleId
+		self:SendLanguageChangedEvent(oldLocaleId, normalizedLocaleId)
+		log("[LocalizationLogic] locale changed old=" .. oldLocaleId .. " new=" .. normalizedLocaleId)
+	end
+
+	method void SendLanguageChangedEvent(string oldLocaleId, string newLocaleId)
+		-- 언어 변경 이벤트 발행
+		local languageChangedEvent = LanguageChangedEvent()
+		languageChangedEvent.oldLocaleId = oldLocaleId
+		languageChangedEvent.newLocaleId = newLocaleId
+		self:SendEvent(languageChangedEvent)
+	end
+
+	method boolean RunReleaseLint()
+		-- 번역 key와 placeholder 무결성 검사
+		if self:Reload() == false then
+			log_warning("[LocalizationLint] skipped because localization tables are not ready")
+			return false
+		end
+		self:LintSourceTables()
+		local mismatchCount = 0
+		for key, tEntry in pairs(self.tTextByKey) do
+			if self:HasSameTokens(tEntry.ko, tEntry.en) == false then
+				mismatchCount = mismatchCount + 1
+				self:LogLintDetail("token mismatch key=" .. key)
+			end
+		end
+
+		local isValid = self.duplicateKeyCount == 0 and self.invalidRowCount == 0 and self.missingRequiredKeyCount == 0 and self.duplicateDialogLineIdCount == 0 and mismatchCount == 0
+		log("[LocalizationLint] valid=" .. tostring(isValid) .. " duplicate=" .. tostring(self.duplicateKeyCount) .. " invalid=" .. tostring(self.invalidRowCount) .. " requiredKeyMissing=" .. tostring(self.missingRequiredKeyCount) .. " dialogLineDuplicate=" .. tostring(self.duplicateDialogLineIdCount) .. " tokenMismatch=" .. tostring(mismatchCount))
+		return isValid
+	end
+
+	method void LintSourceTables()
+		-- 원문 컬럼 제거 이후 ID와 key의 대응을 검사
+		self:LintRequiredKeyColumn("ActivityTable", "activityId", "nameKey")
+		self:LintRequiredKeyColumn("ActorSpeechTable", "speechId", "messageKey")
+		self:LintRequiredKeyColumn("ActorTable", "actorId", "nameKey")
+		self:LintRequiredKeyColumn("CharacterTypeTable", "characterTypeId", "nameKey")
+		self:LintRequiredKeyColumn("ConditionGradeTable", "grade", "displayNameKey")
+		self:LintRequiredKeyColumn("EventTable", "eventId", "nameKey")
+		self:LintOptionalKeyColumn("EventTable", "eventId", "descriptionKey")
+		self:LintRequiredKeyColumn("EventResultTable", "eventResultId", "descriptionKey")
+		self:LintRequiredKeyColumn("GameGoalTable", "gameGoalId", "nameKey")
+		self:LintRequiredKeyColumn("GameGoalTable", "gameGoalId", "descriptionKey")
+		self:LintRequiredKeyColumn("ItemTable", "itemId", "nameKey")
+		self:LintRequiredKeyColumn("ItemTable", "itemId", "descriptionKey")
+		self:LintRequiredKeyColumn("ShopItemTable", "shopItemId", "nameKey")
+		self:LintDialogSourceTable()
+	end
+
+	method void LintRequiredKeyColumn(string tableName, string idColumn, string keyColumn)
+		-- ID가 있는 행의 필수 key 존재 여부 검사
+		local dataSet = _DataService:GetTable(tableName)
+		self:LintRequiredKeyDataSet(dataSet, tableName, idColumn, keyColumn, true)
+	end
+
+	method void LintOptionalKeyColumn(string tableName, string idColumn, string keyColumn)
+		-- ID가 있는 행의 선택 key가 존재할 때만 번역 행과 대응하는지 검사
+		local dataSet = _DataService:GetTable(tableName)
+		self:LintRequiredKeyDataSet(dataSet, tableName, idColumn, keyColumn, false)
+	end
+
+	method void LintRequiredKeyDataSet(any dataSet, string tableName, string idColumn, string keyColumn, boolean isRequired)
+		-- 전달된 DataSet의 ID와 key 대응 검사
+		if dataSet == nil then
+			log_warning("[LocalizationLint] source table not found table=" .. tableName)
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local rowId = _DataTableUtil:SafeGetString(dataSet, rowIndex, idColumn, "")
+			if rowId ~= "" then
+				local key = _DataTableUtil:SafeGetString(dataSet, rowIndex, keyColumn, "")
+				if key == "" then
+					if isRequired == true then
+						self.missingRequiredKeyCount = self.missingRequiredKeyCount + 1
+						self:LogLintDetail("required key missing table=" .. tableName .. " row=" .. tostring(rowIndex) .. " column=" .. keyColumn)
+					end
+				elseif self:IsValidLocalizationKey(key) == false then
+					self.missingRequiredKeyCount = self.missingRequiredKeyCount + 1
+					self:LogLintDetail("invalid key format key=" .. key .. " table=" .. tableName)
+				elseif self.tTextByKey[key] == nil then
+					self.missingRequiredKeyCount = self.missingRequiredKeyCount + 1
+					self:LogLintDetail("translation key missing key=" .. key .. " table=" .. tableName)
+				end
+			end
+		end
+	end
+
+	method void LintDialogSourceTable()
+		-- 대화 lineId와 조건부 화자 이름 key 검사
+		local dataSet = _DataService:GetTable("DialogTable")
+		if dataSet == nil then
+			log_warning("[LocalizationLint] source table not found table=DialogTable")
+			return
+		end
+
+		local tLineIdSeen = {}
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local dialogId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogId", "")
+			local indexText = _DataTableUtil:SafeGetString(dataSet, rowIndex, "index", "")
+			local lineId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "lineId", "")
+			local lineIndex = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "index", 0)
+			local expectedLineId = ""
+			if dialogId ~= "" and tonumber(indexText) ~= nil and lineIndex >= 1 and math.floor(lineIndex) == lineIndex then
+				expectedLineId = dialogId .. "__" .. string.format("%03d", lineIndex)
+			end
+			local messageKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "messageKey", "")
+			local speakerNameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speakerNameOverrideKey", "")
+			if lineId ~= "" then
+				if tLineIdSeen[lineId] == true then
+					self.duplicateDialogLineIdCount = self.duplicateDialogLineIdCount + 1
+					self:LogLintDetail("dialog lineId duplicated lineId=" .. lineId)
+				end
+				tLineIdSeen[lineId] = true
+			end
+
+			if lineId == "" or expectedLineId == "" or lineId ~= expectedLineId then
+				self.missingRequiredKeyCount = self.missingRequiredKeyCount + 1
+				self:LogLintDetail("dialog lineId mismatch row=" .. tostring(rowIndex) .. " expected=" .. expectedLineId)
+			end
+			if messageKey == "" or self.tTextByKey[messageKey] == nil or self:IsValidLocalizationKey(messageKey) == false then
+				self.missingRequiredKeyCount = self.missingRequiredKeyCount + 1
+				self:LogLintDetail("dialog message key missing row=" .. tostring(rowIndex))
+			end
+			if speakerNameKey ~= "" and (self:IsValidLocalizationKey(speakerNameKey) == false or self.tTextByKey[speakerNameKey] == nil) then
+				self.missingRequiredKeyCount = self.missingRequiredKeyCount + 1
+				self:LogLintDetail("dialog speaker key missing row=" .. tostring(rowIndex))
+			end
+		end
+	end
+
+	method boolean IsValidLocalizationKey(string key)
+		-- 소문자 prefix와 ASCII key 문자 규칙 검사
+		if key == nil or key == "" or string.match(key, "^[%l][%w%._%-]*$") == nil then
+			return false
+		end
+
+		return true
+	end
+
+	method boolean IsSupportedLocale(any localeId)
+		-- 지역 코드가 포함된 지원 언어 여부 확인
+		if localeId == nil or localeId == "" then
+			return false
+		end
+
+		local normalizedLocaleId = string.lower(tostring(localeId))
+		local replacedLocaleId, _ = string.gsub(normalizedLocaleId, "_", "-")
+		return replacedLocaleId == self.LOCALE_KO or replacedLocaleId == self.LOCALE_EN or string.sub(replacedLocaleId, 1, 3) == "ko-" or string.sub(replacedLocaleId, 1, 3) == "en-"
+	end
+
+	method void LogLintDetail(string message)
+		-- lint 상세 경고 개수 제한
+		self.lintDetailLogCount = self.lintDetailLogCount + 1
+		if self.lintDetailLogCount <= self.LINT_DETAIL_LOG_LIMIT then
+			log_warning("[LocalizationLint] " .. message)
+		elseif self.lintDetailLogCount == self.LINT_DETAIL_LOG_LIMIT + 1 then
+			log_warning("[LocalizationLint] additional detail logs suppressed")
+		end
+	end
+
+	method boolean HasSameTokens(string leftText, string rightText)
+		-- placeholder·리치태그·제어태그·줄바꿈 무결성 비교
+		if self:CountLineBreaks(leftText) ~= self:CountLineBreaks(rightText) then
+			return false
+		end
+		if self:HasBalancedRichTags(leftText) == false or self:HasBalancedRichTags(rightText) == false then
+			return false
+		end
+
+		local leftTokens = self:CollectTokens(leftText)
+		local rightTokens = self:CollectTokens(rightText)
+		for token, count in pairs(leftTokens) do
+			if rightTokens[token] ~= count then return false end
+		end
+		for token, count in pairs(rightTokens) do
+			if leftTokens[token] ~= count then return false end
+		end
+		return true
+	end
+
+	method integer CountLineBreaks(string text)
+		-- 문자열의 줄바꿈 개수 계산
+		local count = 0
+		for _ in string.gmatch(text or "", "\n") do
+			count = count + 1
+		end
+		return count
+	end
+
+	method boolean HasBalancedRichTags(string text)
+		-- color·size·voffset·delay 리치태그의 중첩 구조 검사
+		local tOpenTags = {}
+		for tag in string.gmatch(text or "", "<[^>]+>") do
+			local closingName = string.match(tag, "^</([%w]+)>")
+			if closingName ~= nil then
+				if #tOpenTags <= 0 or tOpenTags[#tOpenTags] ~= closingName then
+					return false
+				end
+				table.remove(tOpenTags)
+			else
+				local openingName = string.match(tag, "^<([%w]+)=")
+				if openingName == "color" or openingName == "size" or openingName == "voffset" or openingName == "delay" then
+					table.insert(tOpenTags, openingName)
+				end
+			end
+		end
+
+		return #tOpenTags == 0
+	end
+
+	method any CollectTokens(string text)
+		-- 검사 대상 placeholder와 태그 개수 수집
+		local tTokens = {}
+		for token in string.gmatch(text or "", "{[^}]+}") do
+			tTokens[token] = (tTokens[token] or 0) + 1
+		end
+		for token in string.gmatch(text or "", "<[^>]+>") do
+			tTokens[token] = (tTokens[token] or 0) + 1
+		end
+
+		local markerCount = 0
+		local markerStart = 1
+		while true do
+			local markerIndex, _ = string.find(text or "", "@@", markerStart, true)
+			if markerIndex == nil then break end
+			markerCount = markerCount + 1
+			markerStart = markerIndex + 2
+		end
+		if markerCount > 0 then tTokens["@@"] = markerCount end
+		return tTokens
+	end
+
+end

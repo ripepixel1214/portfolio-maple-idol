@@ -1,0 +1,750 @@
+@Component
+@ExecSpace("ClientOnly")
+script NpcEventTriggerComponent extends Component
+
+	@HideFromInspector
+	property string npcId = ""
+
+	@HideFromInspector
+	property string targetCharacterId = ""
+
+	@HideFromInspector
+	property integer dayProgressOverride = 0
+
+	@HideFromInspector
+	property integer maxTriggerCount = 1
+
+	@HideFromInspector
+	property boolean IsEventAvailable = false
+
+	@HideFromInspector
+	property boolean IsExecutingEvent = false
+
+	@HideFromInspector
+	property string ResolvedCharacterId = ""
+
+	@HideFromInspector
+	property string pendingInteractionRequestId = ""
+
+	@HideFromInspector
+	property string activeSessionId = ""
+
+	@HideFromInspector
+	property string activeStepToken = ""
+
+	@HideFromInspector
+	property any interactionEventHandler = nil
+
+	-- NPC 터치 이벤트 구독 핸들러
+	@HideFromInspector
+	property any touchEventHandler = nil
+
+	-- 이벤트 표시 엔티티 참조
+	@HideFromInspector
+	property Entity eventIconEntity = nil
+
+	-- 상호작용 표시 엔티티 참조
+	@HideFromInspector
+	property Entity interactIconEntity = nil
+
+	-- 모바일 상호작용 표시 스프라이트 RUID
+	@HideFromInspector
+	property string MOBILE_INTERACT_ICON_RUID = "86435f462bc5461e82b2ef5f0120e838"
+
+	-- 모바일 상호작용 표시 기준 스케일
+	property Vector3 mobileInteractIconScale = Vector3(1, 1, 1)
+
+	-- 에디터에 배치된 E 안내 아이콘 스케일을 1.0 기준으로 사용합니다.
+	@HideFromInspector
+	property Vector3 interactIconBaseScale = Vector3(1, 1, 1)
+
+	@HideFromInspector
+	property Vector3 interactIconBasePosition = Vector3(0, 0, 0)
+
+	@HideFromInspector
+	property boolean isInteractIconBaseScaleReady = false
+
+	@HideFromInspector
+	property boolean isInteractIconTweenPlaying = false
+
+	@HideFromInspector
+	property number interactIconTweenElapsed = 0
+
+	-- 등장 시 0.85배에서 BackEaseOut으로 원래 크기까지 가볍게 팝업됩니다.
+	property number interactIconAppearDuration = 0.25
+
+	property number interactIconAppearStartScale = 0.85
+
+	-- 대기 중에는 1.5초 주기로 약 2.5px 높이를 천천히 떠다닙니다. (1 world unit = 100px)
+	property number interactIconIdleFloatPeriod = 1.5
+
+	property number interactIconIdleFloatHeight = 0.025
+
+	property number interactIconIdleScaleAmplitude = 0.015
+
+	-- 로컬 플레이어가 상호작용 범위 안에 있는지 여부
+	@HideFromInspector
+	property boolean isPlayerInRange = false
+
+	-- 현재 전구(EventIndicator)가 표시 중인지 여부 (E 안내와 상호배타 판정용)
+	@HideFromInspector
+	property boolean isEventIconShown = false
+
+	-- 상호작용 범위 진입 이벤트 핸들러
+	@HideFromInspector
+	property any interactionEnterHandler = nil
+
+	-- 상호작용 범위 이탈 이벤트 핸들러
+	@HideFromInspector
+	property any interactionLeaveHandler = nil
+
+	@HideFromInspector
+	property boolean hasInteractionLock = false
+
+	@HideFromInspector
+	property any dialogClosedHandler = nil
+
+	-- 행동력 변동을 받아 전구 표시를 갱신하기 위한 핸들러
+	@HideFromInspector
+	property any progressChangedHandler = nil
+
+	-- 이벤트가 없을 때 재생할 평상시 대화 dialogId (StaticActorDialogTable에서 actorId로 조회)
+	@HideFromInspector
+	property string regularDialogId = ""
+
+	-- 현재 평상시 대화가 열려 있는지 여부
+	@HideFromInspector
+	property boolean isRegularDialogActive = false
+
+	method void OnBeginPlay()
+		-- 표시 엔티티 초기화와 이벤트 구독
+		self:InitializeIndicatorEntities()
+		self:ConnectEvents()
+		if self.npcId ~= "" then
+			self.regularDialogId = self:ResolveRegularDialogId()
+			self.ResolvedCharacterId = self:ResolveCharacterId()
+			self:ApplyEventState(self.IsEventAvailable)
+		else
+			log("[DowntownNpcEventTrigger] waiting for runtime configuration entity=" .. tostring(self.Entity.Name))
+			self:ApplyEventState(false)
+		end
+	end
+
+	method void ConfigureNpcContext(string configuredNpcId, string configuredCharacterId, boolean eventAvailable)
+		-- 서버 권위 NPC 표시 컨텍스트만 클라이언트 상호작용 상태에 적용
+		self.npcId = configuredNpcId or ""
+		self.targetCharacterId = configuredCharacterId or ""
+		self.regularDialogId = self:ResolveRegularDialogId()
+		self:ClearPreparedEvent()
+		self.ResolvedCharacterId = self:ResolveCharacterId()
+		self.IsEventAvailable = eventAvailable == true
+		self:ApplyEventState(self.IsEventAvailable)
+
+		log("[DowntownNpcEventTrigger] context configured npcId=" .. tostring(self.npcId)
+			.. " characterId=" .. tostring(self.ResolvedCharacterId)
+			.. " eventAvailable=" .. tostring(self.IsEventAvailable))
+	end
+
+	method void InitializeIndicatorEntities()
+		-- 에디터 참조 검증과 모바일 상호작용 스프라이트 적용
+		if self.eventIconEntity == nil or isvalid(self.eventIconEntity) == false then
+			log_warning("[DowntownNpcEventTrigger] event icon entity 참조가 유효하지 않습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
+		end
+
+		if self.interactIconEntity == nil or isvalid(self.interactIconEntity) == false then
+			log_warning("[DowntownNpcEventTrigger] interact icon entity 참조가 유효하지 않습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
+			return
+		end
+
+		if Environment:IsMobilePlatform() == false then
+			self:CacheInteractIconBaseScale()
+			return
+		end
+
+		local spriteRenderer = self.interactIconEntity.SpriteRendererComponent
+		if spriteRenderer == nil then
+			log_warning("[DowntownNpcEventTrigger] interact icon의 SpriteRendererComponent를 찾을 수 없습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
+			return
+		end
+
+		local transform = self.interactIconEntity.TransformComponent
+		if transform == nil then
+			log_warning("[DowntownNpcEventTrigger] interact icon의 TransformComponent를 찾을 수 없습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
+			return
+		end
+
+		log("[DowntownNpcEventTrigger] 모바일 상호작용 아이콘 스프라이트 적용 npcEntity=" .. tostring(self.Entity.Name)
+			.. " spriteRUID=" .. tostring(self.MOBILE_INTERACT_ICON_RUID))
+
+		spriteRenderer.SpriteRUID = self.MOBILE_INTERACT_ICON_RUID
+		local mobileScale = self.mobileInteractIconScale
+		transform.Scale = Vector3(mobileScale.x, mobileScale.y, mobileScale.z)
+		self.isInteractIconBaseScaleReady = false
+		self:CacheInteractIconBaseScale()
+	end
+
+	method void OnEndPlay()
+		-- 진행 중 서버 세션 취소 요청과 로컬 이벤트 구독 정리
+		if self.activeSessionId ~= "" and _NpcEventManager ~= nil then
+			_NpcEventManager:RequestCancelNpcInteraction(self.activeSessionId)
+		end
+		self:StopInteractIconTween()
+		self:DisconnectEvents()
+		self:ClearPreparedEvent()
+	end
+
+	method void OnUpdate(number delta)
+		-- 짧은 등장 팝업 이후 미세한 상하 플로팅으로 상호작용 가능 상태를 자연스럽게 안내합니다.
+		if self.isInteractIconTweenPlaying == false then
+			return
+		end
+
+		if self.interactIconEntity == nil or isvalid(self.interactIconEntity) == false
+			or self.interactIconEntity.TransformComponent == nil then
+			self:StopInteractIconTween()
+			return
+		end
+
+		self.interactIconTweenElapsed = self.interactIconTweenElapsed + math.max(delta, 0)
+
+		local appearDuration = math.max(self.interactIconAppearDuration, 0.01)
+		if self.interactIconTweenElapsed < appearDuration then
+			local startScale = math.max(self.interactIconAppearStartScale, 0)
+			local multiplier = _TweenLogic:Ease(
+				startScale,
+				1,
+				appearDuration,
+				EaseType.BackEaseOut,
+				self.interactIconTweenElapsed)
+			self:ApplyInteractIconScaleMultiplier(multiplier)
+			self:ApplyInteractIconPositionOffset(0)
+			return
+		end
+
+		local idleElapsed = self.interactIconTweenElapsed - appearDuration
+		local idlePeriod = math.max(self.interactIconIdleFloatPeriod, 0.01)
+		local phase = (idleElapsed / idlePeriod) * math.pi * 2
+		local wave = math.sin(phase)
+		self:ApplyInteractIconScaleMultiplier(1 + wave * math.max(self.interactIconIdleScaleAmplitude, 0))
+		self:ApplyInteractIconPositionOffset(wave * self.interactIconIdleFloatHeight)
+	end
+
+	method void ConnectEvents()
+		if self.interactionEventHandler == nil then
+			self.interactionEventHandler = self.Entity:ConnectEvent(InteractionEvent, self.OnInteractionEvent)
+		end
+
+		if self.touchEventHandler == nil then
+			self.touchEventHandler = self.Entity:ConnectEvent(TouchEvent, self.OnNpcTouched)
+		end
+
+		if self.interactionEnterHandler == nil then
+			self.interactionEnterHandler = self.Entity:ConnectEvent(InteractionEnterEvent, self.OnInteractionEnter)
+		end
+
+		if self.interactionLeaveHandler == nil then
+			self.interactionLeaveHandler = self.Entity:ConnectEvent(InteractionLeaveEvent, self.OnInteractionLeave)
+		end
+
+		if self.dialogClosedHandler == nil and _DialogUILogic ~= nil then
+			self.dialogClosedHandler = _DialogUILogic:ConnectEvent(DialogClosedEvent, self.OnNpcEventDialogClosed)
+		end
+
+		if self.progressChangedHandler == nil and _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+	end
+
+	method void DisconnectEvents()
+		if self.interactionEventHandler ~= nil then
+			self.Entity:DisconnectEvent(InteractionEvent, self.interactionEventHandler)
+			self.interactionEventHandler = nil
+		end
+
+		if self.touchEventHandler ~= nil then
+			self.Entity:DisconnectEvent(TouchEvent, self.touchEventHandler)
+			self.touchEventHandler = nil
+		end
+
+		if self.interactionEnterHandler ~= nil then
+			self.Entity:DisconnectEvent(InteractionEnterEvent, self.interactionEnterHandler)
+			self.interactionEnterHandler = nil
+		end
+
+		if self.interactionLeaveHandler ~= nil then
+			self.Entity:DisconnectEvent(InteractionLeaveEvent, self.interactionLeaveHandler)
+			self.interactionLeaveHandler = nil
+		end
+
+		if self.dialogClosedHandler ~= nil and _DialogUILogic ~= nil then
+			_DialogUILogic:DisconnectEvent(DialogClosedEvent, self.dialogClosedHandler)
+			self.dialogClosedHandler = nil
+		end
+
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+			self.progressChangedHandler = nil
+		end
+	end
+
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 행동력이 바뀌면 전구(EventIndicator) 표시 조건을 다시 반영한다. (0이 되면 남은 이벤트 NPC 전구가 꺼진다)
+		-- 이벤트 실행/평상시 대화 진행 중인 NPC는 현재 상태를 유지한다.
+		if self.IsExecutingEvent == true or self.isRegularDialogActive == true then
+			return
+		end
+
+		self:ApplyEventState(self.IsEventAvailable)
+	end
+
+	method void OnInteractionEvent(InteractionEvent event)
+		-- InteractionComponent의 상호작용 요청 처리
+		self:TryStartInteraction()
+	end
+
+	method void OnNpcTouched(TouchEvent event)
+		-- 상호작용 범위 안에서 발생한 NPC 클릭 처리
+		if self.isPlayerInRange == false then
+			return
+		end
+
+		self:TryStartInteraction()
+	end
+
+	method void TryStartInteraction()
+		-- 행동력과 이벤트 상태에 따른 공통 상호작용 시작
+		if self.IsExecutingEvent == true or self.isRegularDialogActive == true then
+			return
+		end
+
+		local hasEvent = self:HasStartableEvent()
+		local canAffordEvent = hasEvent == true and self:GetCurrentActionPoint() > 0
+		local hasRegular = self.regularDialogId ~= ""
+
+		-- 이벤트를 시작할 수 없고(행동력 부족/이벤트 없음) 평상시 대화도 없으면 상호작용을 막는다.
+		-- 단, 이벤트를 들고 있어도 행동력이 없으면 평상시 대화를 가진 고정 NPC는 평상시 대화로 폴백한다.
+		if canAffordEvent == false and hasRegular == false then
+			log("[DowntownNpcEventTrigger] ignored interaction (cannot start event, no regular dialog) npcId=" .. tostring(self.npcId))
+			return
+		end
+
+		-- 다른 상호작용/대화가 진행 중이면 거부하고, 아니면 전역 잠금을 점유한다(연타·중복 상호작용 차단 + 이동 잠금).
+		if _NpcInteractionGateLogic ~= nil then
+			if _NpcInteractionGateLogic:TryBeginInteraction() == false then
+				log("[DowntownNpcEventTrigger] ignored interaction because gate is locked npcId=" .. tostring(self.npcId))
+				return
+			end
+			self.hasInteractionLock = true
+		end
+
+		if canAffordEvent == true then
+			-- 서버가 이벤트 재판정과 행동력 차감 및 세션 생성을 단일 처리
+			self:ExecuteNextPreparedEvent()
+		else
+			self:StartRegularDialog()
+		end
+
+		-- 상호작용이 시작되어 진행 상태가 바뀌었으니 E 안내 아이콘을 다시 평가(진행 중엔 숨김)
+		self:RefreshInteractIndicator()
+	end
+
+	method void OnInteractionEnter(InteractionEnterEvent event)
+		-- 로컬 플레이어가 상호작용 범위에 진입하면 E 안내 아이콘 표시 조건을 갱신
+		if self:IsLocalPlayerEntity(event) == false then
+			return
+		end
+
+		self.isPlayerInRange = true
+		self:RefreshInteractIndicator()
+	end
+
+	method void OnInteractionLeave(InteractionLeaveEvent event)
+		-- 로컬 플레이어가 상호작용 범위에서 벗어나면 E 안내 아이콘을 숨김
+		if self:IsLocalPlayerEntity(event) == false then
+			return
+		end
+
+		self.isPlayerInRange = false
+		self:RefreshInteractIndicator()
+	end
+
+	method boolean IsLocalPlayerEntity(any event)
+		-- 이벤트의 상호작용 대상이 이 클라이언트의 로컬 플레이어인지 확인
+		if event == nil or event.InteractionEntity == nil then
+			return false
+		end
+
+		if _UserService == nil or _UserService.LocalPlayer == nil then
+			return false
+		end
+
+		return event.InteractionEntity == _UserService.LocalPlayer
+	end
+
+	method boolean HasStartableEvent()
+		-- 서버 컨텍스트 기준으로 지금 시작할 수 있는 이벤트가 있는지 반환
+		return self.IsEventAvailable == true
+	end
+
+	method integer GetCurrentActionPoint()
+		-- 클라이언트 진행 캐시에서 현재 행동력을 읽는다. 조회 불가 시 0으로 간주한다.
+		if _ProgressManager == nil then
+			return 0
+		end
+
+		local progress = _ProgressManager:ClientGetProgress()
+		if progress == nil or progress.actionPoint == nil then
+			return 0
+		end
+
+		return progress.actionPoint
+	end
+
+	method string ResolveRegularDialogId()
+		-- 이 NPC(actorId)의 평상시 대화 dialogId를 StaticActorDialogTable에서 조회한다. 없으면 빈 문자열.
+		if _StaticActorDialogMaster == nil or self.npcId == "" then
+			return ""
+		end
+
+		return _StaticActorDialogMaster:GetDialogId(self.npcId)
+	end
+
+	method void StartRegularDialog()
+		-- 이벤트가 없을 때 고정 NPC의 평상시 대화를 연다. 행동력을 소모하지 않는다.
+		if self.regularDialogId == "" or _DialogUILogic == nil then
+			log_warning("[DowntownNpcEventTrigger] cannot start regular dialog npcId=" .. tostring(self.npcId)
+				.. " dialogId=" .. tostring(self.regularDialogId))
+			self:ReleaseInteractionLock()
+			return
+		end
+
+		self.isRegularDialogActive = true
+		log("[DowntownNpcEventTrigger] start regular dialog npcId=" .. tostring(self.npcId)
+			.. " dialogId=" .. tostring(self.regularDialogId))
+		-- 일반 NPC 대화도 기본값을 가진 옵션으로 엽니다.
+		local options = DialogOpenOptions()
+		options.dialogId = self.regularDialogId
+		_DialogUILogic:Open(options)
+	end
+
+	method void ExecuteNextPreparedEvent()
+		-- 클라이언트가 이벤트 ID를 선택하지 않고 서버 권위 세션 시작만 요청
+		if _NpcEventManager == nil then
+			self:FinishPreparedEvent()
+			return
+		end
+
+		self.pendingInteractionRequestId = _NpcEventManager:CreateClientRequestId(
+			"npc-interaction:" .. tostring(self.npcId))
+		self.IsExecutingEvent = true
+		self:ApplyEventState(false)
+		log("[DowntownNpcEventTrigger] request interaction npcId=" .. tostring(self.npcId)
+			.. " requestId=" .. tostring(self.pendingInteractionRequestId))
+		_NpcEventManager:RequestBeginNpcInteraction(self.pendingInteractionRequestId, self.npcId)
+	end
+
+	method void OnNpcEventDialogClosed(DialogClosedEvent event)
+		-- 대화창이 닫혔을 때, 평상시 대화면 잠금만 해제하고, 이벤트 대화면 다음 준비 이벤트로 넘어간다.
+		if event == nil then
+			return
+		end
+
+		-- 평상시 대화가 닫힌 경우: 점유했던 잠금만 해제한다(행동력/이벤트 진행과 무관).
+		if self.isRegularDialogActive == true then
+			self.isRegularDialogActive = false
+			self:ReleaseInteractionLock()
+			-- 대화가 닫혔으니, 플레이어가 아직 근처면 E 안내 아이콘을 다시 표시
+			self:RefreshInteractIndicator()
+			return
+		end
+
+		if self.IsExecutingEvent == false then
+			return
+		end
+
+		if self.activeSessionId == "" or self.activeStepToken == "" or _NpcEventManager == nil then
+			return
+		end
+
+		local stepToken = self.activeStepToken
+		self.activeStepToken = ""
+		_NpcEventManager:RequestAdvanceNpcInteraction(self.activeSessionId, stepToken)
+	end
+
+	method void OnServerSessionStarted(string requestId, string sessionId, string stepToken)
+		-- 서버가 승인한 상호작용 세션과 최초 단계 토큰 적용
+		if requestId ~= self.pendingInteractionRequestId
+			or sessionId == nil or sessionId == ""
+			or stepToken == nil or stepToken == "" then
+			return
+		end
+
+		self.pendingInteractionRequestId = ""
+		self.activeSessionId = sessionId
+		self.activeStepToken = stepToken
+		self.IsExecutingEvent = true
+		log("[DowntownNpcEventTrigger] session started npcId=" .. tostring(self.npcId)
+			.. " sessionId=" .. tostring(sessionId)
+			.. " stepToken=" .. tostring(stepToken))
+	end
+
+	method void OnServerSessionStep(string sessionId, string stepToken)
+		-- 활성 세션의 다음 대화 단계 토큰 적용
+		if sessionId == nil or sessionId == ""
+			or sessionId ~= self.activeSessionId
+			or stepToken == nil or stepToken == "" then
+			return
+		end
+
+		self.activeStepToken = stepToken
+		log("[DowntownNpcEventTrigger] session step ready npcId=" .. tostring(self.npcId)
+			.. " sessionId=" .. tostring(sessionId)
+			.. " stepToken=" .. tostring(stepToken))
+	end
+
+	method void OnServerSessionRejected(string requestId, string reason)
+		-- 서버 거절 시 클라이언트 실행 상태와 상호작용 잠금 복구
+		if requestId ~= self.pendingInteractionRequestId then
+			return
+		end
+
+		self.pendingInteractionRequestId = ""
+		self.activeSessionId = ""
+		self.activeStepToken = ""
+		self.IsExecutingEvent = false
+		self:ReleaseInteractionLock()
+		self:ApplyEventState(self.IsEventAvailable)
+		log_warning("[DowntownNpcEventTrigger] session rejected npcId=" .. tostring(self.npcId)
+			.. " requestId=" .. tostring(requestId)
+			.. " reason=" .. tostring(reason))
+	end
+
+	method void OnServerSessionEnded(string sessionId, boolean isCompleted, string reason)
+		-- 서버 세션 종료 결과 반영과 로컬 잠금 및 표시 상태 복구
+		if sessionId == nil or sessionId == "" or sessionId ~= self.activeSessionId then
+			return
+		end
+
+		self.activeSessionId = ""
+		self.activeStepToken = ""
+		self.pendingInteractionRequestId = ""
+		self.IsExecutingEvent = false
+		if isCompleted == true then
+			self.IsEventAvailable = false
+		end
+		self:ReleaseInteractionLock()
+		self:ApplyEventState(self.IsEventAvailable)
+		log("[DowntownNpcEventTrigger] session ended npcId=" .. tostring(self.npcId)
+			.. " sessionId=" .. tostring(sessionId)
+			.. " completed=" .. tostring(isCompleted)
+			.. " reason=" .. tostring(reason))
+
+		local currentMap = self.Entity.CurrentMap
+		if isCompleted == true and currentMap ~= nil then
+			---@type NpcSpawnComponent
+			local spawnComponent = currentMap:GetComponent("script.NpcSpawnComponent")
+			if spawnComponent ~= nil then
+				spawnComponent:RefreshEntrySpawn()
+			end
+		end
+	end
+
+	method void FinishPreparedEvent()
+		-- 서버 세션 시작 실패 시 로컬 실행 상태 정리
+		self.IsExecutingEvent = false
+		self.pendingInteractionRequestId = ""
+		self.activeSessionId = ""
+		self.activeStepToken = ""
+		self:ApplyEventState(self.IsEventAvailable)
+		self:ReleaseInteractionLock()
+	end
+
+	method void ClearPreparedEvent()
+		-- 클라이언트 NPC 표시와 서버 세션 참조 초기화
+		self:ApplyEventState(false)
+		self.IsEventAvailable = false
+		self.IsExecutingEvent = false
+		self.pendingInteractionRequestId = ""
+		self.activeSessionId = ""
+		self.activeStepToken = ""
+		self.ResolvedCharacterId = ""
+		self.isRegularDialogActive = false
+		-- 상호작용 도중 NPC가 재구성/제거되는 경우에도 잠금이 남지 않도록 해제한다.
+		self:ReleaseInteractionLock()
+	end
+
+	method void ReleaseInteractionLock()
+		-- 이 NPC가 점유한 상호작용 잠금을 해제한다(점유 중일 때만 동작하여 다른 NPC의 세션을 풀지 않는다).
+		if self.hasInteractionLock == false then
+			return
+		end
+
+		self.hasInteractionLock = false
+		if _NpcInteractionGateLogic ~= nil then
+			_NpcInteractionGateLogic:Unhold("interaction")
+		end
+	end
+
+	method string ResolveCharacterId()
+		if self.targetCharacterId ~= nil and self.targetCharacterId ~= "" then
+			return self.targetCharacterId
+		end
+
+		-- NPC 자체가 내 소유 캐릭터(character_xxx)면 그 id를 대상으로 사용, 일반 NPC는 "" (대상 캐릭터 없음)
+		if _CharacterManager ~= nil and self.npcId ~= "" and _CharacterManager:ClientGetCharacterById(self.npcId) ~= nil then
+			return self.npcId
+		end
+
+		return ""
+	end
+
+	method void ApplyEventState(boolean isEventAvailable)
+		self:ApplyActionName()
+		-- 전구(EventIndicator)는 이벤트가 있고 행동력이 남아 있을 때만 표시한다.
+		local shouldShowIcon = isEventAvailable == true and self:GetCurrentActionPoint() > 0
+		self.isEventIconShown = shouldShowIcon
+		self:ApplyEventIcon(shouldShowIcon)
+		self:ApplyNpcSpeechAndBalloonState()
+		-- 전구 상태가 바뀌면 상호배타 관계인 E 안내 아이콘도 다시 평가한다.
+		self:RefreshInteractIndicator()
+	end
+
+	method void ApplyActionName()
+		if self.Entity.InteractionComponent == nil then
+			return
+		end
+
+		self.Entity.InteractionComponent.ShowActionInfo = false
+	end
+
+	method void ApplyNpcSpeechAndBalloonState()
+		---@type StaticActorSpeechComponent
+		local speechComponent = self.Entity:GetComponent("script.StaticActorSpeechComponent")
+		if speechComponent ~= nil then
+			speechComponent.enableTouchSpeech = false
+			speechComponent.enableIdleSpeech = false
+			speechComponent:HideSpeech()
+		end
+
+		local touchReceiveComponent = self.Entity.TouchReceiveComponent
+		if touchReceiveComponent ~= nil then
+			touchReceiveComponent.Enable = true
+		end
+	end
+
+	method void ApplyEventIcon(boolean shouldShow)
+		-- 연결된 이벤트 표시 엔티티의 활성 상태 반영
+		if self.eventIconEntity == nil or isvalid(self.eventIconEntity) == false then
+			if shouldShow == true then
+				log_warning("[DowntownNpcEventTrigger] event icon entity 참조가 유효하지 않습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
+			end
+			return
+		end
+
+		self.eventIconEntity:SetVisible(shouldShow)
+		self.eventIconEntity:SetEnable(shouldShow)
+	end
+
+	method void RefreshInteractIndicator()
+		-- 상호작용 아이콘은 플레이어가 근처이고, 전구가 떠 있지 않으며, 상호작용/대화 진행 중이 아닐 때만 표시(전구와 중복 금지)
+		local shouldShow = self.isPlayerInRange == true
+			and self.isEventIconShown == false
+			and self.IsExecutingEvent == false
+			and self.isRegularDialogActive == false
+		self:ApplyInteractIcon(shouldShow)
+	end
+
+	method void ApplyInteractIcon(boolean shouldShow)
+		-- 연결된 상호작용 표시 엔티티의 활성 상태 반영
+		if self.interactIconEntity == nil or isvalid(self.interactIconEntity) == false then
+			self:StopInteractIconTween()
+			if shouldShow == true then
+				log_warning("[DowntownNpcEventTrigger] interact icon entity 참조가 유효하지 않습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
+			end
+			return
+		end
+
+		if shouldShow == true then
+			self.interactIconEntity:SetVisible(true)
+			self.interactIconEntity:SetEnable(true)
+			self:StartInteractIconTween()
+			return
+		end
+
+		self:StopInteractIconTween()
+		self.interactIconEntity:SetVisible(false)
+		self.interactIconEntity:SetEnable(false)
+	end
+
+	method void CacheInteractIconBaseScale()
+		-- 현재 에디터 위치와 스케일을 등장/대기 트윈의 기준으로 한 번만 저장합니다.
+		if self.isInteractIconBaseScaleReady == true then
+			return
+		end
+
+		if self.interactIconEntity == nil or isvalid(self.interactIconEntity) == false
+			or self.interactIconEntity.TransformComponent == nil then
+			return
+		end
+
+		local transform = self.interactIconEntity.TransformComponent
+		local scale = transform.Scale
+		local position = transform.Position
+		self.interactIconBaseScale = Vector3(scale.x, scale.y, scale.z)
+		self.interactIconBasePosition = Vector3(position.x, position.y, position.z)
+		self.isInteractIconBaseScaleReady = true
+	end
+
+	method void StartInteractIconTween()
+		-- 짧게 팝업된 뒤 미세하게 떠다니는 일반적인 상호작용 프롬프트 모션을 시작합니다.
+		if self.isInteractIconTweenPlaying == true then
+			return
+		end
+
+		self:CacheInteractIconBaseScale()
+		if self.isInteractIconBaseScaleReady == false or self.interactIconEntity == nil
+			or isvalid(self.interactIconEntity) == false or self.interactIconEntity.TransformComponent == nil then
+			return
+		end
+
+		self.isInteractIconTweenPlaying = true
+		self.interactIconTweenElapsed = 0
+		self:ApplyInteractIconScaleMultiplier(math.max(self.interactIconAppearStartScale, 0))
+		self:ApplyInteractIconPositionOffset(0)
+	end
+
+	method void StopInteractIconTween()
+		-- 프레임 기반 반복 트윈을 중단하고 에디터에서 잡아둔 원래 크기로 복원합니다.
+		self.isInteractIconTweenPlaying = false
+		self.interactIconTweenElapsed = 0
+		self:ApplyInteractIconScaleMultiplier(1)
+		self:ApplyInteractIconPositionOffset(0)
+	end
+
+	method void ApplyInteractIconScaleMultiplier(number multiplier)
+		if self.isInteractIconBaseScaleReady == false or self.interactIconEntity == nil
+			or isvalid(self.interactIconEntity) == false or self.interactIconEntity.TransformComponent == nil then
+			return
+		end
+
+		local baseScale = self.interactIconBaseScale
+		self.interactIconEntity.TransformComponent.Scale = Vector3(
+			baseScale.x * multiplier,
+			baseScale.y * multiplier,
+			baseScale.z)
+	end
+
+	method void ApplyInteractIconPositionOffset(number offsetY)
+		if self.isInteractIconBaseScaleReady == false or self.interactIconEntity == nil
+			or isvalid(self.interactIconEntity) == false or self.interactIconEntity.TransformComponent == nil then
+			return
+		end
+
+		local basePosition = self.interactIconBasePosition
+		self.interactIconEntity.TransformComponent.Position = Vector3(
+			basePosition.x,
+			basePosition.y + offsetY,
+			basePosition.z)
+	end
+
+end

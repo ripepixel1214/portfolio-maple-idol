@@ -1,0 +1,14 @@
+@Struct
+script MiniGameLaunchContext
+
+	property string sessionId = ""
+	property string miniGameId = ""
+	property integer contextType = 0
+	property string contextId = ""
+	property string presentationActorId = ""
+	property string commandPayload = ""
+	property number duration = 0
+	property integer betAmount = 0
+	property integer balance = 0
+
+end

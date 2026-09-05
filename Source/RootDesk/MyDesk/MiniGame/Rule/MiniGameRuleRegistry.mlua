@@ -1,0 +1,50 @@
+---@description "미니게임 규칙 식별자와 공용 처리 Logic 연결"
+@Logic
+script MiniGameRuleRegistry extends Logic
+
+	method any ResolveInputRule(integer inputType)
+		-- 입력 타입을 지원하는 공용 검증 처리기 반환
+		if _MiniGameInputRule ~= nil and _MiniGameInputRule:Supports(inputType) == true then
+			return _MiniGameInputRule
+		end
+
+		return nil
+	end
+
+	method any ResolveObjectiveRule(string evaluatorId)
+		-- Objective 식별자를 지원하는 공용 평가기 반환
+		if _MiniGameObjectiveRule ~= nil and _MiniGameObjectiveRule:Supports(evaluatorId) == true then
+			return _MiniGameObjectiveRule
+		end
+
+		return nil
+	end
+
+	method any ResolveTimeRule(string modeId)
+		-- 시간 규칙 식별자를 지원하는 공용 처리기 반환
+		if _MiniGamePhaseTimer ~= nil and _MiniGamePhaseTimer:Supports(modeId) == true then
+			return _MiniGamePhaseTimer
+		end
+
+		return nil
+	end
+
+	method any ResolveResultResolver(string resolverId)
+		-- 결과 식별자를 지원하는 공용 처리기 반환
+		if _MiniGameResultResolver ~= nil and _MiniGameResultResolver:Supports(resolverId) == true then
+			return _MiniGameResultResolver
+		end
+
+		return nil
+	end
+
+	method any ResolveSettlementRule(integer settlementType)
+		-- 정산 유형을 지원하는 공용 규칙 처리기 반환
+		if _MiniGameSettlementRule ~= nil and _MiniGameSettlementRule:Supports(settlementType) == true then
+			return _MiniGameSettlementRule
+		end
+
+		return nil
+	end
+
+end

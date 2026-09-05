@@ -1,0 +1,72 @@
+---@description "미니게임 Phase의 카운트다운과 게이지 감소 시간 상태를 공통 처리"
+@Logic
+script MiniGamePhaseTimer extends Logic
+
+	property string MODE_COUNTDOWN = "Countdown"
+
+	property string MODE_GAUGE_DRAIN = "GaugeDrain"
+
+	method boolean Supports(string modeId)
+		-- 공용 시간 규칙 지원 여부 확인
+		return modeId == self.MODE_COUNTDOWN or modeId == self.MODE_GAUGE_DRAIN
+	end
+
+	method any CreateState(any rule)
+		-- Phase 시간 규칙에서 독립 실행 상태 생성
+		local source = rule or {}
+		local duration = source.duration or 0
+		return {
+			mode = source.mode or "",
+			elapsed = 0,
+			duration = duration,
+			timeRemaining = duration,
+			gauge = source.startGauge or 0,
+			startGauge = source.startGauge or 0,
+			drainPerSecond = source.drainPerSecond or 0,
+			failAt = source.failAt or 0
+		}
+	end
+
+	method any Update(any state, number delta)
+		-- 프레임 경과량을 현재 시간 상태에 반영
+		if state == nil then
+			return nil
+		end
+
+		local safeDelta = delta or 0
+		if safeDelta < 0 then
+			safeDelta = 0
+		end
+
+		state.elapsed = (state.elapsed or 0) + safeDelta
+		if state.mode == self.MODE_COUNTDOWN then
+			state.timeRemaining = (state.duration or 0) - state.elapsed
+			if state.timeRemaining < 0 then
+				state.timeRemaining = 0
+			end
+		elseif state.mode == self.MODE_GAUGE_DRAIN then
+			state.gauge = (state.gauge or 0) - ((state.drainPerSecond or 0) * safeDelta)
+			if state.gauge < 0 then
+				state.gauge = 0
+			end
+		end
+
+		return state
+	end
+
+	method boolean IsExpired(any state)
+		-- 현재 시간 규칙의 실패 경계 도달 여부 확인
+		if state == nil then
+			return false
+		end
+
+		if state.mode == self.MODE_COUNTDOWN then
+			return (state.timeRemaining or 0) <= 0
+		elseif state.mode == self.MODE_GAUGE_DRAIN then
+			return (state.gauge or 0) <= (state.failAt or 0)
+		end
+
+		return false
+	end
+
+end

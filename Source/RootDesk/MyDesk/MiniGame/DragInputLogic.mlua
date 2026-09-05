@@ -1,0 +1,194 @@
+@Logic
+@ExecSpace("ClientOnly")
+script DragInputLogic extends Logic
+
+	-- 모듈 활성 여부
+	property boolean 	isActive = false
+
+	-- 입력 채널 식별자
+	property string channelId = ""
+	-- 현재 드래그 진행 중 여부
+	property boolean 	isDragging = false
+	-- ScreenTouchEvent(누름) 핸들러
+	property any 		touchDownHandler = nil
+	-- ScreenTouchHoldEvent(이동) 핸들러
+	property any 		touchHoldHandler = nil
+	-- ScreenTouchReleaseEvent(뗌) 핸들러
+	property any 		touchUpHandler = nil
+	-- 추적 중인 터치 식별자
+	property integer 	activeTouchId = 0
+	-- 직전 기록 좌표
+	property Vector2 	lastPoint = Vector2(0, 0)
+	-- 누적 이동 거리(px)
+	property number 	pathLength = 0
+	-- 기록된 포인트 수
+	property integer 	pointCount = 0
+	-- 성공으로 인정할 최소 이동 거리(px)
+	property number 	minDistance = 0
+	-- 이동 이벤트 발행 간 최소 이동 거리(px)
+	property number 	moveEpsilon = 1
+
+	@ExecSpace("ClientOnly")
+	method void StartModule(string sessionId, any config)
+		-- 화면 드래그 입력을 받기 시작한다.
+		self:Cleanup()
+
+		self.isDragging = false
+		self.channelId = config.channelId or ""
+		self.activeTouchId = 0
+		self.pathLength = 0
+		self.pointCount = 0
+		self.lastPoint = Vector2(0, 0)
+		self.minDistance = 0
+		self.moveEpsilon = 1
+
+		if config.minDistance ~= nil then
+			self.minDistance = config.minDistance
+		end
+		if config.moveEpsilon ~= nil then
+			self.moveEpsilon = config.moveEpsilon
+		end
+
+		self.touchDownHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.OnTouchDown)
+		self.touchHoldHandler = _InputService:ConnectEvent(ScreenTouchHoldEvent, self.OnTouchHold)
+		self.touchUpHandler = _InputService:ConnectEvent(ScreenTouchReleaseEvent, self.OnTouchUp)
+
+		self.isActive = true
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Start, {})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTouchDown(ScreenTouchEvent event)
+		-- 드래그 시작 좌표를 기록한다.
+		if self.isActive == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		if self.isDragging == true then
+			return
+		end
+
+		self.isDragging = true
+		self.activeTouchId = event.TouchId
+		self.lastPoint = event.TouchPoint
+		self.pathLength = 0
+		self.pointCount = 1
+
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Input, {
+			keyName = "down",
+			value = 0,
+			progress = 0,
+			successCount = self.pointCount,
+			pointX = event.TouchPoint.x,
+			pointY = event.TouchPoint.y
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTouchHold(ScreenTouchHoldEvent event)
+		-- 드래그 이동 거리를 누적하고 이동 이벤트를 발행한다.
+		if self.isActive == false or self.isDragging == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		if event.TouchId ~= self.activeTouchId then
+			return
+		end
+
+		local stepDistance = self:Distance(self.lastPoint, event.TouchPoint)
+		if stepDistance < self.moveEpsilon then
+			return
+		end
+
+		self.pathLength = self.pathLength + stepDistance
+		self.lastPoint = event.TouchPoint
+		self.pointCount = self.pointCount + 1
+
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Input, {
+			keyName = "move",
+			value = self.pathLength,
+			successCount = self.pointCount,
+			pointX = event.TouchPoint.x,
+			pointY = event.TouchPoint.y
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTouchUp(ScreenTouchReleaseEvent event)
+		-- 드래그 종료 시 누적 결과로 완료 이벤트를 발행한다.
+		if self.isActive == false or self.isDragging == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		if event.TouchId ~= self.activeTouchId then
+			return
+		end
+
+		local finalLength = self.pathLength
+		local finalPointCount = self.pointCount
+		local success = (finalLength >= self.minDistance)
+
+		self:Cleanup()
+
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Complete, {
+			keyName = "up",
+			value = finalLength,
+			progress = 1,
+			successCount = finalPointCount,
+			isTerminal = true,
+			isSuccess = success
+		})
+		_MiniGameInputHubLogic:NotifyChannelFinished(self.channelId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number Distance(Vector2 a, Vector2 b)
+		-- 두 화면 좌표 사이의 거리를 반환한다.
+		local dx = b.x - a.x
+		local dy = b.y - a.y
+		return math.sqrt(dx * dx + dy * dy)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CancelModule()
+		-- 외부 중단 요청 시 핸들러만 정리한다. (종료 이벤트는 허브가 발행)
+		self:Cleanup()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Cleanup()
+		-- 화면 터치 핸들러 연결을 모두 해제한다.
+		if self.touchDownHandler ~= nil then
+			_InputService:DisconnectEvent(ScreenTouchEvent, self.touchDownHandler)
+			self.touchDownHandler = nil
+		end
+		if self.touchHoldHandler ~= nil then
+			_InputService:DisconnectEvent(ScreenTouchHoldEvent, self.touchHoldHandler)
+			self.touchHoldHandler = nil
+		end
+		if self.touchUpHandler ~= nil then
+			_InputService:DisconnectEvent(ScreenTouchReleaseEvent, self.touchUpHandler)
+			self.touchUpHandler = nil
+		end
+
+		self.isDragging = false
+		self.activeTouchId = 0
+		self.isActive = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 핸들러 누수를 막는다.
+		self:Cleanup()
+	end
+
+end

@@ -1,0 +1,72 @@
+---@description "미니게임 규칙 상태를 공통 결과 계약으로 변환하는 로직"
+@Logic
+script MiniGameResultResolver extends Logic
+
+	property string RESOLVER_OBJECTIVE = "ObjectiveResult"
+
+	property string RESOLVER_ACCURACY = "AccuracyResult"
+
+	property string RESOLVER_MESO_DRAW = "MesoDraw"
+
+	property string REASON_TIMEOUT = "timeout"
+
+	property string REASON_CANCEL = "cancel"
+
+	property string REASON_MAP_CHANGE = "mapChange"
+
+	property string REASON_RESTART = "restart"
+
+	property string REASON_DRAIN = "drain"
+
+	method boolean Supports(string resolverId)
+		-- 공용 결과 처리기 지원 여부 확인
+		return resolverId == self.RESOLVER_OBJECTIVE
+			or resolverId == self.RESOLVER_ACCURACY
+			or resolverId == self.RESOLVER_MESO_DRAW
+	end
+
+	method any Resolve(string resolverId, any state, any objectiveSummary, string reason)
+		-- 규칙 상태와 Objective 요약을 기존 결과 필드로 변환
+		if self:Supports(resolverId) == false then
+			return nil
+		end
+
+		local sourceState = state or {}
+		local summary = objectiveSummary or {}
+		local progress = summary.progress or 0
+		if progress < 0 then
+			progress = 0
+		elseif progress > 1 then
+			progress = 1
+		end
+
+		local isSuccess = summary.allRequiredMet == true
+		if sourceState.requestedSuccess ~= nil then
+			isSuccess = sourceState.requestedSuccess == true
+		end
+		if self:IsFailureReason(reason) == true then
+			isSuccess = false
+		end
+		if resolverId == self.RESOLVER_MESO_DRAW then
+			isSuccess = (sourceState.blockDrawCount or 0) > 0 and self:IsFailureReason(reason) == false
+		end
+
+		return {
+			isSuccess = isSuccess,
+			score = math.floor(progress * 100),
+			progress = progress,
+			accuracy = sourceState.lastAccuracy or "",
+			reason = reason or ""
+		}
+	end
+
+	method boolean IsFailureReason(string reason)
+		-- 정상 목표 완료가 아닌 강제 종료 사유 확인
+		return reason == self.REASON_TIMEOUT
+			or reason == self.REASON_CANCEL
+			or reason == self.REASON_MAP_CHANGE
+			or reason == self.REASON_RESTART
+			or reason == self.REASON_DRAIN
+	end
+
+end

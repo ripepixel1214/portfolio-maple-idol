@@ -1,0 +1,152 @@
+---@description "미니게임의 시작 비용 검증과 결과 정산을 유형별로 처리"
+@Logic
+script MiniGameSettlementRule extends Logic
+
+	property string AMOUNT_MODE_PLAYER_SELECTED = "PlayerSelected"
+	property string AMOUNT_MODE_FIXED = "Fixed"
+	property string CURRENCY_GROUP_MESO = "groupMeso"
+	property string CURRENCY_NIGHT_MARKET_COIN = "nightMarketCoin"
+	property string STATUS_VALIDATED = "validated"
+	property string STATUS_SETTLED = "settled"
+	property string STATUS_CANCELLED = "cancelled"
+
+	method boolean Supports(integer settlementType)
+		-- 공통 정산 규칙이 인식하는 유형 여부 확인
+		return _EMiniGameSettlementType:IsValid(settlementType)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateState(any preset, integer betAmount, string userId, boolean isBettingRequest)
+		-- 프리셋 정산 규칙과 서버 권위 잔액을 기준으로 세션 정산 상태 생성
+		if preset == nil then
+			return nil
+		end
+
+		local rule = preset.settlementRule or {}
+		local settlementType = rule.type or _EMiniGameSettlementType.None
+		if self:Supports(settlementType) == false then
+			return nil
+		end
+
+		local requiresBet = _EMiniGameSettlementType:IsBetting(settlementType)
+		if requiresBet ~= isBettingRequest then
+			log_warning("[MiniGameSettlementRule] start request mismatch type="
+				.. _EMiniGameSettlementType:ToName(settlementType))
+			return nil
+		end
+
+		if settlementType == _EMiniGameSettlementType.None then
+			return {
+				type = settlementType,
+				status = self.STATUS_VALIDATED,
+				amount = 0,
+				inputCurrency = "",
+				outputCurrency = ""
+			}
+		end
+
+		if _ProgressManager:CanUseProgress(userId) == false then
+			return nil
+		end
+
+		local amount = self:ResolveAmount(rule, betAmount)
+		if self:IsValidAmount(rule, amount) == false then
+			log_warning("[MiniGameSettlementRule] invalid amount type=" .. _EMiniGameSettlementType:ToName(settlementType)
+				.. " amount=" .. tostring(amount))
+			return nil
+		end
+
+		local progress = _ProgressManager:ServerGetProgress()
+		if progress == nil then
+			return nil
+		end
+
+		local inputCurrency = rule.inputCurrency or ""
+		local balance = 0
+		if inputCurrency == self.CURRENCY_GROUP_MESO then
+			local currentGroupMeso = math.floor(progress.groupMeso or 0)
+			balance = currentGroupMeso
+			if amount > currentGroupMeso then
+				log_warning("[MiniGameSettlementRule] insufficient groupMeso user=" .. tostring(userId)
+					.. " amount=" .. tostring(amount)
+					.. " balance=" .. tostring(currentGroupMeso))
+				return nil
+			end
+		end
+
+		return {
+			type = settlementType,
+			status = self.STATUS_VALIDATED,
+			amount = amount,
+			inputCurrency = inputCurrency,
+			outputCurrency = rule.outputCurrency or "",
+			creditAmount = 0,
+			balance = balance
+		}
+	end
+
+	method integer ResolveAmount(any rule, integer betAmount)
+		-- 고정 비용과 사용자 선택 판돈을 공통 금액으로 변환
+		if rule.amountMode == self.AMOUNT_MODE_FIXED then
+			return math.floor(rule.amount or 0)
+		end
+
+		return math.floor(betAmount or 0)
+	end
+
+	method boolean IsValidAmount(any rule, integer amount)
+		-- 최소값과 증가 단위를 기준으로 정산 금액 검증
+		if rule == nil or amount == nil then
+			return false
+		end
+
+		local minAmount = math.floor(rule.min or 0)
+		local amountStep = math.floor(rule.step or 1)
+		if amount < minAmount or amountStep <= 0 then
+			return false
+		end
+
+		return (amount - minAmount) % amountStep == 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TrySettle(any settlementState, integer creditAmount, string userId)
+		-- 검증된 정산 상태를 결과 금액으로 한 번만 반영
+		if settlementState == nil or settlementState.status ~= self.STATUS_VALIDATED then
+			return false
+		end
+
+		if creditAmount == nil or creditAmount < 0 then
+			return false
+		end
+
+		if settlementState.type ~= _EMiniGameSettlementType.MesoBet then
+			log_warning("[MiniGameSettlementRule] settlement not implemented type="
+				.. _EMiniGameSettlementType:ToName(settlementState.type))
+			return false
+		end
+
+		local isApplied = _ProgressManager:TryApplyGroupMesoTransaction(
+			settlementState.amount,
+			creditAmount,
+			userId
+		)
+		if isApplied == false then
+			return false
+		end
+
+		settlementState.creditAmount = creditAmount
+		settlementState.status = self.STATUS_SETTLED
+		return true
+	end
+
+	method void Cancel(any settlementState)
+		-- 미정산 상태를 자산 변동 없이 취소
+		if settlementState == nil or settlementState.status ~= self.STATUS_VALIDATED then
+			return
+		end
+
+		settlementState.status = self.STATUS_CANCELLED
+	end
+
+end

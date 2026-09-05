@@ -1,0 +1,8 @@
+@Event
+script LanguageChangedEvent extends EventType
+
+	property string oldLocaleId = ""
+
+	property string newLocaleId = ""
+
+end

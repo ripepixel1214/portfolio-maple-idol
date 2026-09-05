@@ -1,0 +1,38 @@
+@Event
+script MiniGameInputEvent extends EventType
+
+	-- 입력 모듈을 시작한 세션 식별자
+	property string 	sessionId = ""
+	-- 입력 채널 식별자
+	property string channelId = ""
+	-- 입력 타입 (EMiniGameInputType 값)
+	property integer 	inputType = -1
+	-- 액션 종류 (EMiniGameInputAction 값)
+	property integer 	action = -1
+	-- 입력에 사용된 키 이름 (있을 경우)
+	property string 	keyName = ""
+	-- 액션별 수치 값 (Mash 카운트, Timing 오차, Drag 이동거리 등)
+	property number 	value = 0
+	-- 진행도 0~1
+	property number 	progress = 0
+	-- 판정 정확도 (perfect / good / miss 등)
+	property string 	accuracy = ""
+	-- 누적 성공 입력 수
+	property integer 	successCount = 0
+	-- 누적 실패 입력 수
+	property integer 	missCount = 0
+	-- 이번 이벤트가 종료(terminal) 이벤트인지 여부
+	property boolean 	isTerminal = false
+	-- 종료 이벤트일 때 성공 여부
+	property boolean 	isSuccess = false
+	-- 종료 사유 등 부가 설명
+	property string 	reason = ""
+	-- 입력 화면 좌표 X (드래그 등 위치 기반 입력)
+	property number 	pointX = 0
+	-- 입력 화면 좌표 Y (드래그 등 위치 기반 입력)
+	property number 	pointY = 0
+	-- 남은 시도 횟수 / 최대 시도 횟수 (시도 제한이 있는 입력 타입에서만 사용; maxAttempts=0이면 제한 없음)
+	property integer 	attemptsRemaining = 0
+	property integer 	maxAttempts = 0
+
+end

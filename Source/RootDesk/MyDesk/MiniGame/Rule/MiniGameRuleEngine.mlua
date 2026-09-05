@@ -1,0 +1,203 @@
+---@description "미니게임 프리셋의 Phase·시간·Objective·결과 처리를 통합 실행"
+@Logic
+script MiniGameRuleEngine extends Logic
+
+	property string TIME_RULE_COUNTDOWN = "Countdown"
+
+	property string TIME_RULE_GAUGE_DRAIN = "GaugeDrain"
+
+	method any CreateState(any preset)
+		-- 프리셋 첫 Phase를 기준으로 독립 규칙 상태 생성
+		local phase = self:GetPhase(preset, "")
+		if phase == nil then
+			return nil
+		end
+
+		local timeState = nil
+		local timeRule = phase.timeRule or {}
+		local timeHandler = _MiniGameRuleRegistry:ResolveTimeRule(timeRule.mode or "")
+		if timeHandler ~= nil then
+			timeState = timeHandler:CreateState(timeRule)
+		end
+
+		return {
+			phaseId = phase.id or "",
+			timeState = timeState,
+			objectiveTargetOverrides = {},
+			successCount = 0,
+			hitCount = 0,
+			missCount = 0,
+			gauge = timeState ~= nil and timeState.gauge or 0,
+			shapeRatio = 0,
+			accuracyScore = 0,
+			lastAccuracy = "",
+			blockDrawCount = 0,
+			drawNumber = 0,
+			drawRow = 0,
+			drawColumn = 0,
+			drawBlockId = "",
+			drawMultiplier = 0,
+			drawIsWin = false,
+			drawPayout = 0,
+			drawNetChange = 0,
+			drawBalance = 0,
+			requestedSuccess = nil
+		}
+	end
+
+	method any GetPhase(any preset, string phaseId)
+		-- 식별자가 일치하거나 첫 번째로 등록된 Phase 반환
+		if preset == nil or preset.phases == nil then
+			return nil
+		end
+
+		if phaseId ~= nil and phaseId ~= "" then
+			for _, phase in ipairs(preset.phases) do
+				if phase.id == phaseId then
+					return phase
+				end
+			end
+		end
+
+		return preset.phases[1]
+	end
+
+	method any SyncRuntimeState(any state, any snapshot)
+		-- 기존 실행 프로퍼티를 통합 규칙 상태에 반영
+		if state == nil or snapshot == nil then
+			return state
+		end
+
+		state.successCount = snapshot.successCount or 0
+		state.hitCount = snapshot.hitCount or 0
+		state.missCount = snapshot.missCount or 0
+		state.gauge = snapshot.gauge or 0
+		state.shapeRatio = snapshot.shapeRatio or 0
+		state.accuracyScore = snapshot.accuracyScore or state.shapeRatio
+		state.lastAccuracy = snapshot.lastAccuracy or ""
+		if state.timeState ~= nil then
+			state.timeState.gauge = state.gauge
+		end
+
+		return state
+	end
+
+	method void SetObjectiveTargetOverride(any state, string evaluatorId, number target)
+		-- 세션에서 동적으로 확정된 Objective 목표값 저장
+		if state == nil or evaluatorId == nil or evaluatorId == "" then
+			return
+		end
+
+		state.objectiveTargetOverrides[evaluatorId] = target
+	end
+
+	method void SetCountdownDuration(any state, number duration)
+		-- 서버가 확정한 제한시간을 현재 시간 상태에 적용
+		if state == nil or state.timeState == nil or duration == nil or duration <= 0 then
+			return
+		end
+
+		state.timeState.duration = duration
+		state.timeState.timeRemaining = duration
+		state.timeState.elapsed = 0
+	end
+
+	method any Update(any preset, any state, number delta)
+		-- 현재 Phase 시간 규칙 갱신 후 Objective 상태와 동기화
+		if state == nil or state.timeState == nil then
+			return state
+		end
+
+		local timeHandler = _MiniGameRuleRegistry:ResolveTimeRule(state.timeState.mode or "")
+		if timeHandler ~= nil then
+			timeHandler:Update(state.timeState, delta)
+			state.gauge = state.timeState.gauge or state.gauge
+		end
+
+		return state
+	end
+
+	method boolean IsTimeExpired(any state)
+		-- 현재 Phase 시간 규칙의 종료 경계 확인
+		if state == nil or state.timeState == nil then
+			return false
+		end
+
+		local timeHandler = _MiniGameRuleRegistry:ResolveTimeRule(state.timeState.mode or "")
+		return timeHandler ~= nil and timeHandler:IsExpired(state.timeState) == true
+	end
+
+	method any EvaluateObjectives(any preset, any state)
+		-- 현재 Phase의 Objective를 처리기별로 평가해 공통 요약 생성
+		local summary = {
+			allRequiredMet = true,
+			progress = 0,
+			objectiveCount = 0,
+			requiredCount = 0,
+			metRequiredCount = 0
+		}
+		local phase = state ~= nil and self:GetPhase(preset, state.phaseId or "") or nil
+		local objectives = phase ~= nil and phase.objectives or nil
+		if objectives == nil then
+			return summary
+		end
+
+		local progressSum = 0
+		for _, objective in ipairs(objectives) do
+			local evaluatorId = objective.evaluator or ""
+			local evaluator = _MiniGameRuleRegistry:ResolveObjectiveRule(evaluatorId)
+			local target = objective.target or 0
+			if state.objectiveTargetOverrides[evaluatorId] ~= nil then
+				target = state.objectiveTargetOverrides[evaluatorId]
+			end
+
+			local current = evaluator ~= nil and evaluator:GetCurrent(state, objective) or 0
+			local ratio = 1
+			local isMet = true
+			if target > 0 then
+				ratio = current / target
+				isMet = current >= target
+			end
+			if ratio < 0 then
+				ratio = 0
+			elseif ratio > 1 then
+				ratio = 1
+			end
+
+			progressSum = progressSum + ratio
+			summary.objectiveCount = summary.objectiveCount + 1
+			if objective.required == true then
+				summary.requiredCount = summary.requiredCount + 1
+				if isMet == true then
+					summary.metRequiredCount = summary.metRequiredCount + 1
+				else
+					summary.allRequiredMet = false
+				end
+			end
+		end
+
+		if summary.objectiveCount > 0 then
+			summary.progress = progressSum / summary.objectiveCount
+		end
+		return summary
+	end
+
+	method any BuildResult(any preset, any state, string reason)
+		-- 현재 규칙 상태를 프리셋 결과 처리기로 전달
+		if preset == nil or state == nil then
+			return nil
+		end
+
+		local resolver = _MiniGameRuleRegistry:ResolveResultResolver(preset.resultResolver or "")
+		if resolver == nil then
+			return nil
+		end
+
+		return resolver:Resolve(
+			preset.resultResolver,
+			state,
+			self:EvaluateObjectives(preset, state),
+			reason)
+	end
+
+end

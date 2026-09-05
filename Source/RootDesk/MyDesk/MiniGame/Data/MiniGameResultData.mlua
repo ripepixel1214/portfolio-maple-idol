@@ -1,0 +1,36 @@
+@Struct
+script MiniGameResultData
+
+	property boolean success = false
+	property integer score = 0
+	property number progress = 0
+	property string accuracy = ""
+	property string reason = ""
+
+	method any ToPlainTable()
+		-- RPC 전달용 plain table 생성
+		return {
+			success = self.success,
+			score = self.score,
+			progress = self.progress,
+			accuracy = self.accuracy,
+			reason = self.reason
+		}
+	end
+
+	method any FromPlainTable(any tPlainResult)
+		-- RPC plain table 값을 결과 구조체에 복원
+		if tPlainResult == nil or type(tPlainResult) ~= "table" then
+			return self
+		end
+
+		self.success = tPlainResult.success == true
+		local parsedScore = tonumber(tPlainResult.score) or 0
+		self.score = math.floor(parsedScore)
+		self.progress = tonumber(tPlainResult.progress) or 0
+		self.accuracy = type(tPlainResult.accuracy) == "string" and tPlainResult.accuracy or ""
+		self.reason = type(tPlainResult.reason) == "string" and tPlainResult.reason or ""
+		return self
+	end
+
+end

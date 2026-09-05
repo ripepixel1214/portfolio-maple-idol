@@ -1,0 +1,112 @@
+---@description "미니게임 목표 평가 식별자를 공통 진행 상태 값으로 해석하는 규칙"
+@Logic
+script MiniGameObjectiveRule extends Logic
+
+	property string EVALUATOR_COUNT = "Count"
+
+	property string EVALUATOR_TIMING_HIT = "TimingHit"
+
+	property string EVALUATOR_SEQUENCE = "Sequence"
+
+	property string EVALUATOR_GAUGE_FILL = "GaugeFill"
+
+	property string EVALUATOR_SHAPE_MATCH = "ShapeMatch"
+
+	property string EVALUATOR_ACCURACY = "Accuracy"
+
+	property string EVALUATOR_BLOCK_DRAW = "BlockDraw"
+
+	method boolean Supports(string evaluatorId)
+		-- 공용 Objective 평가기 지원 여부 확인
+		return evaluatorId == self.EVALUATOR_COUNT
+			or evaluatorId == self.EVALUATOR_TIMING_HIT
+			or evaluatorId == self.EVALUATOR_SEQUENCE
+			or evaluatorId == self.EVALUATOR_GAUGE_FILL
+			or evaluatorId == self.EVALUATOR_SHAPE_MATCH
+			or evaluatorId == self.EVALUATOR_ACCURACY
+			or evaluatorId == self.EVALUATOR_BLOCK_DRAW
+	end
+
+	method number GetCurrent(any state, any objective)
+		-- Objective 식별자에 대응하는 현재 진행 값 반환
+		if state == nil or objective == nil then
+			return 0
+		end
+
+		local evaluatorId = objective.evaluator or ""
+		if evaluatorId == self.EVALUATOR_COUNT then
+			return state.successCount or 0
+		elseif evaluatorId == self.EVALUATOR_TIMING_HIT then
+			return state.hitCount or 0
+		elseif evaluatorId == self.EVALUATOR_SEQUENCE then
+			return state.successCount or 0
+		elseif evaluatorId == self.EVALUATOR_GAUGE_FILL then
+			return state.gauge or 0
+		elseif evaluatorId == self.EVALUATOR_SHAPE_MATCH then
+			return state.shapeRatio or 0
+		elseif evaluatorId == self.EVALUATOR_ACCURACY then
+			return state.accuracyScore or 0
+		elseif evaluatorId == self.EVALUATOR_BLOCK_DRAW then
+			return state.blockDrawCount or 0
+		end
+
+		return 0
+	end
+
+	method any CreateBlockDrawResult(any state, any objective, any selection)
+		-- 서버 권위 추첨 결과 계산
+		if state == nil or objective == nil or selection == nil or selection.isConfirmed ~= true then
+			return nil
+		end
+		if (state.blockDrawCount or 0) > 0 then
+			return nil
+		end
+
+		local boardRows = math.floor(objective.boardRows or selection.boardRows or 0)
+		local boardColumns = math.floor(objective.boardColumns or selection.boardColumns or 0)
+		local drawMin = math.floor(objective.drawMin or 1)
+		local drawMax = math.floor(objective.drawMax or (boardRows * boardColumns))
+		if boardRows <= 0 or boardColumns <= 0 or drawMin < 1 or drawMax < drawMin then
+			return nil
+		end
+
+		local tDrawResult = MiniGameDrawResultData()
+		tDrawResult.drawNumber = _UtilLogic:RandomIntegerRange(drawMin, drawMax)
+		tDrawResult.row = math.floor((tDrawResult.drawNumber - 1) / boardColumns)
+		tDrawResult.column = (tDrawResult.drawNumber - 1) % boardColumns
+
+		for _, placement in ipairs(selection.placements or {}) do
+			for _, cell in ipairs(placement.cells or {}) do
+				if cell.row == tDrawResult.row and cell.column == tDrawResult.column then
+					tDrawResult.blockId = placement.blockId or ""
+					tDrawResult.multiplier = tonumber(cell.multiplier) or 0
+					tDrawResult.isWin = true
+					return tDrawResult
+				end
+			end
+		end
+
+		return tDrawResult
+	end
+
+	method boolean CommitBlockDraw(any state, any tDrawResult)
+		-- 정산 성공 후 추첨 Objective 상태 확정
+		if state == nil or tDrawResult == nil or (state.blockDrawCount or 0) > 0 then
+			return false
+		end
+
+		state.blockDrawCount = 1
+		state.drawNumber = tDrawResult.drawNumber
+		state.drawRow = tDrawResult.row
+		state.drawColumn = tDrawResult.column
+		state.drawBlockId = tDrawResult.blockId
+		state.drawMultiplier = tDrawResult.multiplier
+		state.drawIsWin = tDrawResult.isWin
+		state.drawPayout = tDrawResult.payout
+		state.drawNetChange = tDrawResult.netChange
+		state.drawBalance = tDrawResult.balance
+		state.lastAccuracy = tDrawResult.isWin == true and "hit" or "miss"
+		return true
+	end
+
+end

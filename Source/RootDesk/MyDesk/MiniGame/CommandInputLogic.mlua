@@ -1,0 +1,313 @@
+@Logic
+@ExecSpace("ClientOnly")
+script CommandInputLogic extends Logic
+
+	-- 커맨드 프로토콜 방향키 이름
+	property string COMMAND_KEY_UP = "Up"
+	property string COMMAND_KEY_DOWN = "Down"
+	property string COMMAND_KEY_LEFT = "Left"
+	property string COMMAND_KEY_RIGHT = "Right"
+	property string COMMAND_INPUT_HISTORY_SEPARATOR = ","
+
+	-- 모듈 활성 여부
+	property boolean 	isActive = false
+
+	-- 입력 채널 식별자
+	property string channelId = ""
+	-- KeyDownEvent 핸들러
+	property any 		keyDownHandler = nil
+	-- ScreenTouchEvent 핸들러
+	property any touchDownHandler = nil
+	-- ScreenTouchReleaseEvent 핸들러
+	property any touchUpHandler = nil
+	-- 모바일 스와이프 진행 여부
+	property boolean isSwiping = false
+	-- 추적 중인 터치 식별자
+	property integer activeTouchId = 0
+	-- 스와이프 시작 좌표
+	property Vector2 swipeStartPoint = Vector2(0, 0)
+	-- 방향 입력으로 인정할 최소 이동 거리(px)
+	property number swipeMinDistance = 80
+	-- 입력 시퀀스 (KeyboardKey 배열)
+	property any 		sequence = {}
+	-- 입력 시퀀스 키 이름 배열 (이벤트 표기용)
+	property any 		sequenceNames = {}
+	-- 현재까지 맞춘 위치 (다음 기대 인덱스는 index + 1)
+	property integer 	index = 0
+	-- 누적 오입력 수
+	property integer 	missCount = 0
+	-- 오입력 시 시퀀스를 처음부터 재시작할지 여부
+	property boolean 	resetOnError = true
+	-- 서버 입력 검증용 세션과 순번
+	property string sessionId = ""
+	property integer inputSequence = 0
+	-- 서버 순번 복구용 누적 입력 이력
+	property any inputHistory = {}
+
+	@ExecSpace("ClientOnly")
+	method void StartModule(string sessionId, any config)
+		-- 키 시퀀스 입력을 받기 시작한다.
+		self:Cleanup()
+
+		self.index = 0
+		self.channelId = config.channelId or ""
+		self.missCount = 0
+		self.resetOnError = true
+		self.sessionId = sessionId
+		self.inputSequence = 0
+		self.inputHistory = {}
+		self.isSwiping = false
+		self.activeTouchId = 0
+		self.swipeStartPoint = Vector2(0, 0)
+		self.swipeMinDistance = 80
+
+		if config.resetOnError ~= nil then
+			self.resetOnError = config.resetOnError
+		end
+		if config.swipeMinDistance ~= nil then
+			self.swipeMinDistance = config.swipeMinDistance
+		end
+
+		self.sequence = {}
+		self.sequenceNames = {}
+		if config.sequence ~= nil then
+			for i = 1, #config.sequence do
+				self.sequence[i] = config.sequence[i]
+			end
+		end
+		if config.sequenceNames ~= nil then
+			for i = 1, #config.sequenceNames do
+				self.sequenceNames[i] = config.sequenceNames[i]
+			end
+		end
+
+		-- 설정이 없으면 기본 방향키 시퀀스를 사용한다.
+		if #self.sequence == 0 then
+			self.sequence = { KeyboardKey.UpArrow, KeyboardKey.DownArrow, KeyboardKey.LeftArrow, KeyboardKey.RightArrow }
+			self.sequenceNames = {
+				self.COMMAND_KEY_UP,
+				self.COMMAND_KEY_DOWN,
+				self.COMMAND_KEY_LEFT,
+				self.COMMAND_KEY_RIGHT
+			}
+		end
+
+		if Environment:IsMobilePlatform() == true then
+			self.touchDownHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.OnTouchDown)
+			self.touchUpHandler = _InputService:ConnectEvent(ScreenTouchReleaseEvent, self.OnTouchUp)
+		else
+			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+		end
+		self.isActive = true
+
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Start, {
+			value = #self.sequence,
+			progress = 0
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- 기대하는 다음 키와 비교해 진행 또는 오입력을 처리한다.
+		if self.isActive == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		local inputKeyName = self:GetInputKeyName(event.key)
+		if inputKeyName == "" then
+			return
+		end
+
+		self:SubmitDirection(inputKeyName)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTouchDown(ScreenTouchEvent event)
+		-- 모바일 스와이프 시작 좌표 기록
+		if self.isActive == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+		if self.isSwiping == true then
+			return
+		end
+
+		self.isSwiping = true
+		self.activeTouchId = event.TouchId
+		self.swipeStartPoint = event.TouchPoint
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTouchUp(ScreenTouchReleaseEvent event)
+		-- 모바일 스와이프 종료 시 주 이동축 기준 방향 판정
+		if self.isActive == false or self.isSwiping == false then
+			return
+		end
+		if event.TouchId ~= self.activeTouchId then
+			return
+		end
+
+		self.isSwiping = false
+		self.activeTouchId = 0
+
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		local dx = event.TouchPoint.x - self.swipeStartPoint.x
+		local dy = event.TouchPoint.y - self.swipeStartPoint.y
+		local absX = math.abs(dx)
+		local absY = math.abs(dy)
+		if math.max(absX, absY) < self.swipeMinDistance then
+			return
+		end
+
+		local direction = ""
+		if absX > absY then
+			if dx < 0 then
+				direction = self.COMMAND_KEY_LEFT
+			else
+				direction = self.COMMAND_KEY_RIGHT
+			end
+		elseif dy < 0 then
+			direction = self.COMMAND_KEY_DOWN
+		else
+			direction = self.COMMAND_KEY_UP
+		end
+
+		self:SubmitDirection(direction)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SubmitDirection(string inputKeyName)
+		-- 입력 장치와 무관한 커맨드 검증 및 서버 제출
+		if self.isActive == false then
+			return
+		end
+		if _MiniGameInputHubLogic:IsChannelEnabled(self.channelId) == false then
+			return
+		end
+
+		local expectedKeyName = self:GetKeyName(self.index + 1)
+		if expectedKeyName == "" then
+			expectedKeyName = self:GetInputKeyName(self.sequence[self.index + 1])
+		end
+		if expectedKeyName == "" then
+			return
+		end
+
+		self.inputSequence = self.inputSequence + 1
+		self.inputHistory[self.inputSequence] = inputKeyName
+		local inputHistoryPayload = table.concat(self.inputHistory, self.COMMAND_INPUT_HISTORY_SEPARATOR)
+		_MiniGameManager:RequestCommandInput(self.sessionId, self.inputSequence, inputKeyName, inputHistoryPayload)
+
+		if inputKeyName == expectedKeyName then
+			self.index = self.index + 1
+			_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Hit, {
+				keyName = self:GetKeyName(self.index),
+				successCount = self.index,
+				progress = self:GetProgress()
+			})
+
+			if self.index >= #self.sequence then
+				self:Cleanup()
+				-- 최종 성공 확정은 서버 응답 대기
+				_MiniGameInputHubLogic:NotifyChannelFinished(self.channelId)
+			end
+			return
+		end
+
+		-- 오입력 처리
+		self.missCount = self.missCount + 1
+		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Miss, {
+			accuracy = "miss",
+			missCount = self.missCount,
+			progress = self:GetProgress()
+		})
+
+		if self.resetOnError == true then
+			self.index = 0
+			_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Progress, {
+				progress = 0,
+				missCount = self.missCount
+			})
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetInputKeyName(any key)
+		-- 서버 프로토콜에서 사용하는 방향키 이름 변환
+		if key == KeyboardKey.UpArrow then
+			return self.COMMAND_KEY_UP
+		elseif key == KeyboardKey.DownArrow then
+			return self.COMMAND_KEY_DOWN
+		elseif key == KeyboardKey.LeftArrow then
+			return self.COMMAND_KEY_LEFT
+		elseif key == KeyboardKey.RightArrow then
+			return self.COMMAND_KEY_RIGHT
+		end
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetKeyName(integer pos)
+		-- 해당 위치의 키 이름을 반환한다.
+		local name = self.sequenceNames[pos]
+		if name == nil then
+			return ""
+		end
+
+		return name
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetProgress()
+		-- 시퀀스 진행도(0~1)를 반환한다.
+		local total = #self.sequence
+		if total == 0 then
+			return 1
+		end
+
+		return self.index / total
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CancelModule()
+		-- 외부 중단 요청 시 핸들러만 정리한다. (종료 이벤트는 허브가 발행)
+		self:Cleanup()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Cleanup()
+		-- 입력 핸들러 연결을 해제하고 비활성화한다.
+		if self.keyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
+			self.keyDownHandler = nil
+		end
+		if self.touchDownHandler ~= nil then
+			_InputService:DisconnectEvent(ScreenTouchEvent, self.touchDownHandler)
+			self.touchDownHandler = nil
+		end
+		if self.touchUpHandler ~= nil then
+			_InputService:DisconnectEvent(ScreenTouchReleaseEvent, self.touchUpHandler)
+			self.touchUpHandler = nil
+		end
+
+		self.isSwiping = false
+		self.activeTouchId = 0
+		self.isActive = false
+		self.inputHistory = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 핸들러 누수를 막는다.
+		self:Cleanup()
+	end
+
+end

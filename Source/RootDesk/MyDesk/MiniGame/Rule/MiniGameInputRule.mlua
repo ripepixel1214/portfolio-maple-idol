@@ -1,0 +1,240 @@
+---@description "미니게임 서버 입력 payload 검증과 정규화"
+@Logic
+script MiniGameInputRule extends Logic
+
+	property string PLACEMENT_SEPARATOR = ";"
+	property string FIELD_SEPARATOR = ","
+	property string CELL_KEY_SEPARATOR = ":"
+
+	property string REASON_EMPTY_PAYLOAD = "emptyPayload"
+	property string REASON_INVALID_FORMAT = "invalidFormat"
+	property string REASON_INVALID_CONFIG = "invalidConfig"
+	property string REASON_UNKNOWN_BLOCK = "unknownBlock"
+	property string REASON_DUPLICATE_BLOCK = "duplicateBlock"
+	property string REASON_MISSING_BLOCK = "missingBlock"
+	property string REASON_INVALID_ROTATION = "invalidRotation"
+	property string REASON_OUT_OF_BOARD = "outOfBoard"
+	property string REASON_OVERLAP = "overlap"
+	property integer MAX_SELECTION_PAYLOAD_LENGTH = 256
+
+	method boolean Supports(integer inputType)
+		-- 공용 서버 입력 규칙 지원 여부 반환
+		return inputType == _EMiniGameInputType.Selection
+	end
+
+	method any ValidateSelection(any preset, string payload)
+		-- Selection payload를 서버 프리셋 기준으로 검증하고 절대 셀 좌표 생성
+		if payload == nil or payload == "" then
+			return self:BuildFailure(self.REASON_EMPTY_PAYLOAD)
+		end
+		if #payload > self.MAX_SELECTION_PAYLOAD_LENGTH then
+			return self:BuildFailure(self.REASON_INVALID_FORMAT)
+		end
+
+		local inputConfig = preset ~= nil and preset.inputConfig or nil
+		local blockCatalog = preset ~= nil and preset.blockCatalog or nil
+		local boardRows = inputConfig ~= nil and inputConfig.boardRows or 0
+		local boardColumns = inputConfig ~= nil and inputConfig.boardColumns or 0
+		if boardRows <= 0 or boardColumns <= 0 or blockCatalog == nil or #blockCatalog == 0 then
+			return self:BuildFailure(self.REASON_INVALID_CONFIG)
+		end
+
+		local sourcePlacements = self:ParsePlacements(payload)
+		if sourcePlacements == nil or #sourcePlacements ~= #blockCatalog then
+			return self:BuildFailure(self.REASON_INVALID_FORMAT)
+		end
+
+		local usedBlockIds = {}
+		local occupiedCells = {}
+		local validatedPlacements = {}
+		for _, source in ipairs(sourcePlacements) do
+			local block = self:FindBlock(blockCatalog, source.blockId)
+			if block == nil then
+				return self:BuildFailure(self.REASON_UNKNOWN_BLOCK)
+			end
+			if usedBlockIds[source.blockId] == true then
+				return self:BuildFailure(self.REASON_DUPLICATE_BLOCK)
+			end
+			if self:IsAllowedRotation(block, source.rotation) == false then
+				return self:BuildFailure(self.REASON_INVALID_ROTATION)
+			end
+
+			local rotatedCells = self:BuildRotatedCells(block.cells, source.rotation)
+			if rotatedCells == nil or #rotatedCells == 0 then
+				return self:BuildFailure(self.REASON_INVALID_CONFIG)
+			end
+			local absoluteCells = {}
+			for _, cell in ipairs(rotatedCells) do
+				local row = source.row + cell.row
+				local column = source.column + cell.column
+				if row < 0 or row >= boardRows or column < 0 or column >= boardColumns then
+					return self:BuildFailure(self.REASON_OUT_OF_BOARD)
+				end
+
+				local cellKey = tostring(row) .. self.CELL_KEY_SEPARATOR .. tostring(column)
+				if occupiedCells[cellKey] ~= nil then
+					return self:BuildFailure(self.REASON_OVERLAP)
+				end
+				occupiedCells[cellKey] = source.blockId
+				absoluteCells[#absoluteCells + 1] = {
+					row = row,
+					column = column,
+					multiplier = tonumber(cell.multiplier) or 0
+				}
+			end
+
+			usedBlockIds[source.blockId] = true
+			validatedPlacements[#validatedPlacements + 1] = {
+				blockId = source.blockId,
+				row = source.row,
+				column = source.column,
+				rotation = source.rotation,
+				cells = absoluteCells
+			}
+		end
+
+		for _, block in ipairs(blockCatalog) do
+			if usedBlockIds[block.id] ~= true then
+				return self:BuildFailure(self.REASON_MISSING_BLOCK)
+			end
+		end
+
+		return {
+			isValid = true,
+			reason = "",
+			selection = {
+				boardRows = boardRows,
+				boardColumns = boardColumns,
+				placements = validatedPlacements,
+				occupiedCells = occupiedCells,
+				isConfirmed = true
+			}
+		}
+	end
+
+	method any ParsePlacements(string payload)
+		-- blockId,row,column,rotation 반복 문자열 해석
+		local placements = {}
+		local placementPattern = "(.-)" .. self.PLACEMENT_SEPARATOR
+		for placementText in string.gmatch(payload .. self.PLACEMENT_SEPARATOR, placementPattern) do
+			if placementText == "" then
+				return nil
+			end
+
+			local fields = self:SplitFields(placementText)
+			if fields == nil or #fields ~= 4 then
+				return nil
+			end
+
+			local row = self:ParseInteger(fields[2])
+			local column = self:ParseInteger(fields[3])
+			local rotation = self:ParseInteger(fields[4])
+			if fields[1] == "" or row == nil or column == nil or rotation == nil then
+				return nil
+			end
+
+			placements[#placements + 1] = {
+				blockId = fields[1],
+				row = row,
+				column = column,
+				rotation = rotation
+			}
+		end
+		return placements
+	end
+
+	method any SplitFields(string placementText)
+		-- 배치 항목의 쉼표 구분 필드 해석
+		local fields = {}
+		local fieldPattern = "(.-)" .. self.FIELD_SEPARATOR
+		for field in string.gmatch(placementText .. self.FIELD_SEPARATOR, fieldPattern) do
+			fields[#fields + 1] = field
+		end
+		return fields
+	end
+
+	method any ParseInteger(string text)
+		-- 정수 형식 필드 변환
+		local value = tonumber(text)
+		if value == nil or value ~= math.floor(value) then
+			return nil
+		end
+		return value
+	end
+
+	method any FindBlock(any blockCatalog, string blockId)
+		-- 서버 카탈로그에서 블록 원본 조회
+		for _, block in ipairs(blockCatalog) do
+			if block.id == blockId then
+				return block
+			end
+		end
+		return nil
+	end
+
+	method boolean IsAllowedRotation(any block, integer rotation)
+		-- 서버 카탈로그에 선언된 회전값 여부 확인
+		if block == nil or block.rotations == nil then
+			return false
+		end
+		if rotation ~= 0 and rotation ~= 90 and rotation ~= 180 and rotation ~= 270 then
+			return false
+		end
+		for _, allowedRotation in ipairs(block.rotations) do
+			if allowedRotation == rotation then
+				return true
+			end
+		end
+		return false
+	end
+
+	method any BuildRotatedCells(any sourceCells, integer rotation)
+		-- 회전 후 좌상단을 0,0으로 정규화한 상대 셀 생성
+		if sourceCells == nil or #sourceCells == 0 then
+			return nil
+		end
+		local rotatedCells = {}
+		local minRow = nil
+		local minColumn = nil
+		for _, sourceCell in ipairs(sourceCells) do
+			local row = sourceCell.row
+			local column = sourceCell.column
+			local rotatedRow = row
+			local rotatedColumn = column
+			if rotation == 90 then
+				rotatedRow = column
+				rotatedColumn = -row
+			elseif rotation == 180 then
+				rotatedRow = -row
+				rotatedColumn = -column
+			elseif rotation == 270 then
+				rotatedRow = -column
+				rotatedColumn = row
+			end
+
+			rotatedCells[#rotatedCells + 1] = {
+				row = rotatedRow,
+				column = rotatedColumn,
+				multiplier = tonumber(sourceCell.multiplier) or 0
+			}
+			if minRow == nil or rotatedRow < minRow then
+				minRow = rotatedRow
+			end
+			if minColumn == nil or rotatedColumn < minColumn then
+				minColumn = rotatedColumn
+			end
+		end
+
+		for _, cell in ipairs(rotatedCells) do
+			cell.row = cell.row - minRow
+			cell.column = cell.column - minColumn
+		end
+		return rotatedCells
+	end
+
+	method any BuildFailure(string reason)
+		-- 검증 실패 결과 생성
+		return { isValid = false, reason = reason or self.REASON_INVALID_FORMAT }
+	end
+
+end

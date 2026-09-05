@@ -1,0 +1,242 @@
+---@description "미니게임 세션의 복수 입력 채널을 관리하고 공통 입력 이벤트 발행"
+@Logic
+@ExecSpace("ClientOnly")
+script MiniGameInputHubLogic extends Logic
+
+	property string ADAPTER_MASH = "Mash"
+	property string ADAPTER_TIMING = "Timing"
+	property string ADAPTER_COMMAND = "Command"
+	property string ADAPTER_DRAG = "Drag"
+	property string DEFAULT_CHANNEL_ID = "primary"
+
+	property string activeSessionId = ""
+
+	-- 채널 ID별 어댑터·모듈·활성 상태
+	property any activeChannels = {}
+	property any activeChannelOrder = {}
+	
+	property boolean isRunning = false
+	property boolean inputEnabled = false
+
+	@ExecSpace("ClientOnly")
+	method void StartInputs(string sessionId, any channelConfigs)
+		-- 세션에 선언된 서로 다른 입력 어댑터를 채널별로 시작
+		if self.activeSessionId ~= "" then
+			self:StopInputs("restart")
+		end
+		if sessionId == nil or sessionId == "" or channelConfigs == nil then
+			return
+		end
+
+		self.activeSessionId = sessionId
+		self.activeChannels = {}
+		self.activeChannelOrder = {}
+		self.isRunning = false
+		self.inputEnabled = false
+		_MiniGameUIRouter:SetMobilePrimaryInputEnabled(false)
+
+		local usedAdapters = {}
+		for _, channelConfig in ipairs(channelConfigs) do
+			local channelId = channelConfig.id or ""
+			local adapterId = channelConfig.adapter or ""
+			if channelId == "" or self.activeChannels[channelId] ~= nil then
+				log_warning("[MiniGameInputHub] 잘못된 입력 채널 id=" .. tostring(channelId))
+			elseif usedAdapters[adapterId] == true then
+				log_warning("[MiniGameInputHub] 중복 입력 어댑터 adapter=" .. tostring(adapterId))
+			else
+				local module = self:GetModuleByAdapter(adapterId)
+				local inputType = self:GetInputType(adapterId)
+				if module == nil or inputType == _EMiniGameInputType.None then
+					log_warning("[MiniGameInputHub] 알 수 없는 입력 어댑터 adapter=" .. tostring(adapterId))
+				else
+					local runtimeConfig = self:CopyConfig(channelConfig.config)
+					runtimeConfig.channelId = channelId
+					local entry = {
+						id = channelId,
+						adapter = adapterId,
+						inputType = inputType,
+						module = module,
+						running = true,
+						enabled = false
+					}
+					self.activeChannels[channelId] = entry
+					table.insert(self.activeChannelOrder, channelId)
+					usedAdapters[adapterId] = true
+					module:StartModule(sessionId, runtimeConfig)
+				end
+			end
+		end
+
+		self.isRunning = #self.activeChannelOrder > 0
+		if self.isRunning == false then
+			self:ClearActive()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnableInputs()
+		-- 실행 중인 모든 채널의 입력 허용
+		if self.isRunning == false then
+			return
+		end
+		self.inputEnabled = true
+		local usesMobilePrimaryInput = false
+		for _, channelId in ipairs(self.activeChannelOrder) do
+			local entry = self.activeChannels[channelId]
+			if entry ~= nil and entry.running == true then
+				entry.enabled = true
+				if entry.adapter == self.ADAPTER_MASH or entry.adapter == self.ADAPTER_TIMING then
+					usesMobilePrimaryInput = true
+				end
+			end
+		end
+		_MiniGameUIRouter:SetMobilePrimaryInputEnabled(usesMobilePrimaryInput)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsChannelEnabled(string channelId)
+		-- 지정 채널의 실행·입력 허용 상태 확인
+		local entry = self.activeChannels[channelId]
+		return self.isRunning == true
+			and self.inputEnabled == true
+			and entry ~= nil
+			and entry.running == true
+			and entry.enabled == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsRunning()
+		return self.isRunning == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SubmitMobilePrimaryInput()
+		-- 활성 채널 중 모바일 공용 입력을 사용하는 첫 채널에 전달
+		for _, channelId in ipairs(self.activeChannelOrder) do
+			local entry = self.activeChannels[channelId]
+			if self:IsChannelEnabled(channelId) == true then
+				if entry.adapter == self.ADAPTER_MASH then
+					_MashInputLogic:SubmitMobileInput()
+					return
+				elseif entry.adapter == self.ADAPTER_TIMING then
+					_TimingInputLogic:SubmitMobileInput()
+					return
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopInputs(string reason)
+		-- 모든 활성 입력 모듈을 중단하고 채널별 취소 이벤트 발행
+		if self.activeSessionId == "" then
+			return
+		end
+		for _, channelId in ipairs(self.activeChannelOrder) do
+			local entry = self.activeChannels[channelId]
+			if entry ~= nil then
+				if entry.module ~= nil then
+					entry.module:CancelModule()
+				end
+				self:EmitForChannel(channelId, _EMiniGameInputAction.Cancel, {
+					isTerminal = true,
+					isSuccess = false,
+					reason = reason
+				})
+			end
+		end
+		self:ClearActive()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EmitForChannel(string channelId, integer action, any fields)
+		-- 지정 채널 신호를 공통 입력 이벤트로 구성해 발행
+		local entry = self.activeChannels[channelId]
+		if entry == nil then
+			return
+		end
+		local source = fields or {}
+		local event = MiniGameInputEvent()
+		event.sessionId = self.activeSessionId
+		event.channelId = channelId
+		event.inputType = entry.inputType
+		event.action = action
+		event.keyName = source.keyName or ""
+		event.value = source.value or 0
+		event.progress = source.progress or 0
+		event.accuracy = source.accuracy or ""
+		event.successCount = source.successCount or 0
+		event.missCount = source.missCount or 0
+		event.isTerminal = source.isTerminal == true
+		event.isSuccess = source.isSuccess == true
+		event.reason = source.reason or ""
+		event.pointX = source.pointX or 0
+		event.pointY = source.pointY or 0
+		event.attemptsRemaining = source.attemptsRemaining or 0
+		event.maxAttempts = source.maxAttempts or 0
+		self:SendEvent(event)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void NotifyChannelFinished(string channelId)
+		-- 완료 채널만 비활성화하고 세션 상태는 종료 요청까지 유지
+		local entry = self.activeChannels[channelId]
+		if entry ~= nil then
+			entry.running = false
+			entry.enabled = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetModuleByAdapter(string adapterId)
+		-- 입력 어댑터 식별자에 대응하는 Logic 반환
+		if adapterId == self.ADAPTER_MASH then
+			return _MashInputLogic
+		elseif adapterId == self.ADAPTER_TIMING then
+			return _TimingInputLogic
+		elseif adapterId == self.ADAPTER_COMMAND then
+			return _CommandInputLogic
+		elseif adapterId == self.ADAPTER_DRAG then
+			return _DragInputLogic
+		end
+		return nil
+	end
+
+	method integer GetInputType(string adapterId)
+		-- 입력 어댑터 식별자를 기존 UI용 타입으로 변환
+		if adapterId == self.ADAPTER_MASH then
+			return _EMiniGameInputType.Mash
+		elseif adapterId == self.ADAPTER_TIMING then
+			return _EMiniGameInputType.Timing
+		elseif adapterId == self.ADAPTER_COMMAND then
+			return _EMiniGameInputType.Command
+		elseif adapterId == self.ADAPTER_DRAG then
+			return _EMiniGameInputType.Drag
+		end
+		return _EMiniGameInputType.None
+	end
+
+	method any CopyConfig(any source)
+		-- 프리셋 입력 설정의 얕은 복사본 생성
+		local copied = {}
+		if source == nil then
+			return copied
+		end
+		for key, value in pairs(source) do
+			copied[key] = value
+		end
+		return copied
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearActive()
+		-- 활성 입력 세션과 모든 채널 상태 초기화
+		_MiniGameUIRouter:SetMobilePrimaryInputEnabled(false)
+		self.isRunning = false
+		self.inputEnabled = false
+		self.activeSessionId = ""
+		self.activeChannels = {}
+		self.activeChannelOrder = {}
+	end
+
+end

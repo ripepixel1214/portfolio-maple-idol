@@ -1,0 +1,15 @@
+@Event
+script MiniGameResultEvent extends EventType
+
+	property boolean isSuccess = false
+	property string sessionId = ""
+	property string miniGameId = ""
+	property string userId = ""
+	property integer contextType = -1
+	property string contextId = ""
+	property integer resultType = -1
+	property integer score = 0
+	property number progress = 0
+	property string reason = ""
+
+end

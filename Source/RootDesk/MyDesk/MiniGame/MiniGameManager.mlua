@@ -1,0 +1,1026 @@
+@Logic
+script MiniGameManager extends Logic
+
+	-- 사용자 없는 서버 세션 식별 키
+	property string SYSTEM_OWNER_KEY = "__system__"
+
+	-- 세션 상태 상수
+	property string SESSION_STATUS_RUNNING = "running"
+	property string SESSION_STATUS_PREPARING = "preparing"
+	property string SESSION_STATUS_FINISHED = "finished"
+	property string SESSION_STATUS_ABORTED = "aborted"
+
+	-- 세션 처리 사유 상수
+	property string SESSION_REASON_START = "start"
+	property string SESSION_REASON_CANCEL = "cancel"
+	property string SESSION_REASON_RESTART = "restart"
+	property string SESSION_REASON_TIMEOUT = "timeout"
+	property string SESSION_REASON_OBJECTIVE = "objective"
+	property string SESSION_REASON_USER_LEAVE = "userLeave"
+
+	-- 커맨드 프로토콜 키
+	property string COMMAND_KEY_UP = "Up"
+	property string COMMAND_KEY_DOWN = "Down"
+	property string COMMAND_KEY_LEFT = "Left"
+	property string COMMAND_KEY_RIGHT = "Right"
+	property string COMMAND_FEEDBACK_HIT = "hit"
+	property string COMMAND_FEEDBACK_MISS = "miss"
+	property string COMMAND_FEEDBACK_COMPLETE = "complete"
+	property string COMMAND_FEEDBACK_TIMEOUT = "timeout"
+	property string LAUNCH_FIELD_SEPARATOR = "|"
+	property string COMMAND_FIELD_SEPARATOR = ","
+	property string COMMAND_INPUT_HISTORY_SEPARATOR = ","
+	property string EVALUATOR_BLOCK_DRAW = "BlockDraw"
+	property string REQUEST_REJECTED_START = "startRejected"
+	property string REQUEST_REJECTED_SELECTION = "selectionRejected"
+	property string REQUEST_REJECTED_DRAW = "drawRejected"
+	property string MINI_GAME_DALGONA_CHALLENGE = "dalgona_challenge"
+
+	-- 서버 생성 커맨드 길이 범위
+	property integer COMMAND_SEQUENCE_MIN = 5
+	property integer COMMAND_SEQUENCE_MAX = 8
+
+	-- 종료 세션 보관 시간
+	property number SESSION_RETENTION_SECONDS = 300
+	property number SESSION_PREPARE_TIMEOUT_SECONDS = 10
+
+	-- 미니게임 매니저 초기화 여부
+	property boolean isInitialized = false
+
+	-- 검증용 서버 측 미니게임 프리셋 사본
+	property any miniGames = {}
+
+	-- 진행 중/완료된 세션 정보 (sessionId -> session table)
+	property any sessions = {}
+
+	-- 사용자별 진행 세션 정보 (userId -> sessionId)
+	property any activeSessionByUser = {}
+
+	-- 세션 식별자 생성용 일련번호
+	property integer sessionSeq = 0
+
+	-- 사용자 이탈 이벤트 구독 핸들러
+	property any userLeaveHandler = nil
+
+	-- 현재 활성 세션 정보 (서버 기록용)
+	property string activeSessionId = ""
+	property string activeMiniGameId = ""
+	property integer activeContextType = -1
+	property string activeContextId = ""
+
+	-- 클라이언트 실행 트리거: "sessionId|miniGameId|contextType|contextId" (빈 문자열이면 비활성)
+	-- 단일 프로퍼티로 패킹해 동기화 순서와 무관하게 원자적으로 전달한다.
+	@Sync property string activeLaunch = ""
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		self:InitializeMiniGames()
+		self.userLeaveHandler = _UserService:ConnectEvent(UserLeaveEvent, self.OnUserLeave)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 사용자 이탈 이벤트 구독 해제
+		if self.userLeaveHandler ~= nil then
+			_UserService:DisconnectEvent(UserLeaveEvent, self.userLeaveHandler)
+			self.userLeaveHandler = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void InitializeMiniGames()
+		-- DataManager가 아닌 공용 데이터 스크립트(MiniGameTable)에서 프리셋을 복사한다.
+		self.miniGames = _MiniGameTable:GetMiniGames()
+		self.sessions = {}
+		self.activeSessionByUser = {}
+		self.sessionSeq = 0
+		self:ClearActiveSession()
+
+		self.isInitialized = self.miniGames ~= nil and #self.miniGames > 0
+		if self.isInitialized == false then
+			log_warning("[MiniGameManager] 미니게임 프리셋을 불러오지 못했습니다")
+			return
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method any FindMiniGame(string miniGameId)
+		-- 식별자가 일치하는 미니게임 프리셋을 반환한다.
+		if miniGameId == nil or miniGameId == "" then
+			return nil
+		end
+
+		for _, miniGame in ipairs(self.miniGames) do
+			if miniGame.id == miniGameId then
+				return miniGame
+			end
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NextSessionId(string miniGameId)
+		-- 세션 식별자를 생성한다.
+		self.sessionSeq = self.sessionSeq + 1
+		return miniGameId .. "-" .. tostring(self.sessionSeq)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetSessionOwnerKey(string userId)
+		-- 사용자별 활성 세션 조회용 키 반환
+		if userId == nil or userId == "" then
+			return self.SYSTEM_OWNER_KEY
+		end
+		return userId
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetActiveSessionForUser(string userId)
+		-- 사용자의 실행 중 세션 조회
+		local ownerKey = self:GetSessionOwnerKey(userId)
+		local sessionId = self.activeSessionByUser[ownerKey]
+		if sessionId == nil or sessionId == "" then
+			return nil
+		end
+
+		local session = self.sessions[sessionId]
+		if session == nil
+			or (session.status ~= self.SESSION_STATUS_RUNNING
+			and session.status ~= self.SESSION_STATUS_PREPARING) then
+			self.activeSessionByUser[ownerKey] = nil
+			return nil
+		end
+
+		return session
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SetSessionStatus(any session, string nextStatus, string reason)
+		-- 세션 종료 상태 전이와 종료 사유 기록
+		if session == nil then
+			return
+		end
+
+		if session.status ~= self.SESSION_STATUS_RUNNING
+			and session.status ~= self.SESSION_STATUS_PREPARING then
+			log_warning("[MiniGameManager] 종료된 세션 상태 전이 무시 session=" .. tostring(session.id) .. " status=" .. tostring(session.status))
+			return
+		end
+
+		session.status = nextStatus
+		session.endReason = reason or ""
+		session.finishedElapsed = 0
+		local ownerKey = self:GetSessionOwnerKey(session.userId)
+		if self.activeSessionByUser[ownerKey] == session.id then
+			self.activeSessionByUser[ownerKey] = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GenerateCommandSequence()
+		-- 서버 판정용 방향 커맨드 생성
+		local directions = {
+			self.COMMAND_KEY_UP,
+			self.COMMAND_KEY_DOWN,
+			self.COMMAND_KEY_LEFT,
+			self.COMMAND_KEY_RIGHT
+		}
+		local length = _UtilLogic:RandomIntegerRange(self.COMMAND_SEQUENCE_MIN, self.COMMAND_SEQUENCE_MAX)
+		local sequence = {}
+		for i = 1, length do
+			sequence[i] = directions[_UtilLogic:RandomIntegerRange(1, #directions)]
+		end
+		return sequence
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ConfigureServerJudgement(any session, any preset)
+		-- 서버 판정에 필요한 세션별 입력 상태 구성
+		session.inputType = preset.inputType
+		session.elapsed = 0
+		session.duration = 0
+		session.serverInputStarted = false
+
+		local timeConfig = preset.timeConfig or {}
+		if timeConfig.duration ~= nil and timeConfig.duration > 0 then
+			session.duration = timeConfig.duration
+		end
+
+		if preset.inputType ~= _EMiniGameInputType.Command then
+			return
+		end
+
+		local inputConfig = preset.inputConfig or {}
+		session.commandSequence = self:GenerateCommandSequence()
+		session.commandIndex = 0
+		session.lastInputSequence = 0
+		session.missCount = 0
+		session.resetOnError = inputConfig.resetOnError == true
+	end
+
+	@ExecSpace("ServerOnly")
+	method string SerializeCommandSequence(any sequence)
+		-- 클라이언트 실행 정보에 포함할 커맨드 문자열 생성
+		if sequence == nil or #sequence == 0 then
+			return ""
+		end
+		return table.concat(sequence, self.COMMAND_FIELD_SEPARATOR)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string BuildLaunchPayload(any session)
+		-- 세션 실행 정보 패킹
+		local commandPayload = self:SerializeCommandSequence(session.commandSequence)
+		local separator = self.LAUNCH_FIELD_SEPARATOR
+		local settlement = session.settlement or {}
+		return session.id .. separator .. session.miniGameId .. separator .. tostring(session.contextType) .. separator ..
+			session.contextId .. separator .. session.presentationActorId .. separator .. commandPayload .. separator .. tostring(session.duration) .. separator ..
+			tostring(settlement.amount or 0) .. separator .. tostring(settlement.balance or 0)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsValidCommandKey(string keyName)
+		-- 서버가 허용하는 방향키 이름 검증
+		return keyName == self.COMMAND_KEY_UP
+			or keyName == self.COMMAND_KEY_DOWN
+			or keyName == self.COMMAND_KEY_LEFT
+			or keyName == self.COMMAND_KEY_RIGHT
+	end
+
+	@ExecSpace("ServerOnly")
+	method any SplitCommandInputHistory(string text)
+		-- 누적 커맨드 입력 문자열을 순번 배열로 변환
+		local history = {}
+		if text == nil or text == "" then
+			return history
+		end
+
+		local separator = self.COMMAND_INPUT_HISTORY_SEPARATOR
+		local pattern = "([^" .. separator .. "]*)" .. separator
+		for keyName in string.gmatch(text .. separator, pattern) do
+			history[#history + 1] = keyName
+		end
+		return history
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetCommandProgress(any session)
+		-- 서버 커맨드 진행률 계산
+		if session == nil or session.commandSequence == nil or #session.commandSequence == 0 then
+			return 0
+		end
+		return session.commandIndex / #session.commandSequence
+	end
+
+	@ExecSpace("ServerOnly")
+	method void FinishCommandTimeout(any session)
+		-- 제한 시간 초과 세션을 서버 결과로 확정
+		local progress = self:GetCommandProgress(session)
+		local score = math.floor(progress * 100)
+		self:DeliverCommandFeedback(session, session.lastInputSequence, self.COMMAND_FEEDBACK_TIMEOUT, progress)
+		local tResult = MiniGameResultData()
+		tResult.success = false
+		tResult.score = score
+		tResult.progress = progress
+		tResult.accuracy = self.SESSION_REASON_TIMEOUT
+		tResult.reason = self.SESSION_REASON_TIMEOUT
+		self:ConfirmSessionResult(session, tResult)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void DeliverSessionStart(any session)
+		-- 서버 세션 실행 정보를 소유 클라이언트에 전달
+		local launch = self:BuildLaunchPayload(session)
+
+		if session.userId ~= nil and session.userId ~= "" then
+			self:PushSessionStarted(launch, session.userId)
+			return
+		end
+
+		-- 사용자 식별자가 없는 기존 서버 실행 경로 호환
+		self.activeLaunch = launch
+	end
+
+	@ExecSpace("ServerOnly")
+	method void DeliverSessionActivation(any session)
+		if session == nil or session.userId == nil or session.userId == "" then
+			return
+		end
+
+		self:PushSessionActivated(session.id, session.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void DeliverCommandFeedback(any session, integer inputSequence, string action, number progress)
+		-- 서버 커맨드 판정 결과를 세션 소유 클라이언트에 전달
+		if session == nil or session.userId == nil or session.userId == "" then
+			return
+		end
+
+		local tFeedback = MiniGameCommandFeedbackData()
+		tFeedback.inputSequence = inputSequence
+		tFeedback.action = action
+		tFeedback.commandIndex = session.commandIndex
+		tFeedback.progress = progress
+		self:PushCommandFeedback(
+			session.id,
+			tFeedback:ToPlainTable(),
+			session.userId
+		)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUpdate(number delta)
+		-- 실행 세션 타이머 갱신과 종료 세션 정리
+		local expiredSessionIds = {}
+		for sessionId, session in pairs(self.sessions) do
+			if session ~= nil
+				and session.status == self.SESSION_STATUS_RUNNING
+				and session.inputType == _EMiniGameInputType.Command then
+				if session.serverInputStarted == true then
+					session.elapsed = session.elapsed + delta
+					if session.duration > 0 and session.elapsed >= session.duration then
+						self:FinishCommandTimeout(session)
+					end
+				end
+			elseif session ~= nil
+				and session.status == self.SESSION_STATUS_PREPARING
+				and session.inputType == _EMiniGameInputType.Command then
+				session.prepareElapsed = (session.prepareElapsed or 0) + delta
+				if session.prepareElapsed >= self.SESSION_PREPARE_TIMEOUT_SECONDS then
+					self:AbortSession(session, self.SESSION_REASON_TIMEOUT)
+				end
+			elseif session ~= nil
+				and (session.status == self.SESSION_STATUS_FINISHED
+				or session.status == self.SESSION_STATUS_ABORTED) then
+				session.finishedElapsed = (session.finishedElapsed or 0) + delta
+				if session.finishedElapsed >= self.SESSION_RETENTION_SECONDS then
+					expiredSessionIds[#expiredSessionIds + 1] = sessionId
+				end
+			end
+		end
+
+		for _, sessionId in ipairs(expiredSessionIds) do
+			self.sessions[sessionId] = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserLeave(UserLeaveEvent event)
+		-- 이탈 사용자의 실행 세션 정리
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+
+		local session = self:GetActiveSessionForUser(event.UserId)
+		if session ~= nil then
+			self:AbortSession(session, self.SESSION_REASON_USER_LEAVE)
+		end
+	end
+
+	@ExecSpace("Server")
+	method void RequestStartMiniGame(string miniGameId, integer contextType, string contextId)
+		-- 클라이언트의 미니게임 시작 요청을 서버 세션 생성으로 전달
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = miniGameId
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = contextType
+		tStartOptions.contextId = contextId or ""
+		self:CreateMiniGameSession(tStartOptions)
+	end
+
+	@ExecSpace("Server")
+	method void RequestStartBettingMiniGame(string miniGameId, integer betAmount)
+		-- 사용자 선택 판돈을 포함한 베팅형 미니게임 시작 요청
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = miniGameId
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = _EMiniGameContextType.Standalone
+		tStartOptions.betAmount = betAmount
+		tStartOptions.isBettingRequest = true
+		local sessionId = self:CreateMiniGameSession(tStartOptions)
+		if sessionId == "" then
+			self:PushDalgonaRequestRejected(miniGameId, self.REQUEST_REJECTED_START, senderUserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsAllowedContext(any preset, integer contextType)
+		-- 프리셋이 허용한 실행 문맥 여부 확인
+		if preset == nil or preset.allowedContexts == nil then
+			return false
+		end
+
+		for _, allowedContext in ipairs(preset.allowedContexts) do
+			if allowedContext == contextType then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateMiniGameSession(any tStartOptions)
+		-- 새 미니게임 세션을 생성하고 클라이언트에 활성 세션을 브로드캐스트한다.
+		if self.isInitialized == false then
+			log_warning("[MiniGameManager] 초기화 전에는 미니게임을 시작할 수 없습니다")
+			return ""
+		end
+		if tStartOptions == nil then
+			return ""
+		end
+
+		local miniGameId = tStartOptions.miniGameId or ""
+		local ownerUserId = tStartOptions.ownerUserId or ""
+		local contextType = tStartOptions.contextType
+
+		local preset = self:FindMiniGame(miniGameId)
+		if preset == nil then
+			log_warning("[MiniGameManager] 알 수 없는 미니게임 id=" .. tostring(miniGameId))
+			return ""
+		end
+
+		if _EMiniGameContextType:IsValid(contextType) == false
+			or self:IsAllowedContext(preset, contextType) == false then
+			log_warning("[MiniGameManager] 허용되지 않은 실행 문맥 miniGame=" .. tostring(miniGameId)
+				.. " context=" .. tostring(contextType))
+			return ""
+		end
+
+		local settlementConfig = preset.settlementRule or {}
+		local settlementType = settlementConfig.type or _EMiniGameSettlementType.None
+		local settlementHandler = _MiniGameRuleRegistry:ResolveSettlementRule(settlementType)
+		if settlementHandler == nil then
+			log_warning("[MiniGameManager] 정산 규칙 처리기 없음 miniGame=" .. tostring(miniGameId))
+			return ""
+		end
+
+		local settlementState = settlementHandler:CreateState(
+			preset,
+			tStartOptions.betAmount or 0,
+			ownerUserId,
+			tStartOptions.isBettingRequest == true
+		)
+		if settlementState == nil then
+			log_warning("[MiniGameManager] 정산 규칙 검증 실패 miniGame=" .. tostring(miniGameId)
+				.. " user=" .. tostring(ownerUserId))
+			return ""
+		end
+
+		-- 같은 사용자에게 이미 진행 중인 세션이 있으면 해당 세션만 취소
+		local activeSession = self:GetActiveSessionForUser(ownerUserId)
+		if activeSession ~= nil then
+			log_warning("[MiniGameManager] 사용자 진행 세션 재시작 user=" .. tostring(ownerUserId) .. " prev=" .. activeSession.id)
+			self:AbortSession(activeSession, self.SESSION_REASON_RESTART)
+		end
+
+		local sessionId = self:NextSessionId(miniGameId)
+		local ownerKey = self:GetSessionOwnerKey(ownerUserId)
+		local isCommandSession = preset.inputType == _EMiniGameInputType.Command
+		local isSelectionSession = preset.inputType == _EMiniGameInputType.Selection
+		local initialStatus = self.SESSION_STATUS_RUNNING
+		if (isCommandSession == true or isSelectionSession == true)
+			and ownerUserId ~= nil and ownerUserId ~= "" then
+			initialStatus = self.SESSION_STATUS_PREPARING
+		end
+
+		self.sessions[sessionId] = {
+			id = sessionId,
+			miniGameId = miniGameId,
+			contextType = contextType,
+			contextId = tStartOptions.contextId or "",
+			userId = ownerUserId or "",
+			presentationActorId = tStartOptions.presentationActorId or "",
+			status = initialStatus,
+			ownerKey = ownerKey,
+			prepareElapsed = 0,
+			startReason = self.SESSION_REASON_START,
+			settlement = settlementState,
+			ruleState = _MiniGameRuleEngine:CreateState(preset),
+			drawInProgress = false
+		}
+		self:ConfigureServerJudgement(self.sessions[sessionId], preset)
+		if initialStatus == self.SESSION_STATUS_RUNNING
+			and isCommandSession == true then
+			self.sessions[sessionId].serverInputStarted = true
+		end
+		self.activeSessionByUser[ownerKey] = sessionId
+
+		self.activeSessionId = sessionId
+		self.activeMiniGameId = miniGameId
+		self.activeContextType = contextType
+		self.activeContextId = tStartOptions.contextId or ""
+
+		-- 클라이언트가 관찰할 실행 트리거를 마지막에 설정한다.
+		local session = self.sessions[sessionId]
+		self:DeliverSessionStart(session)
+
+		log("[MiniGameManager] 세션 시작 session=" .. sessionId ..
+			" miniGame=" .. miniGameId ..
+			" context=" .. _EMiniGameContextType:ToName(contextType) ..
+			" user=" .. tostring(ownerUserId))
+
+		return sessionId
+	end
+
+	@ExecSpace("Server")
+	method void RequestInputReady(string sessionId)
+		local session = self.sessions[sessionId]
+		if session == nil
+			or session.status ~= self.SESSION_STATUS_PREPARING
+			or session.inputType ~= _EMiniGameInputType.Command then
+			return
+		end
+
+		if session.userId ~= "" and session.userId ~= senderUserId then
+			log_warning("[MiniGameManager] 입력 준비 소유자 불일치 session=" .. sessionId)
+			return
+		end
+
+		session.status = self.SESSION_STATUS_RUNNING
+		session.serverInputStarted = true
+		session.elapsed = 0
+		session.prepareElapsed = 0
+		self:DeliverSessionActivation(session)
+	end
+
+	@ExecSpace("Server")
+	method void RequestSubmitSelection(string sessionId, string payload)
+		-- Selection 배치를 서버 규칙으로 검증한 뒤 세션에 확정
+		local session = self.sessions[sessionId]
+		if session == nil
+			or session.status ~= self.SESSION_STATUS_PREPARING
+			or session.inputType ~= _EMiniGameInputType.Selection then
+			return
+		end
+		if session.userId ~= "" and session.userId ~= senderUserId then
+			log_warning("[MiniGameManager] Selection 소유자 불일치 session=" .. tostring(sessionId))
+			return
+		end
+
+		local preset = self:FindMiniGame(session.miniGameId)
+		local inputRule = _MiniGameRuleRegistry:ResolveInputRule(session.inputType)
+		if preset == nil or inputRule == nil then
+			log_warning("[MiniGameManager] Selection 입력 규칙 없음 session=" .. tostring(sessionId))
+			return
+		end
+
+		local validation = inputRule:ValidateSelection(preset, payload)
+		if validation == nil or validation.isValid ~= true then
+			local reason = validation ~= nil and validation.reason or "invalidSelection"
+			log_warning("[MiniGameManager] Selection 배치 거절 session=" .. tostring(sessionId)
+				.. " reason=" .. tostring(reason))
+			self:PushDalgonaRequestRejected(session.miniGameId, reason, session.userId)
+			return
+		end
+
+		session.selection = validation.selection
+		session.status = self.SESSION_STATUS_RUNNING
+		session.prepareElapsed = 0
+		self:PushSelectionAccepted(session.id, session.userId)
+		log("[MiniGameManager] Selection 배치 확정 session=" .. tostring(sessionId)
+			.. " placements=" .. tostring(#session.selection.placements))
+	end
+
+	@ExecSpace("Server")
+	method void RequestBlockDraw(string sessionId)
+		-- 확정 배치를 기준으로 단일 서버 추첨과 메소 정산 처리
+		local session = self.sessions[sessionId]
+		if session == nil then
+			self:PushDalgonaRequestRejected(
+				self.MINI_GAME_DALGONA_CHALLENGE,
+				self.REQUEST_REJECTED_DRAW,
+				senderUserId)
+			return
+		end
+		if session.userId ~= "" and session.userId ~= senderUserId then
+			log_warning("[MiniGameManager] BlockDraw 소유자 불일치 session=" .. tostring(sessionId))
+			return
+		end
+		if session.status ~= self.SESSION_STATUS_RUNNING
+			or session.inputType ~= _EMiniGameInputType.Selection
+			or session.selection == nil
+			or session.selection.isConfirmed ~= true
+			or session.drawInProgress == true
+			or session.ruleState == nil then
+			self:PushDalgonaRequestRejected(session.miniGameId, self.REQUEST_REJECTED_DRAW, session.userId)
+			return
+		end
+		log("[MiniGameManager] BlockDraw 요청 검증 완료 session=" .. tostring(sessionId))
+
+		local preset = self:FindMiniGame(session.miniGameId)
+		local phase = preset ~= nil and _MiniGameRuleEngine:GetPhase(preset, session.ruleState.phaseId or "") or nil
+		local objective = nil
+		for _, candidate in ipairs(phase ~= nil and phase.objectives or {}) do
+			if candidate.evaluator == self.EVALUATOR_BLOCK_DRAW then
+				objective = candidate
+				break
+			end
+		end
+		local objectiveRule = _MiniGameRuleRegistry:ResolveObjectiveRule(self.EVALUATOR_BLOCK_DRAW)
+		local settlementHandler = session.settlement ~= nil
+			and _MiniGameRuleRegistry:ResolveSettlementRule(session.settlement.type) or nil
+		if preset == nil or objective == nil or objectiveRule == nil or settlementHandler == nil then
+			self:PushDalgonaRequestRejected(session.miniGameId, self.REQUEST_REJECTED_DRAW, session.userId)
+			return
+		end
+
+		session.drawInProgress = true
+		local tDrawResult = objectiveRule:CreateBlockDrawResult(session.ruleState, objective, session.selection)
+		if tDrawResult == nil then
+			session.drawInProgress = false
+			self:PushDalgonaRequestRejected(session.miniGameId, self.REQUEST_REJECTED_DRAW, session.userId)
+			return
+		end
+
+		local betAmount = math.floor(session.settlement.amount or 0)
+		if tDrawResult.isWin == true then
+			tDrawResult.payout = math.floor(betAmount * tDrawResult.multiplier)
+		end
+		tDrawResult.netChange = tDrawResult.payout - betAmount
+		if settlementHandler:TrySettle(session.settlement, tDrawResult.payout, session.userId) == false then
+			session.drawInProgress = false
+			self:PushDalgonaRequestRejected(session.miniGameId, self.REQUEST_REJECTED_DRAW, session.userId)
+			return
+		end
+		log("[MiniGameManager] BlockDraw 정산 적용 완료 session=" .. tostring(sessionId)
+			.. " payout=" .. tostring(tDrawResult.payout))
+
+		local progress = _ProgressManager:ServerGetProgress()
+		tDrawResult.balance = progress ~= nil and math.floor(progress.groupMeso or 0) or 0
+		if objectiveRule:CommitBlockDraw(session.ruleState, tDrawResult) == false then
+			log_warning("[MiniGameManager] 정산 후 BlockDraw 상태 확정 실패 session=" .. tostring(sessionId))
+			return
+		end
+
+		session.tDrawResult = tDrawResult
+		local resolvedResult = _MiniGameRuleEngine:BuildResult(preset, session.ruleState, self.SESSION_REASON_OBJECTIVE)
+		local tResult = MiniGameResultData()
+		tResult.success = resolvedResult ~= nil and resolvedResult.isSuccess == true
+		tResult.score = resolvedResult ~= nil and resolvedResult.score or 0
+		tResult.progress = resolvedResult ~= nil and resolvedResult.progress or 0
+		tResult.accuracy = resolvedResult ~= nil and resolvedResult.accuracy or ""
+		tResult.reason = self.SESSION_REASON_OBJECTIVE
+
+		-- 정산 완료 UI 응답을 공통 결과 이벤트보다 먼저 전달
+		log("[MiniGameManager] BlockDraw 결과 Push session=" .. tostring(sessionId))
+		self:PushDalgonaDrawResult(session.id, tDrawResult:ToPlainTable(), session.userId)
+		self:ConfirmSessionResult(session, tResult)
+
+		log("[MiniGameManager] BlockDraw 정산 완료 session=" .. tostring(sessionId)
+			.. " number=" .. tostring(tDrawResult.drawNumber)
+			.. " multiplier=" .. tostring(tDrawResult.multiplier)
+			.. " payout=" .. tostring(tDrawResult.payout))
+	end
+
+	@ExecSpace("Server")
+	method void RequestCommandInput(string sessionId, integer inputSequence, string keyName, string inputHistoryPayload)
+		-- 누적 입력 이력으로 누락·역전된 요청을 복구하며 서버 진행 상태 갱신
+		local session = self.sessions[sessionId]
+		if session == nil then
+			log_warning("[MiniGameManager] 알 수 없는 커맨드 세션 입력 무시 session=" .. tostring(sessionId))
+			return
+		end
+
+		if session.status ~= self.SESSION_STATUS_RUNNING then
+			log_warning("[MiniGameManager] 종료된 커맨드 세션 입력 무시 session=" .. sessionId)
+			return
+		end
+
+		if session.userId ~= "" and session.userId ~= senderUserId then
+			log_warning("[MiniGameManager] 커맨드 세션 소유자 불일치 session=" .. sessionId)
+			return
+		end
+
+		if session.inputType ~= _EMiniGameInputType.Command then
+			log_warning("[MiniGameManager] 커맨드가 아닌 세션 입력 무시 session=" .. sessionId)
+			return
+		end
+
+		if self:IsValidCommandKey(keyName) == false then
+			log_warning("[MiniGameManager] 허용되지 않은 커맨드 입력 session=" .. sessionId .. " key=" .. tostring(keyName))
+			return
+		end
+
+		if session.duration > 0 and session.elapsed >= session.duration then
+			self:FinishCommandTimeout(session)
+			return
+		end
+
+		if inputSequence <= session.lastInputSequence then
+			return
+		end
+
+		local inputHistory = self:SplitCommandInputHistory(inputHistoryPayload)
+		if #inputHistory < inputSequence or inputHistory[inputSequence] ~= keyName then
+			log_warning("[MiniGameManager] 커맨드 입력 이력 불일치 session=" .. sessionId ..
+				" sequence=" .. tostring(inputSequence) ..
+				" historyCount=" .. tostring(#inputHistory))
+			return
+		end
+
+		for sequenceIndex = session.lastInputSequence + 1, inputSequence do
+			if self:IsValidCommandKey(inputHistory[sequenceIndex]) == false then
+				log_warning("[MiniGameManager] 누적 이력의 허용되지 않은 입력 session=" .. sessionId ..
+					" sequence=" .. tostring(sequenceIndex))
+				return
+			end
+		end
+
+		if session.serverInputStarted == false then
+			session.elapsed = 0
+			session.serverInputStarted = true
+		end
+
+		for sequenceIndex = session.lastInputSequence + 1, inputSequence do
+			local recoveredKeyName = inputHistory[sequenceIndex]
+			session.lastInputSequence = sequenceIndex
+
+			local expectedKey = session.commandSequence[session.commandIndex + 1]
+			if recoveredKeyName == expectedKey then
+				session.commandIndex = session.commandIndex + 1
+				local progress = self:GetCommandProgress(session)
+				if session.commandIndex >= #session.commandSequence then
+					self:DeliverCommandFeedback(session, sequenceIndex, self.COMMAND_FEEDBACK_COMPLETE, progress)
+					local tResult = MiniGameResultData()
+					tResult.success = true
+					tResult.score = 100
+					tResult.progress = 1
+					tResult.accuracy = self.COMMAND_FEEDBACK_HIT
+					tResult.reason = self.SESSION_REASON_OBJECTIVE
+					self:ConfirmSessionResult(session, tResult)
+					return
+				end
+				self:DeliverCommandFeedback(session, sequenceIndex, self.COMMAND_FEEDBACK_HIT, progress)
+			else
+				session.missCount = session.missCount + 1
+				if session.resetOnError == true then
+					session.commandIndex = 0
+				end
+				self:DeliverCommandFeedback(session, sequenceIndex, self.COMMAND_FEEDBACK_MISS, self:GetCommandProgress(session))
+			end
+		end
+	end
+
+	@ExecSpace("Server")
+	method void RequestCancelMiniGame(string sessionId)
+		-- 세션 소유자의 실행 취소 요청 검증
+		local session = self.sessions[sessionId]
+		if session == nil
+			or (session.status ~= self.SESSION_STATUS_RUNNING
+			and session.status ~= self.SESSION_STATUS_PREPARING) then
+			return
+		end
+		if session.userId ~= "" and session.userId ~= senderUserId then
+			log_warning("[MiniGameManager] 미니게임 취소 소유자 불일치 session=" .. sessionId)
+			return
+		end
+
+		self:AbortSession(session, self.SESSION_REASON_CANCEL)
+	end
+
+	@ExecSpace("Server")
+	method void RequestSubmitMiniGameResult(string sessionId, table tPlainResult)
+		-- 클라이언트가 계산한 결과를 받아 세션을 검증하고 확정한다.
+		if tPlainResult == nil or type(tPlainResult) ~= "table" then
+			log_warning("[MiniGameManager] 잘못된 결과 payload 무시 session=" .. tostring(sessionId))
+			return
+		end
+		local session = self.sessions[sessionId]
+		if session == nil then
+			log_warning("[MiniGameManager] 알 수 없는 세션 결과 무시 session=" .. tostring(sessionId))
+			return
+		end
+
+		if session.status ~= self.SESSION_STATUS_RUNNING then
+			log_warning("[MiniGameManager] 이미 종료된 세션 결과 무시 session=" .. sessionId .. " status=" .. session.status)
+			return
+		end
+
+		-- 세션 소유자 검증 (서버 시작 세션은 userId가 비어 있어 검증을 건너뛴다).
+		if session.userId ~= "" and session.userId ~= senderUserId then
+			log_warning("[MiniGameManager] 세션 소유자 불일치 무시 session=" .. sessionId)
+			return
+		end
+
+		-- 서버 입력 프로토콜이 시작된 커맨드 세션은 클라이언트 계산 결과를 사용하지 않음
+		if session.inputType == _EMiniGameInputType.Command and session.serverInputStarted == true then
+			log_warning("[MiniGameManager] 서버 판정 커맨드의 클라이언트 결과 무시 session=" .. sessionId)
+			return
+		end
+		if session.inputType == _EMiniGameInputType.Selection then
+			log_warning("[MiniGameManager] 서버 판정 Selection의 클라이언트 결과 무시 session=" .. sessionId)
+			return
+		end
+
+		local tResult = MiniGameResultData():FromPlainTable(tPlainResult)
+		self:ConfirmSessionResult(session, tResult)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ConfirmSessionResult(any session, any tResult)
+		-- 결과 타입을 판정하고 결과를 확정/브로드캐스트한다.
+		-- 보상은 미니게임이 직접 적용하지 않는다: 이벤트는 EventExecutor, 일정/활동은 Schedule/Activity 결과 계약이 컨텍스트별로 처리한다.
+		if tResult == nil then
+			return
+		end
+		local safeScore = tResult.score
+		if safeScore == nil or safeScore < 0 then
+			safeScore = 0
+		end
+
+		local resultType = self:ResolveResultType(tResult.success, tResult.reason)
+		self:SetSessionStatus(session, self.SESSION_STATUS_FINISHED, tResult.reason)
+		session.resultType = resultType
+		session.score = safeScore
+		session.progress = tResult.progress or 0
+		session.accuracy = tResult.accuracy or ""
+
+		log("[MiniGameManager] 결과 확정 session=" .. session.id ..
+			" result=" .. _EMiniGameResultType:ToName(resultType) ..
+			" score=" .. tostring(safeScore) ..
+			" progress=" .. tostring(tResult.progress) ..
+			" accuracy=" .. tostring(tResult.accuracy) ..
+			" reason=" .. tostring(tResult.reason))
+
+		self:PublishMiniGameResult(session)
+		self:CleanupCompletedSession(session.id)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PublishMiniGameResult(any session)
+		-- 세션 식별 정보를 포함한 서버 확정 결과 발송
+		if session == nil then
+			return
+		end
+
+		local miniGameResultEvent = MiniGameResultEvent()
+		miniGameResultEvent.isSuccess = session.resultType == _EMiniGameResultType.Success
+		miniGameResultEvent.sessionId = session.id
+		miniGameResultEvent.miniGameId = session.miniGameId
+		miniGameResultEvent.userId = session.userId
+		miniGameResultEvent.contextType = session.contextType
+		miniGameResultEvent.contextId = session.contextId
+		miniGameResultEvent.resultType = session.resultType
+		miniGameResultEvent.score = session.score or 0
+		miniGameResultEvent.progress = session.progress or 0
+		miniGameResultEvent.reason = session.endReason or ""
+		self:SendEvent(miniGameResultEvent)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer CountPerformanceSuccess(string performanceId)
+		-- 지정 공연(performanceId) 컨텍스트에서 성공으로 끝난 미니게임 세션 수를 반환 (공연 현장 반응 점수용)
+		if performanceId == nil or performanceId == "" then
+			return 0
+		end
+
+		local count = 0
+		for _, session in pairs(self.sessions) do
+			if session ~= nil
+				and session.contextType == _EMiniGameContextType.Performance
+				and session.contextId == performanceId
+				and session.resultType == _EMiniGameResultType.Success then
+				count = count + 1
+			end
+		end
+		return count
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer ResolveResultType(boolean success, string reason)
+		-- 성공 여부와 종료 사유를 결과 enum으로 변환한다.
+		if reason == self.SESSION_REASON_CANCEL or reason == self.SESSION_REASON_RESTART then
+			return _EMiniGameResultType.Canceled
+		end
+
+		if reason == self.SESSION_REASON_TIMEOUT then
+			return _EMiniGameResultType.Timeout
+		end
+
+		if success == true then
+			return _EMiniGameResultType.Success
+		end
+
+		return _EMiniGameResultType.Failure
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AbortSession(any session, string reason)
+		-- 지정 세션 취소 처리
+		if session == nil then
+			return
+		end
+
+		self:SetSessionStatus(session, self.SESSION_STATUS_ABORTED, reason)
+		if session.settlement ~= nil then
+			local settlementHandler = _MiniGameRuleRegistry:ResolveSettlementRule(session.settlement.type)
+			if settlementHandler ~= nil then
+				settlementHandler:Cancel(session.settlement)
+			end
+		end
+		session.resultType = _EMiniGameResultType.Canceled
+		session.score = 0
+		session.progress = self:GetCommandProgress(session)
+		self:PublishMiniGameResult(session)
+		self:CleanupCompletedSession(session.id)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CleanupCompletedSession(string sessionId)
+		-- 호환용 전역 실행 신호가 지정 세션일 때만 초기화
+		local session = self.sessions[sessionId]
+		local commandResultHandledByFeedback = session ~= nil
+			and session.inputType == _EMiniGameInputType.Command
+			and session.status == self.SESSION_STATUS_FINISHED
+		local selectionResultHandledByDraw = session ~= nil
+			and session.inputType == _EMiniGameInputType.Selection
+			and session.status == self.SESSION_STATUS_FINISHED
+		if session ~= nil
+			and session.userId ~= nil
+			and session.userId ~= ""
+			and commandResultHandledByFeedback == false
+			and selectionResultHandledByDraw == false then
+			self:PushSessionStopped(sessionId, session.endReason or "", session.userId)
+		end
+
+		if self.activeSessionId == sessionId then
+			self.activeSessionId = ""
+			self.activeMiniGameId = ""
+			self.activeContextType = _EMiniGameContextType.None
+			self.activeContextId = ""
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearActiveSession()
+		-- 활성 세션 상태와 클라이언트 트리거를 초기화한다.
+		self.activeSessionId = ""
+		self.activeMiniGameId = ""
+		self.activeContextType = _EMiniGameContextType.None
+		self.activeContextId = ""
+		self.activeLaunch = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSyncProperty(string name, any value)
+		-- 서버가 활성 세션 트리거를 갱신하면 클라이언트 플레이 컨트롤러에 위임한다.
+		if name ~= "activeLaunch" then
+			return
+		end
+
+		if value == nil or value == "" then
+			_MiniGamePlayLogic:StopSession("clear")
+			return
+		end
+
+		_MiniGamePlayLogic:HandleSessionLaunch(value)
+	end
+
+	@ExecSpace("Client")
+	method void PushSessionStarted(string launch)
+		-- 서버가 지정한 세션과 커맨드로 로컬 미니게임 시작
+		_MiniGamePlayLogic:HandleSessionLaunch(launch)
+	end
+
+	@ExecSpace("Client")
+	method void PushSessionActivated(string sessionId)
+		_MiniGamePlayLogic:HandleSessionActivated(sessionId)
+	end
+
+	@ExecSpace("Client")
+	method void PushCommandFeedback(string sessionId, table tPlainFeedback)
+		-- 서버 커맨드 판정 결과를 현재 세션에 반영
+		local tFeedback = MiniGameCommandFeedbackData():FromPlainTable(tPlainFeedback)
+		_MiniGamePlayLogic:ApplyCommandFeedback(sessionId, tFeedback)
+	end
+
+	@ExecSpace("Client")
+	method void PushSelectionAccepted(string sessionId)
+		-- 서버 배치 확정 결과를 전용 UI에 전달
+		_DalgonaChallengeUILogic:HandleSelectionAccepted(sessionId)
+	end
+
+	@ExecSpace("Client")
+	method void PushDalgonaRequestRejected(string miniGameId, string reason)
+		-- 시작·배치·추첨 거절 사유를 전용 UI에 전달
+		_DalgonaChallengeUILogic:HandleRequestRejected(miniGameId, reason)
+	end
+
+	@ExecSpace("Client")
+	method void PushDalgonaDrawResult(string sessionId, table tPlainDrawResult)
+		-- 서버 추첨 결과 구조체 복원 후 전용 UI 반영
+		local tDrawResult = MiniGameDrawResultData():FromPlainTable(tPlainDrawResult)
+		_DalgonaChallengeUILogic:ApplyDrawResult(sessionId, tDrawResult)
+		_MiniGamePlayLogic:FinishSelectionSessionFromServer(sessionId)
+	end
+
+	@ExecSpace("Client")
+	method void PushSessionStopped(string sessionId, string reason)
+		-- 현재 세션과 일치하는 서버 종료 요청만 반영
+		_MiniGamePlayLogic:HandleSessionStopped(sessionId, reason)
+	end
+
+end

@@ -1,0 +1,432 @@
+@Logic
+script MiniGameTable extends Logic
+
+	property string AUTHORITY_CLIENT = "client"
+
+	property string AUTHORITY_SERVER = "server"
+
+	property string INPUT_CHANNEL_PRIMARY = "primary"
+
+	property string INPUT_ADAPTER_MASH = "Mash"
+
+	property string INPUT_ADAPTER_TIMING = "Timing"
+
+	property string INPUT_ADAPTER_COMMAND = "Command"
+
+	property string INPUT_ADAPTER_DRAG = "Drag"
+
+	property string INPUT_ADAPTER_SELECTION = "Selection"
+
+	property string PHASE_PLAYING = "playing"
+
+	property string PHASE_RESULT = "result"
+
+	property string TIME_RULE_COUNTDOWN = "Countdown"
+
+	property string TIME_RULE_GAUGE_DRAIN = "GaugeDrain"
+
+	property string OBJECTIVE_EVALUATOR_COUNT = "Count"
+
+	property string OBJECTIVE_EVALUATOR_TIMING_HIT = "TimingHit"
+
+	property string OBJECTIVE_EVALUATOR_SEQUENCE = "Sequence"
+
+	property string OBJECTIVE_EVALUATOR_GAUGE_FILL = "GaugeFill"
+
+	property string OBJECTIVE_EVALUATOR_SHAPE_MATCH = "ShapeMatch"
+
+	property string OBJECTIVE_EVALUATOR_BLOCK_DRAW = "BlockDraw"
+
+	property string RESULT_RESOLVER_OBJECTIVE = "ObjectiveResult"
+
+	property string RESULT_RESOLVER_ACCURACY = "AccuracyResult"
+
+	property string RESULT_RESOLVER_MESO_DRAW = "MesoDraw"
+
+	property string PRESENTATION_DEFAULT_TRAINING = "default_training"
+
+	property string PRESENTATION_PERFORMANCE_TRAINING = "performance_training"
+
+	property string PRESENTATION_DALGONA_CHALLENGE = "dalgona_challenge"
+
+	property string MINI_GAME_DALGONA_CHALLENGE = "dalgona_challenge"
+
+	property string SETTLEMENT_AMOUNT_PLAYER_SELECTED = "PlayerSelected"
+
+	property string CURRENCY_GROUP_MESO = "groupMeso"
+
+	method any GetDalgonaChallengeBlockCatalog()
+		-- 기획 기준 달고나 블록 형태와 임시 배율 반환
+		return {
+			{
+				id = "square",
+				cells = {
+					{ row = 0, column = 0, multiplier = 0.5 },
+					{ row = 0, column = 1, multiplier = 0.5 },
+					{ row = 1, column = 0, multiplier = 0.5 },
+					{ row = 1, column = 1, multiplier = 0.5 }
+				},
+				rotations = { 0 }
+			},
+			{
+				id = "s_block",
+				cells = {
+					{ row = 0, column = 0, multiplier = 1 },
+					{ row = 1, column = 0, multiplier = 1 },
+					{ row = 1, column = 1, multiplier = 1 },
+					{ row = 2, column = 1, multiplier = 1 }
+				},
+				rotations = { 0 }
+			},
+			{
+				id = "line_three",
+				cells = {
+					{ row = 0, column = 0, multiplier = 3 },
+					{ row = 0, column = 1, multiplier = 3 },
+					{ row = 0, column = 2, multiplier = 3 }
+				},
+				rotations = { 0 }
+			}
+		}
+	end
+
+	-- 미니게임 프리셋 마스터 데이터. 중첩 구조라 CSV DataSet 대신 데이터 스크립트로 관리한다.
+	method any GetCirclePoints(integer count)
+		-- 정규화 좌표(0~1, 중심 0.5)로 원형 가이드/판정 점들을 생성한다. (드래그 도형 정의)
+		local points = {}
+		for k = 0, count - 1 do
+			local angle = (2 * math.pi * k) / count
+			points[k + 1] = { x = 0.5 + 0.5 * math.cos(angle), y = 0.5 + 0.5 * math.sin(angle) }
+		end
+
+		return points
+	end
+
+	method any FindMiniGame(string miniGameId)
+		-- 식별자가 일치하는 미니게임 프리셋을 반환한다. (서버/클라이언트 공용)
+		if miniGameId == nil or miniGameId == "" then
+			return nil
+		end
+
+		for _, miniGame in ipairs(self:GetMiniGames()) do
+			if miniGame.id == miniGameId then
+				return miniGame
+			end
+		end
+
+		return nil
+	end
+
+	method any GetMiniGames()
+		-- 등록된 미니게임 프리셋 전체를 반환한다.
+		local S = _ECharacterStatType
+		local EMInput = _EMiniGameInputType
+		local EMObj = _EMiniGameObjectiveType
+		local EMTime = _EMiniGameTimeMode
+		local EMContext = _EMiniGameContextType
+		local EMSettlement = _EMiniGameSettlementType
+
+		return {
+			{
+				id = "rapid_press_count",
+				name = "속도 훈련",
+				authority = self.AUTHORITY_CLIENT,
+				inputChannels = {
+					{
+						id = self.INPUT_CHANNEL_PRIMARY,
+						adapter = self.INPUT_ADAPTER_MASH,
+						config = { targetKeyName = "Space" }
+					}
+				},
+				phases = {
+					{
+						id = self.PHASE_PLAYING,
+						timeRule = { mode = self.TIME_RULE_COUNTDOWN, duration = 8 },
+						objectives = {
+							{ evaluator = self.OBJECTIVE_EVALUATOR_COUNT, target = 20, required = true }
+						},
+						completionTransition = self.PHASE_RESULT
+					}
+				},
+				resultResolver = self.RESULT_RESOLVER_OBJECTIVE,
+				presentations = {
+					default = self.PRESENTATION_DEFAULT_TRAINING,
+					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+				},
+				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
+				inputType = EMInput.Mash,
+				inputConfig = { targetKeyName = "Space" },
+				objectives = {
+					{ type = EMObj.Count, target = 20, required = true }
+				},
+				timeMode = EMTime.Countdown,
+				timeConfig = { duration = 8 },
+				skin = { id = "rapid_press_training", title = "속도 훈련", instruction = "연습생이 과도한 일정으로 인해 화가 났습니다!\n제한시간내에 SPACE바를 연타해서 사과하세요." },
+				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				successRewards = { { type = "Stat", stat = S.Fatigue, amount = -1 } },
+				failureRewards = { { type = "Fatigue", amount = 1 } }
+			},
+			{
+				id = "timing_accuracy",
+				name = "박자 맞추기",
+				authority = self.AUTHORITY_CLIENT,
+				inputChannels = {
+					{
+						id = self.INPUT_CHANNEL_PRIMARY,
+						adapter = self.INPUT_ADAPTER_TIMING,
+						config = {
+							targetKeyName = "Space",
+							timings = { 1.0, 2.0, 3.0, 4.0, 5.0 },
+							perfectWindow = 0.08,
+							goodWindow = 0.2
+						}
+					}
+				},
+				phases = {
+					{
+						id = self.PHASE_PLAYING,
+						timeRule = { mode = self.TIME_RULE_COUNTDOWN, duration = 6 },
+						objectives = {
+							{ evaluator = self.OBJECTIVE_EVALUATOR_TIMING_HIT, target = 3, required = true }
+						},
+						completionTransition = self.PHASE_RESULT
+					}
+				},
+				resultResolver = self.RESULT_RESOLVER_ACCURACY,
+				presentations = {
+					default = self.PRESENTATION_DEFAULT_TRAINING,
+					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+				},
+				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
+				inputType = EMInput.Timing,
+				inputConfig = {
+					targetKeyName = "Space",
+					timings = { 1.0, 2.0, 3.0, 4.0, 5.0 },
+					perfectWindow = 0.08,
+					goodWindow = 0.2
+				},
+				objectives = {
+					{ type = EMObj.TimingHit, target = 3, required = true }
+				},
+				timeMode = EMTime.Countdown,
+				timeConfig = { duration = 6 },
+				skin = { id = "performance_timing", title = "박자 맞추기", instruction = "타이밍에 맞춰 스페이스바를 눌러 트레이닝 효율을 극대화하세요." },
+				allowedContexts = { EMContext.Standalone, EMContext.Performance, EMContext.Event },
+				successRewards = { { type = "PerformanceScore", amount = 100 } },
+				failureRewards = { { type = "PerformanceScore", amount = 30 } }
+			},
+			{
+				id = "command_sequence",
+				name = "안무 순서 기억",
+				authority = self.AUTHORITY_SERVER,
+				inputChannels = {
+					{
+						id = self.INPUT_CHANNEL_PRIMARY,
+						adapter = self.INPUT_ADAPTER_COMMAND,
+						config = {
+							sequenceNames = { "Up", "Down", "Left", "Right" },
+							resetOnError = true,
+							swipeMinDistance = 80
+						}
+					}
+				},
+				phases = {
+					{
+						id = self.PHASE_PLAYING,
+						timeRule = { mode = self.TIME_RULE_COUNTDOWN, duration = 8 },
+						objectives = {
+							{ evaluator = self.OBJECTIVE_EVALUATOR_SEQUENCE, target = 4, required = true }
+						},
+						completionTransition = self.PHASE_RESULT
+					}
+				},
+				resultResolver = self.RESULT_RESOLVER_OBJECTIVE,
+				presentations = {
+					default = self.PRESENTATION_DEFAULT_TRAINING,
+					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+				},
+				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
+				inputType = EMInput.Command,
+				inputConfig = {
+					sequenceNames = { "Up", "Down", "Left", "Right" },
+					resetOnError = true,
+					swipeMinDistance = 80
+				},
+				objectives = {
+					{ type = EMObj.Sequence, target = 4, required = true }
+				},
+				timeMode = EMTime.Countdown,
+				timeConfig = { duration = 8 },
+				skin = { id = "command_choreography", title = "안무 순서 기억", instruction = "일정에 늦었습니다. \n제한시간 내에 커맨드를 입력해서 목적지까지 도착하세요!" },
+				allowedContexts = { EMContext.Standalone, EMContext.Performance, EMContext.Event },
+				successRewards = { { type = "Stat", stat = S.Visual, amount = 1 } },
+				failureRewards = { { type = "Fatigue", amount = 1 } }
+			},
+			{
+				id = "mash_gauge_drain",
+				name = "집중력 유지",
+				authority = self.AUTHORITY_CLIENT,
+				inputChannels = {
+					{
+						id = self.INPUT_CHANNEL_PRIMARY,
+						adapter = self.INPUT_ADAPTER_MASH,
+						config = { targetKeyName = "Space", gaugePerInput = 8 }
+					}
+				},
+				phases = {
+					{
+						id = self.PHASE_PLAYING,
+						timeRule = {
+							mode = self.TIME_RULE_GAUGE_DRAIN,
+							startGauge = 30,
+							drainPerSecond = 6,
+							failAt = 0
+						},
+						objectives = {
+							{ evaluator = self.OBJECTIVE_EVALUATOR_GAUGE_FILL, target = 100, required = true }
+						},
+						completionTransition = self.PHASE_RESULT
+					}
+				},
+				resultResolver = self.RESULT_RESOLVER_OBJECTIVE,
+				presentations = {
+					default = self.PRESENTATION_DEFAULT_TRAINING,
+					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+				},
+				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
+				inputType = EMInput.Mash,
+				inputConfig = { targetKeyName = "Space", gaugePerInput = 8 },
+				objectives = {
+					{ type = EMObj.GaugeFill, target = 100, required = true }
+				},
+				timeMode = EMTime.GaugeDrain,
+				timeConfig = { startGauge = 30, drainPerSecond = 6, failAt = 0 },
+				skin = { id = "focus_gauge", title = "집중력 유지", instruction = "응원봉을 흔들어서 연습생을 칭찬해주세요." },
+				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				successRewards = { { type = "Stat", stat = S.Fatigue, amount = -1 } },
+				failureRewards = { { type = "Fatigue", amount = 1 } }
+			},
+			{
+				id = "shape_trace_match",
+				name = "동선 따라 그리기",
+				authority = self.AUTHORITY_CLIENT,
+				inputChannels = {
+					{
+						id = self.INPUT_CHANNEL_PRIMARY,
+						adapter = self.INPUT_ADAPTER_DRAG,
+						config = { moveEpsilon = 2 }
+					}
+				},
+				phases = {
+					{
+						id = self.PHASE_PLAYING,
+						timeRule = { mode = self.TIME_RULE_COUNTDOWN, duration = 12 },
+						objectives = {
+							{
+								evaluator = self.OBJECTIVE_EVALUATOR_SHAPE_MATCH,
+								target = 0.8,
+								required = true,
+								shapeId = "circle_01",
+								tolerance = 12,
+								shapePoints = self:GetCirclePoints(24)
+							}
+						},
+						completionTransition = self.PHASE_RESULT
+					}
+				},
+				resultResolver = self.RESULT_RESOLVER_ACCURACY,
+				presentations = {
+					default = self.PRESENTATION_DEFAULT_TRAINING,
+					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+				},
+				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
+				inputType = EMInput.Drag,
+				inputConfig = { moveEpsilon = 2 },
+				objectives = {
+					{ type = EMObj.ShapeMatch, target = 0.8, required = true, shapeId = "circle_01", tolerance = 12, shapePoints = self:GetCirclePoints(24) }
+				},
+				timeMode = EMTime.Countdown,
+				timeConfig = { duration = 12 },
+				skin = { id = "shape_trace", title = "동선 따라 그리기", instruction = "새로운 안무가 생각났습니다! \n제한 시간 내에 마우스를 사용해서 스케치를 따라 그리세요!" },
+				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				successRewards = { { type = "Stat", stat = S.Visual, amount = 1 } },
+				failureRewards = { { type = "Fatigue", amount = 1 } }
+			},
+			{
+				id = self.MINI_GAME_DALGONA_CHALLENGE,
+				name = "달고나 메소 뽑기",
+				authority = self.AUTHORITY_SERVER,
+				inputChannels = {
+					{
+						id = self.INPUT_CHANNEL_PRIMARY,
+						adapter = self.INPUT_ADAPTER_SELECTION,
+						config = {
+							boardRows = 4,
+							boardColumns = 4
+						}
+					}
+				},
+				phases = {
+					{
+						id = self.PHASE_PLAYING,
+						objectives = {
+							{
+								evaluator = self.OBJECTIVE_EVALUATOR_BLOCK_DRAW,
+								target = 1,
+								required = true,
+								boardRows = 4,
+								boardColumns = 4,
+								drawMin = 1,
+								drawMax = 16,
+								blockCatalog = self:GetDalgonaChallengeBlockCatalog()
+							}
+						},
+						completionTransition = self.PHASE_RESULT
+					}
+				},
+				resultResolver = self.RESULT_RESOLVER_MESO_DRAW,
+				presentations = {
+					default = self.PRESENTATION_DALGONA_CHALLENGE
+				},
+				-- 3단계 실행 경로 연결 전 호환 계약 등록
+				inputType = EMInput.Selection,
+				inputConfig = {
+					boardRows = 4,
+					boardColumns = 4
+				},
+				objectives = {
+					{
+						type = EMObj.BlockDraw,
+						target = 1,
+						required = true,
+						boardRows = 4,
+						boardColumns = 4,
+						drawMin = 1,
+						drawMax = 16,
+						blockCatalog = self:GetDalgonaChallengeBlockCatalog()
+					}
+				},
+				timeMode = EMTime.None,
+				timeConfig = {},
+				skin = {
+					id = self.PRESENTATION_DALGONA_CHALLENGE,
+					title = "달고나 메소 뽑기",
+					instruction = "블록을 배치하고 숫자를 뽑아 메소 배율을 확인하세요."
+				},
+				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				settlementRule = {
+					type = EMSettlement.MesoBet,
+					amountMode = self.SETTLEMENT_AMOUNT_PLAYER_SELECTED,
+					inputCurrency = self.CURRENCY_GROUP_MESO,
+					outputCurrency = self.CURRENCY_GROUP_MESO,
+					min = 100,
+					step = 100
+				},
+				blockCatalog = self:GetDalgonaChallengeBlockCatalog(),
+				successRewards = {},
+				failureRewards = {}
+			}
+		}
+	end
+
+end

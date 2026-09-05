@@ -1,0 +1,305 @@
+@Logic
+@ExecSpace("ClientOnly")
+script MiniGameUIRouter extends Logic
+
+	-- 기본 미니게임 프레젠테이션 id
+	property string PRESENTATION_DEFAULT_TRAINING = "default_training"
+
+	-- 공연 미니게임 프레젠테이션 id
+	property string PRESENTATION_PERFORMANCE_TRAINING = "performance_training"
+
+	-- 달고나 베팅 미니게임 프레젠테이션 id
+	property string PRESENTATION_DALGONA_CHALLENGE = "dalgona_challenge"
+
+	-- 현재 세션의 프레젠테이션 id
+	property string activePresentationId = ""
+
+	-- 현재 프레젠테이션의 공연 UI 사용 여부 캐시
+	property boolean activeIsPerformance = false
+
+	-- 현재 프레젠테이션의 달고나 UI 사용 여부 캐시
+	property boolean activeIsDalgona = false
+
+	@ExecSpace("ClientOnly")
+	method string ResolvePresentationId(any presentations, integer contextType)
+		-- 프리셋 프레젠테이션 정의와 실행 문맥을 실제 표시 id로 해석
+		if presentations ~= nil then
+			if contextType == _EMiniGameContextType.Performance then
+				local performanceId = presentations.performance
+				if performanceId ~= nil and performanceId ~= "" then
+					return performanceId
+				end
+			end
+
+			local defaultId = presentations.default
+			if defaultId ~= nil and defaultId ~= "" then
+				return defaultId
+			end
+		end
+
+		return self.PRESENTATION_DEFAULT_TRAINING
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPresentation(string presentationId)
+		-- 프레젠테이션 id를 표시 구현으로 연결
+		local nextPresentationId = presentationId
+		if nextPresentationId ~= self.PRESENTATION_DEFAULT_TRAINING
+			and nextPresentationId ~= self.PRESENTATION_PERFORMANCE_TRAINING
+			and nextPresentationId ~= self.PRESENTATION_DALGONA_CHALLENGE then
+			log_warning("[MiniGameUIRouter] 지원하지 않는 presentationId=" .. tostring(nextPresentationId) .. ", 기본 UI로 대체")
+			nextPresentationId = self.PRESENTATION_DEFAULT_TRAINING
+		end
+
+		local nextIsPerformance = (nextPresentationId == self.PRESENTATION_PERFORMANCE_TRAINING)
+		local nextIsDalgona = (nextPresentationId == self.PRESENTATION_DALGONA_CHALLENGE)
+
+		if self.activePresentationId ~= "" and nextPresentationId ~= self.activePresentationId then
+			if self.activeIsDalgona == true then
+				_DalgonaChallengeUILogic:Close()
+			elseif self.activeIsPerformance == true then
+				_MiniGamePerformanceUILogic:Close()
+			else
+				_MiniGameUILogic:Close()
+			end
+		end
+
+		self.activePresentationId = nextPresentationId
+		self.activeIsPerformance = nextIsPerformance
+		self.activeIsDalgona = nextIsDalgona
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(string title, string instruction, string presentationActorId)
+		-- 활성 스킨에 숨김 상태의 세션 UI 초기화와 진행 캐릭터 설정 위임
+		if self.activeIsDalgona == true then
+			_DalgonaChallengeUILogic:OpenForSession(title, instruction)
+		elseif self.activeIsPerformance == true then
+		_MiniGamePerformanceUILogic:OpenForSession(title, instruction, presentationActorId)
+		else
+		_MiniGameUILogic:OpenForSession(title, instruction, presentationActorId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		-- 입력과 스테이지 구성이 끝난 활성 스킨 표시
+		if self.activeIsDalgona == true then
+			_DalgonaChallengeUILogic:ShowActiveSession()
+		elseif self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:ShowActiveSession()
+		else
+			_MiniGameUILogic:ShowActiveSession()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseActive()
+		-- 활성 스킨의 미니게임 UI 패널을 즉시 닫는다. (이벤트 결과 팝업이 뜨는 순간 미니게임 패널을 남기지 않기 위한 용도)
+		if self.activeIsDalgona == true then
+			_DalgonaChallengeUILogic:Close()
+		elseif self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:Close()
+		else
+			_MiniGameUILogic:Close()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectStage(integer inputType, boolean useGauge)
+		-- 입력 타입/게이지 사용 여부에 맞는 스테이지 표시를 활성 스킨에 위임한다. (Mash는 useGauge로 연타/게이지 분기)
+		if self.activeIsDalgona == true then
+			_DalgonaChallengeUILogic:SelectStage(inputType)
+		elseif self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:SelectStage(inputType, useGauge)
+		else
+			_MiniGameUILogic:SelectStage(inputType, useGauge)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetMobilePrimaryInputEnabled(boolean enabled)
+		-- 실제 입력 활성 상태를 현재 미니게임 UI 스킨에 전달
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:SetMobilePrimaryInputEnabled(enabled)
+		else
+			_MiniGameUILogic:SetMobilePrimaryInputEnabled(enabled)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetupTiming(any timings, number duration)
+		-- 타이밍 마커/커서 배치를 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:SetupTiming(timings, duration)
+		else
+			_MiniGameUILogic:SetupTiming(timings, duration)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetupCommand(any names)
+		-- 커맨드 시퀀스 표시 셋업을 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			return _MiniGamePerformanceUILogic:SetupCommand(names)
+		else
+			return _MiniGameUILogic:SetupCommand(names)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCommandVisualReady()
+		-- 활성 스킨의 커맨드 화살표 사전 로드 완료 여부 반환
+		if self.activeIsPerformance == true then
+			return _MiniGamePerformanceUILogic:IsCommandVisualReady()
+		end
+		return _MiniGameUILogic:IsCommandVisualReady()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BuildDragGuide(any localPoints)
+		-- 드래그 가이드 점 생성을 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:BuildDragGuide(localPoints)
+		else
+			_MiniGameUILogic:BuildDragGuide(localPoints)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ScreenToDragLocal(number screenX, number screenY)
+		-- 활성 스킨의 드래그 영역 좌표 변환 결과를 그대로 반환한다.
+		if self.activeIsPerformance == true then
+			return _MiniGamePerformanceUILogic:ScreenToDragLocal(screenX, screenY)
+		end
+		return _MiniGameUILogic:ScreenToDragLocal(screenX, screenY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddInkLocalPoint(number localX, number localY)
+		-- 드래그 잉크 점 생성을 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:AddInkLocalPoint(localX, localY)
+		else
+			_MiniGameUILogic:AddInkLocalPoint(localX, localY)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateHud(any tHudState)
+		-- HUD(진행/타이머/게이지) 갱신을 활성 스킨에 위임한다.
+		if tHudState == nil then
+			return
+		end
+		if self.activeIsDalgona == true then
+			return
+		elseif self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:UpdateHud(tHudState)
+		else
+			_MiniGameUILogic:UpdateHud(tHudState)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateTimingCursor(number elapsed, number duration)
+		-- 타이밍 커서 이동을 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:UpdateTimingCursor(elapsed, duration)
+		else
+			_MiniGameUILogic:UpdateTimingCursor(elapsed, duration)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCommandProgress(integer doneCount)
+		-- 커맨드 진행 표시 갱신을 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:UpdateCommandProgress(doneCount)
+		else
+			_MiniGameUILogic:UpdateCommandProgress(doneCount)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCommandError()
+		-- 커맨드 오답 이펙트를 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:ShowCommandError()
+		else
+			_MiniGameUILogic:ShowCommandError()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCommandHit(integer index)
+		-- 커맨드 정답 입력 시 해당 아이콘 강조 이펙트를 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:PlayCommandHit(index)
+		else
+			_MiniGameUILogic:PlayCommandHit(index)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayTimingHit()
+		-- 타이밍 정답 입력 시 커서 위치 성공 이펙트를 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:PlayTimingHit()
+		else
+			_MiniGameUILogic:PlayTimingHit()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayTimingMiss()
+		-- 타이밍 실패(헛입력) 시 커서 위치 실패 이펙트를 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:PlayTimingMiss()
+		else
+			_MiniGameUILogic:PlayTimingMiss()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateTimingAttempts(integer remaining, integer max)
+		-- 타이밍 남은 시도 횟수 표시를 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:UpdateTimingAttempts(remaining, max)
+		else
+			_MiniGameUILogic:UpdateTimingAttempts(remaining, max)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayMashPose()
+		-- 연타 포즈 토글을 활성 스킨에 위임한다.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:PlayMashPose()
+		else
+			_MiniGameUILogic:PlayMashPose()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayGaugeSway()
+		-- 게이지 스테이지 응원봉 흔들림(입력 연출)을 활성 스킨에 위임한다. 연타 포즈(PlayMashPose)와 분리된 훅.
+		if self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:PlayGaugeSway()
+		else
+			_MiniGameUILogic:PlayGaugeSway()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowResult(boolean success, string reason, string detailText)
+		-- 결과 표시를 활성 스킨에 위임한다.
+		if self.activeIsDalgona == true then
+			return
+		elseif self.activeIsPerformance == true then
+			_MiniGamePerformanceUILogic:ShowResult(success, reason, detailText)
+		else
+			_MiniGameUILogic:ShowResult(success, reason, detailText)
+		end
+	end
+
+end
