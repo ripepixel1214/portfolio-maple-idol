@@ -1,0 +1,297 @@
+-- 이벤트 결과 데이터를 실제 ProgressManager 또는 CharacterManager에 반영합니다.
+@Logic
+script EventResultHandler extends Logic
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 이벤트 결과 핸들러는 별도 초기화 없이 호출 시점에 마스터 데이터를 조회합니다.
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyEventResultActions(string eventId, string eventResultId, string characterId, string requesterUserId)
+		-- 이벤트와 이벤트 결과 id를 기준으로 결과 액션들을 서버 권위 데이터에 반영합니다.
+		local applyResult = self:CreateApplyResult(true, false)
+		local tEvent = _EventMaster:GetEvent(eventId)
+		if tEvent == nil then
+			log_warning("[EventResultHandler] event not found eventId=" .. tostring(eventId))
+			return self:CreateApplyResult(false, false)
+		end
+
+		local tEventResult = _EventResultMaster:GetEventResult(eventResultId)
+		if tEventResult == nil then
+			log_warning("[EventResultHandler] event result not found eventResultId=" .. tostring(eventResultId))
+			return self:CreateApplyResult(false, false)
+		end
+
+		local values = self:GetEventResultValues(tEvent, eventResultId)
+		if values == nil then
+			log_warning("[EventResultHandler] event result does not belong to event eventId=" .. tostring(eventId) .. ", eventResultId=" .. tostring(eventResultId))
+			return self:CreateApplyResult(false, false)
+		end
+
+		local actions = { tEventResult.value1Action, tEventResult.value2Action, tEventResult.value3Action }
+		for index = 1, 3 do
+			local actionResult = self:ApplyEventResultAction(actions[index], values[index], characterId, requesterUserId)
+			if actionResult == nil or actionResult.isApplied ~= true then
+				applyResult.isApplied = false
+				return applyResult
+			end
+
+			if actionResult.hasChange == true then
+				applyResult.hasChange = true
+			end
+		end
+
+		return applyResult
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetEventResultValues(any tEvent, string eventResultId)
+		-- 이벤트 결과 id가 성공/실패 결과 중 어디에 해당하는지 확인하고 대응하는 value 배열을 반환합니다.
+		if tEvent.successResultId == eventResultId then
+			return { tEvent.successValue1, tEvent.successValue2, tEvent.successValue3 }
+		end
+
+		if tEvent.failResultId == eventResultId then
+			return { tEvent.failValue1, tEvent.failValue2, tEvent.failValue3 }
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyEventResultAction(string action, any value, string characterId, string requesterUserId)
+		-- add/sub 형태의 액션 문자열을 해석해 진행 또는 캐릭터 스탯 적용 경로로 전달합니다.
+		if action == nil or action == "" then
+			return self:CreateApplyResult(true, false)
+		end
+
+		local operation = self:ParseActionOperation(action)
+		local statKey = self:ParseActionStatKey(action)
+		if operation == "" or statKey == "" then
+			log_warning("[EventResultHandler] invalid action=" .. tostring(action))
+			return self:CreateApplyResult(false, false)
+		end
+
+		-- value가 string인 event result에 대해 먼저 처리하고 return.
+		if operation == "unlock" then
+			return self:ApplyUnlockAction(statKey, value, requesterUserId)
+		end
+
+		local appliedValue = self:NormalizeActionValueToNumber(value)
+		if appliedValue == nil then
+			log_warning("[EventResultHandler] action value must be number action=" .. tostring(action) .. ", value=" .. tostring(value))
+			return self:CreateApplyResult(false, false)
+		end
+
+		if operation == "sub" then
+			appliedValue = -appliedValue
+		elseif operation ~= "add" then
+			log_warning("[EventResultHandler] unsupported operation=" .. tostring(operation) .. ", action=" .. tostring(action))
+			return self:CreateApplyResult(false, false)
+		end
+
+		if self:IsProgressStatKey(statKey) == true then
+			local isApplied = self:ApplyProgressStatAction(statKey, appliedValue)
+			return self:CreateApplyResult(isApplied, isApplied == true and appliedValue ~= 0)
+		end
+
+		if self:IsCharacterStatKey(statKey) == true then
+			local isApplied = self:ApplyCharacterStatAction(statKey, appliedValue, characterId)
+			return self:CreateApplyResult(isApplied, isApplied == true and appliedValue ~= 0)
+		end
+
+		log_warning("[EventResultHandler] unsupported statKey=" .. tostring(statKey) .. ", action=" .. tostring(action))
+		return self:CreateApplyResult(false, false)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyUnlockAction(string unlockType, any value, string requesterUserId)
+		-- unlock_* 액션의 대상 id를 읽어 활동, 캐릭터, 아이템 매니저에 해금 처리를 위임합니다.
+		local targetId = self:NormalizeActionValueToString(value)
+		if targetId == "" then
+			log_warning("[EventResultHandler] unlock target id is empty unlockType=" .. tostring(unlockType))
+			return self:CreateApplyResult(false, false)
+		end
+
+		if unlockType == "activity" then
+			return self:ApplyUnlockActivity(targetId, requesterUserId)
+		end
+
+		if unlockType == "character" then
+			return self:ApplyUnlockCharacter(targetId, requesterUserId)
+		end
+
+		if unlockType == "item" then
+			return self:ApplyUnlockItem(targetId, requesterUserId)
+		end
+
+		log_warning("[EventResultHandler] unsupported unlockType=" .. tostring(unlockType))
+		return self:CreateApplyResult(false, false)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyUnlockActivity(string activityId, string requesterUserId)
+		-- 활동 해금 액션을 ActivityManager에 적용하고 저장/동기화를 요청합니다.
+		if _ActivityManager == nil or _ActivityManager:IsActivitiesLoaded() == false then
+			log_warning("[EventResultHandler] ActivityManager is not ready")
+			return self:CreateApplyResult(false, false)
+		end
+
+		if _ActivityManager:ServerHasActivityUnlocked(activityId) == true then
+			return self:CreateApplyResult(true, false)
+		end
+
+		local isApplied = _ActivityManager:UnlockActivityWithCommit(activityId, requesterUserId)
+		return self:CreateApplyResult(isApplied, isApplied == true)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyUnlockCharacter(string unlockedCharacterId, string requesterUserId)
+		-- 캐릭터 해금 액션을 CharacterManager에 적용하고 클라이언트에 동기화합니다.
+		if _CharacterManager == nil or _CharacterManager:IsCharactersLoaded() == false then
+			log_warning("[EventResultHandler] CharacterManager is not ready")
+			return self:CreateApplyResult(false, false)
+		end
+
+		local tCharacter = _CharacterManager:ServerGetCharacterById(unlockedCharacterId)
+		if tCharacter ~= nil and tCharacter.isDiscovered == true then
+			return self:CreateApplyResult(true, false)
+		end
+
+		local isApplied = _CharacterManager:UnlockCharacterWithCommit(unlockedCharacterId, requesterUserId)
+		return self:CreateApplyResult(isApplied, isApplied == true)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyUnlockItem(string itemId, string requesterUserId)
+		-- 아이템 획득 액션을 ItemManager에 적용하고 저장/동기화를 요청합니다.
+		if _ItemManager == nil or _ItemManager:IsItemsLoaded() == false then
+			log_warning("[EventResultHandler] ItemManager is not ready")
+			return self:CreateApplyResult(false, false)
+		end
+
+		if _ItemManager:ServerHasItem(itemId) == true then
+			return self:CreateApplyResult(true, false)
+		end
+
+		local isApplied = _ItemManager:UnlockItemWithCommit(itemId, requesterUserId)
+		return self:CreateApplyResult(isApplied, isApplied == true)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateApplyResult(boolean isApplied, boolean hasChange)
+		-- 액션 처리 성공 여부와 실제 데이터 변경 여부를 함께 반환합니다.
+		local result = EventResultApplyResult()
+		result.isApplied = isApplied == true
+		result.hasChange = hasChange == true
+		return result
+	end
+
+	@ExecSpace("ServerOnly")
+	method any NormalizeActionValueToNumber(any value)
+		-- 이벤트 결과 value를 스탯 계산에 사용할 숫자로 변환합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return nil
+		end
+
+		return numberValue
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeActionValueToString(any value)
+		-- 이벤트 결과 value를 해금 대상 id 문자열로 변환합니다.
+		if value == nil then
+			return ""
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string ParseActionOperation(string action)
+		-- 액션 문자열에서 첫 번째 구분자 앞의 연산 이름을 반환합니다.
+		local sepIdx, sepEnd = string.find(action, "_")
+		if sepIdx == nil then
+			return ""
+		end
+
+		return string.sub(action, 1, sepIdx - 1)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string ParseActionStatKey(string action)
+		-- 액션 문자열에서 첫 번째 구분자 뒤의 스탯 키를 반환합니다.
+		local sepIdx, sepEnd = string.find(action, "_")
+		if sepIdx == nil then
+			return ""
+		end
+
+		return string.sub(action, sepIdx + 1)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsCharacterStatKey(string statKey)
+		-- 액션의 스탯 키가 캐릭터 데이터에 속하는지 확인합니다.
+		return _ECharacterStatType:IsValid(_ECharacterStatType:FromKey(statKey))
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsProgressStatKey(string statKey)
+		-- 액션의 스탯 키가 진행 데이터에 속하는지 확인합니다.
+		return statKey == "fandom" or statKey == "actionPoint" or statKey == "meso" or statKey == "groupMeso"
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyCharacterStatAction(string statKey, number value, string characterId)
+		-- 캐릭터 스탯 액션을 CharacterManager의 서버 권위 스탯 변경 API에 위임합니다.
+		if characterId == nil or characterId == "" then
+			log_warning("[EventResultHandler] characterId is required for character stat statKey=" .. tostring(statKey))
+			return false
+		end
+
+		local statType = _ECharacterStatType:FromKey(statKey)
+		if _ECharacterStatType:IsValid(statType) == false then
+			log_warning("[EventResultHandler] unsupported character statKey=" .. tostring(statKey))
+			return false
+		end
+
+		local tDelta = CharacterStatDelta()
+		tDelta.characterId = characterId
+
+		if statType == _ECharacterStatType.Vocal then
+			tDelta.vocal = value
+		elseif statType == _ECharacterStatType.Dance then
+			tDelta.dance = value
+		elseif statType == _ECharacterStatType.Visual then
+			tDelta.visual = value
+		elseif statType == _ECharacterStatType.Fatigue then
+			tDelta.fatigue = value
+		elseif statType == _ECharacterStatType.Intimacy then
+			tDelta.intimacy = value
+		end
+
+		return _CharacterManager:ApplyCharacterStat(tDelta:ToPlainTable())
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyProgressStatAction(string statKey, number value)
+		-- 진행 스탯 액션을 ProgressManager의 서버 권위 진행 변경 API에 위임합니다.
+		local tDelta = ProgressStatDelta()
+
+		if statKey == "actionPoint" then
+			tDelta.actionPoint = value
+		elseif statKey == "fandom" then
+			tDelta.fandom = value
+		elseif statKey == "meso" or statKey == "groupMeso" then
+			tDelta.groupMeso = value
+		else
+			log_warning("[EventResultHandler] unsupported progress statKey=" .. tostring(statKey))
+			return false
+		end
+
+		return _ProgressManager:ApplyProgressStat(tDelta:ToPlainTable())
+	end
+
+end

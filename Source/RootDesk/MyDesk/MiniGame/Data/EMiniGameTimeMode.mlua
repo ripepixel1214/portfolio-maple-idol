@@ -1,0 +1,25 @@
+@Logic
+script EMiniGameTimeMode extends Logic
+
+	-- 미니게임의 종료 시간을 제어하는 시간 모드 enum 상수.
+	property integer None = -1
+	property integer Countdown = 0
+	property integer GaugeDrain = 1
+
+	method boolean IsValid(integer timeMode)
+		-- 알려진 시간 모드인지 반환한다.
+		return timeMode == self.Countdown or timeMode == self.GaugeDrain
+	end
+
+	method string ToName(integer timeMode)
+		-- 디버그 출력용 시간 모드 이름을 반환한다.
+		if timeMode == self.Countdown then
+			return "Countdown"
+		elseif timeMode == self.GaugeDrain then
+			return "GaugeDrain"
+		end
+
+		return "None"
+	end
+
+end

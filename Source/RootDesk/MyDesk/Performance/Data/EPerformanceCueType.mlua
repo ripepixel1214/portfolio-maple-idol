@@ -1,0 +1,67 @@
+---@description "공연 큐 타입 enum. PerformanceCueTable의 type 컬럼 문자열과 1:1 매핑."
+@Logic
+script EPerformanceCueType extends Logic
+
+	property integer None = 0
+
+	-- 카메라 줌 (지속: 목표 배율로 보간)
+	property integer CameraZoom = 1
+
+	-- 카메라 이동 (지속: 목표 포지션으로 이동)
+	property integer CameraMove = 2
+
+	-- 카메라 흔들기 (지속)
+	property integer CameraShake = 3
+
+	-- 캐릭터 이동 (지속)
+	property integer CharMove = 5
+
+	-- 캐릭터 애니메이션 (단발성: 상태 트리거)
+	property integer CharAnim = 6
+
+	-- UI 연출 표시 (지속: duration 후 자동 숨김)
+	property integer UIShow = 7
+
+	-- BGM 볼륨 (지속: 페이드)
+	property integer BgmVolume = 8
+
+	-- 미니게임 시작 (지속: 명목 길이)
+	property integer MiniGame = 9
+
+	-- 효과음 (단발성)
+	property integer Sfx = 10
+
+	-- 캐릭터 표정 (단발성: 표정 재생)
+	property integer CharEmotion = 11
+
+	method integer FromKey(string key)
+		-- CSV type 문자열을 큐 타입 enum으로 변환, 미지의 값은 None 반환
+		if key == "camera_zoom" then return self.CameraZoom end
+		if key == "camera_move" then return self.CameraMove end
+		if key == "camera_shake" then return self.CameraShake end
+		if key == "char_move" then return self.CharMove end
+		if key == "char_anim" then return self.CharAnim end
+		if key == "char_emotion" then return self.CharEmotion end
+		if key == "ui_show" then return self.UIShow end
+		if key == "bgm_volume" then return self.BgmVolume end
+		if key == "minigame" then return self.MiniGame end
+		if key == "sfx" then return self.Sfx end
+		return self.None
+	end
+
+	method string ToKey(integer cueType)
+		-- 큐 타입 enum을 CSV type 문자열로 변환
+		if cueType == self.CameraZoom then return "camera_zoom" end
+		if cueType == self.CameraMove then return "camera_move" end
+		if cueType == self.CameraShake then return "camera_shake" end
+		if cueType == self.CharMove then return "char_move" end
+		if cueType == self.CharAnim then return "char_anim" end
+		if cueType == self.CharEmotion then return "char_emotion" end
+		if cueType == self.UIShow then return "ui_show" end
+		if cueType == self.BgmVolume then return "bgm_volume" end
+		if cueType == self.MiniGame then return "minigame" end
+		if cueType == self.Sfx then return "sfx" end
+		return ""
+	end
+
+end

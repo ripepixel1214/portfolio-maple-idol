@@ -1,0 +1,36 @@
+@Logic
+script EMiniGameInputType extends Logic
+
+	-- 미니게임 입력 타입 enum 상수. 입력 모듈을 구분하는 데 사용된다.
+	property integer None = -1
+	property integer Mash = 0
+	property integer Timing = 1
+	property integer Command = 2
+	property integer Drag = 3
+	property integer Selection = 4
+
+	method boolean IsValid(integer inputType)
+		return inputType == self.Mash
+			or inputType == self.Timing
+			or inputType == self.Command
+			or inputType == self.Drag
+			or inputType == self.Selection
+	end
+
+	method string ToName(integer inputType)
+		if inputType == self.Mash then
+			return "Mash"
+		elseif inputType == self.Timing then
+			return "Timing"
+		elseif inputType == self.Command then
+			return "Command"
+		elseif inputType == self.Drag then
+			return "Drag"
+		elseif inputType == self.Selection then
+			return "Selection"
+		end
+
+		return "None"
+	end
+
+end

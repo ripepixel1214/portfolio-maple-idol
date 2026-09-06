@@ -1,0 +1,46 @@
+@Logic
+script EMiniGameObjectiveType extends Logic
+
+	-- 미니게임 성공 조건을 구성하는 목표 타입 enum 상수.
+	property integer None = -1
+	property integer Count = 0
+	property integer TimingHit = 1
+	property integer Sequence = 2
+	property integer GaugeFill = 3
+	property integer ShapeMatch = 4
+	property integer Accuracy = 5
+	property integer BlockDraw = 6
+
+	method boolean IsValid(integer objectiveType)
+		-- 알려진 목표 타입인지 반환한다.
+		return objectiveType == self.Count
+			or objectiveType == self.TimingHit
+			or objectiveType == self.Sequence
+			or objectiveType == self.GaugeFill
+			or objectiveType == self.ShapeMatch
+			or objectiveType == self.Accuracy
+			or objectiveType == self.BlockDraw
+	end
+
+	method string ToName(integer objectiveType)
+		-- 디버그 출력용 목표 타입 이름을 반환한다.
+		if objectiveType == self.Count then
+			return "Count"
+		elseif objectiveType == self.TimingHit then
+			return "TimingHit"
+		elseif objectiveType == self.Sequence then
+			return "Sequence"
+		elseif objectiveType == self.GaugeFill then
+			return "GaugeFill"
+		elseif objectiveType == self.ShapeMatch then
+			return "ShapeMatch"
+		elseif objectiveType == self.Accuracy then
+			return "Accuracy"
+		elseif objectiveType == self.BlockDraw then
+			return "BlockDraw"
+		end
+
+		return "None"
+	end
+
+end

@@ -1,0 +1,55 @@
+---@description "UI 연출(ui_show/ui_hide) 종류 enum. targetId 컬럼의 프리셋 문자열과 매핑. 이펙트는 여러 종."
+@Logic
+script EPerformanceUIPreset extends Logic
+
+	-- 알 수 없는 프리셋
+	property integer None = 0
+
+	-- 오타게 응원 연출
+	property integer Otage = 1
+
+	-- 이펙트A
+	property integer Vignetting = 2
+
+	-- 이펙트B
+	property integer CircleBurst = 3
+
+	-- 불꽃(무대 전체 불꽃 연출)
+	property integer Firework = 4
+
+	-- 스포트라이트(좌우 빔 회전 스윙)
+	property integer Spotlight = 5
+
+
+	method integer FromKey(string key)
+		-- targetId 프리셋 문자열을 enum으로 변환
+		if key == "otage" then return self.Otage end
+		if key == "vignetting" then return self.Vignetting end
+		if key == "circle_burst" then return self.CircleBurst end
+		if key == "firework" then return self.Firework end
+		if key == "spotlight" then return self.Spotlight end
+		return self.None
+	end
+
+	method string ToKey(integer preset)
+		-- 프리셋 enum을 문자열로 변환
+		if preset == self.Otage then return "otage" end
+		if preset == self.Vignetting then return "vignetting" end
+		if preset == self.CircleBurst then return "circle_burst" end
+		if preset == self.Firework then return "firework" end
+		if preset == self.Spotlight then return "spotlight" end
+		return ""
+	end
+
+	method boolean IsEffect(integer preset)
+		-- 이펙트계열인지 확인
+		return preset == self.Vignetting or preset == self.CircleBurst
+			or preset == self.Firework or preset == self.Spotlight
+	end
+
+	method boolean IsValid(integer preset)
+		-- 유효한 프리셋 값인지 확인
+		return preset == self.Otage or self:IsEffect(preset)
+	end
+
+end

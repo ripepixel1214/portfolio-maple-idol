@@ -1,0 +1,28 @@
+---@description "PerformanceTable의 row 구조체"
+@Struct
+script PerformanceRow
+
+	-- 공연 식별자 (PerformanceCueRow.performanceId와 연결)
+	property string id = ""
+
+	-- 공연 이름
+	property string name = ""
+
+	-- 배경음악 리소스 RUID
+	property string bgmRuid = ""
+
+	-- BGM 볼륨 (0~1)
+	property number bgmVolume = 1
+	
+	-- 공연 전체 길이(초)
+	property number length = 0
+
+	-- 클리어 기준 총점 (최종 점수 총점이 이 값 이상이면 공연 성공)
+	property number clearScore = 0
+
+	-- 스탯 가중치: 이 공연에서 보컬/댄스/비주얼 각각의 중요도 (기본 1, 클수록 해당 스탯이 점수에 크게 반영)
+	property number vocalWeight = 1
+	property number danceWeight = 1
+	property number visualWeight = 1
+
+end

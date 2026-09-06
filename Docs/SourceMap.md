@@ -33,3 +33,17 @@ Git 작성자 목록은 공동 수정 여부를 확인하는 보조 정보입니
 | [RootDesk/MyDesk/Localization/LocalizationLogic.mlua](../Source/RootDesk/MyDesk/Localization/LocalizationLogic.mlua) | `83faf19ae758` | Jinwon |
 | [RootDesk/MyDesk/Localization/LanguageChangedEvent.mlua](../Source/RootDesk/MyDesk/Localization/LanguageChangedEvent.mlua) | `83faf19ae758` | Jinwon |
 | [RootDesk/MyDesk/Localization/LocalizedTextComponent.mlua](../Source/RootDesk/MyDesk/Localization/LocalizedTextComponent.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/Event/EventTriggerManager.mlua](../Source/RootDesk/MyDesk/Event/EventTriggerManager.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/Event/EventExecutor.mlua](../Source/RootDesk/MyDesk/Event/EventExecutor.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/Event/EventResultHandler.mlua](../Source/RootDesk/MyDesk/Event/EventResultHandler.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/Event/EventCompletionManager.mlua](../Source/RootDesk/MyDesk/Event/EventCompletionManager.mlua) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/Event/NpcInteractionGateLogic.mlua](../Source/RootDesk/MyDesk/Event/NpcInteractionGateLogic.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/MiniGame/Data/EMiniGameContextType.mlua](../Source/RootDesk/MyDesk/MiniGame/Data/EMiniGameContextType.mlua) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/MiniGame/Data/EMiniGameInputType.mlua](../Source/RootDesk/MyDesk/MiniGame/Data/EMiniGameInputType.mlua) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/MiniGame/Data/EMiniGameObjectiveType.mlua](../Source/RootDesk/MyDesk/MiniGame/Data/EMiniGameObjectiveType.mlua) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/MiniGame/Data/EMiniGameSettlementType.mlua](../Source/RootDesk/MyDesk/MiniGame/Data/EMiniGameSettlementType.mlua) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/MiniGame/Data/EMiniGameTimeMode.mlua](../Source/RootDesk/MyDesk/MiniGame/Data/EMiniGameTimeMode.mlua) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/Performance/PerformanceConductor.mlua](../Source/RootDesk/MyDesk/Performance/PerformanceConductor.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/Performance/Data](../Source/RootDesk/MyDesk/Performance/Data/) | `83faf19ae758` | Jinwon |
+| [RootDesk/MyDesk/Localization/LocalizationMasterRefreshLogic.mlua](../Source/RootDesk/MyDesk/Localization/LocalizationMasterRefreshLogic.mlua) | `83faf19ae758` | HGM2695, Jinwon |
+| [RootDesk/MyDesk/Utils/TemplateTextFormatter.mlua](../Source/RootDesk/MyDesk/Utils/TemplateTextFormatter.mlua) | `83faf19ae758` | HGM2695, Jinwon |

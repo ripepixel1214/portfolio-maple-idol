@@ -1,0 +1,35 @@
+@Logic
+script EMiniGameSettlementType extends Logic
+
+	property integer None = 0
+	property integer MesoBet = 1
+	property integer CoinBet = 2
+	property integer FixedEntry = 3
+
+	method boolean IsValid(integer settlementType)
+		-- 지원하는 미니게임 정산 유형 여부 확인
+		return settlementType == self.None
+			or settlementType == self.MesoBet
+			or settlementType == self.CoinBet
+			or settlementType == self.FixedEntry
+	end
+
+	method boolean IsBetting(integer settlementType)
+		-- 사용자 선택 베팅이 필요한 정산 유형 여부 확인
+		return settlementType == self.MesoBet or settlementType == self.CoinBet
+	end
+
+	method string ToName(integer settlementType)
+		-- 디버그 출력용 정산 유형 이름 반환
+		if settlementType == self.MesoBet then
+			return "MesoBet"
+		elseif settlementType == self.CoinBet then
+			return "CoinBet"
+		elseif settlementType == self.FixedEntry then
+			return "FixedEntry"
+		end
+
+		return "None"
+	end
+
+end

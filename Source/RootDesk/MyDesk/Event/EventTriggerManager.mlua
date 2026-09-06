@@ -1,0 +1,698 @@
+-- EventTriggerTable을 로드하고 활동 수행 시 발동 가능한 이벤트 후보를 일괄 판정합니다.
+@Logic
+script EventTriggerManager extends Logic
+
+	property boolean IsEventTriggerTableLoaded = false
+
+	property boolean IsConditionTableLoaded = false
+
+	-- Dictionary<string, EventTriggerRow>
+	property any tTriggerById = {}
+
+	-- EventTriggerRow[]
+	property any tTriggers = {}
+
+	-- Dictionary<string, EventTriggerRow[]>
+	property any tTriggersByActivityKey = {}
+
+	-- Dictionary<string, table[]>
+	property any tConditionGroupsById = {}
+
+	-- Dictionary<string, integer>
+	property any tCountByTriggerCharacterKey = {}
+
+	property integer MaxTriggerCountPerBatch = 2
+
+	property integer CurrentDayProgress = 0
+
+	method void OnBeginPlay()
+		-- 시작 시점에 트리거와 조건 테이블 캐시를 준비합니다.
+		self:LoadEventTriggerTable()
+		self:LoadConditionTable()
+	end
+
+	method void LoadEventTriggerTable()
+		-- EventTriggerTable을 읽고 triggerID와 activity 기준으로 캐싱합니다.
+		self.tTriggerById = {}
+		self.tTriggers = {}
+		self.tTriggersByActivityKey = {}
+		self.IsEventTriggerTableLoaded = false
+
+		local dataSet = _DataService:GetTable("EventTriggerTable")
+		if dataSet == nil then
+			log_warning("[EventTriggerManager] EventTriggerTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local id = _DataTableUtil:SafeGetString(dataSet, rowIndex, "triggerID", "")
+			if id ~= "" then
+				local tTrigger = EventTriggerRow()
+				tTrigger.id = id
+				tTrigger.eventId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "eventID", "")
+				tTrigger.activityType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "activityType", "")
+				tTrigger.activityId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "activityID", "")
+				tTrigger.npcId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "npcID", "")
+				tTrigger.spawnX = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "spawnX", 0)
+				tTrigger.spawnY = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "spawnY", 0)
+				tTrigger.conditionGroupId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "conditionGroupID", "")
+				tTrigger.countType = self:NormalizeKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "countType", ""))
+				tTrigger.requiredCount = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "requiredCount", 0)
+				tTrigger.chancePercent = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "chancePercent", 0)
+				tTrigger.countWindow = self:NormalizeKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "countWindow", ""))
+				tTrigger.priority = self:NormalizeKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "priority", ""))
+				tTrigger.priorityRank = self:GetPriorityRank(tTrigger.priority)
+				tTrigger.enabled = _DataTableUtil:SafeGetBoolean(dataSet, rowIndex, "enabled", true)
+
+				self.tTriggerById[id] = tTrigger
+				table.insert(self.tTriggers, tTrigger)
+				self:AddTriggerToActivityCache(tTrigger)
+			end
+		end
+
+		self.IsEventTriggerTableLoaded = true
+		log("[EventTriggerManager] EventTriggerTable loaded count=" .. tostring(#self.tTriggers))
+	end
+
+	method void LoadConditionTable()
+		-- EventConditionTable을 읽고 conditionGroupID 기준으로 조건 목록을 캐싱합니다.
+		self.tConditionGroupsById = {}
+		self.IsConditionTableLoaded = false
+
+		local dataSet = _DataService:GetTable("EventConditionTable")
+		if dataSet == nil then
+			log_warning("[EventTriggerManager] EventConditionTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local conditionId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "conditionID", "")
+			local conditionGroupId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "conditionGroupID", "")
+			if conditionId ~= "" and conditionGroupId ~= "" then
+				local tCondition = {
+					id = conditionId,
+					groupId = conditionGroupId,
+					conditionType = self:NormalizeKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "conditionType", "")),
+					targetKey = self:NormalizeKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "targetKey", "")),
+					operatorKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "operator", ""),
+					value = _DataTableUtil:SafeGetString(dataSet, rowIndex, "value", "")
+				}
+
+				if self.tConditionGroupsById[conditionGroupId] == nil then
+					self.tConditionGroupsById[conditionGroupId] = {}
+				end
+
+				table.insert(self.tConditionGroupsById[conditionGroupId], tCondition)
+			end
+		end
+
+		self.IsConditionTableLoaded = true
+		log("[EventTriggerManager] EventConditionTable loaded groupCount=" .. tostring(self:GetTableKeyCount(self.tConditionGroupsById)))
+	end
+
+	method any EvaluateActivityTriggers(string activityType, string activityId, string characterId, string npcId, integer dayProgress, integer maxTriggerCount)
+		-- 활동 1회 발생을 기록한 뒤 조건/확률/우선순위를 통과한 트리거 목록을 반환합니다.
+		if self.IsEventTriggerTableLoaded == false then
+			self:LoadEventTriggerTable()
+		end
+		if self.IsConditionTableLoaded == false then
+			self:LoadConditionTable()
+		end
+
+		local normalizedActivityType = self:NormalizeKey(activityType)
+		local normalizedActivityId = activityId or ""
+		local normalizedNpcId = npcId or ""
+		local normalizedCharacterId = characterId or ""
+		local candidates = self:EvaluateActivityTriggerCandidates(normalizedActivityType, normalizedActivityId, normalizedCharacterId, normalizedNpcId, dayProgress, false)
+
+		local limit = maxTriggerCount
+		if limit <= 0 then
+			limit = self.MaxTriggerCountPerBatch
+		end
+
+		local selectedTriggers = {}
+		for index, tTrigger in ipairs(candidates) do
+			if index > limit then
+				break
+			end
+			table.insert(selectedTriggers, tTrigger)
+		end
+
+		self:ResetTriggeredUntilTriggerCounts(selectedTriggers, normalizedCharacterId)
+		
+		return selectedTriggers
+	end
+
+	method any EvaluateActivityTriggerCandidates(string activityType, string activityId, string characterId, string npcId, integer dayProgress, boolean ignoreChance)
+		-- 활동 횟수 1회 기록 후 배치 제한 없이 발동 가능한 전체 트리거 후보 반환
+		if self.IsEventTriggerTableLoaded == false then
+			self:LoadEventTriggerTable()
+		end
+		if self.IsConditionTableLoaded == false then
+			self:LoadConditionTable()
+		end
+
+		local normalizedActivityType = self:NormalizeKey(activityType)
+		local normalizedActivityId = activityId or ""
+		local normalizedNpcId = npcId or ""
+		local normalizedCharacterId = characterId or ""
+		local resolvedDayProgress = dayProgress
+		if resolvedDayProgress <= 0 then
+			resolvedDayProgress = self.CurrentDayProgress
+		end
+
+		self:RecordActivityCount(normalizedActivityType, normalizedActivityId, normalizedCharacterId, normalizedNpcId)
+
+		local candidates = self:BuildTriggerCandidates(normalizedActivityType, normalizedActivityId, normalizedCharacterId, normalizedNpcId, resolvedDayProgress, ignoreChance)
+		table.sort(candidates, function(left, right)
+			return self:IsHigherPriority(left, right)
+		end)
+
+		return candidates
+	end
+
+	method any EvaluateActivityTriggersIgnoringChance(string activityType, string activityId, string characterId, string npcId, integer dayProgress, integer maxTriggerCount)
+		-- 최소 주간 발동 보장을 위해 조건과 카운트는 유지하고 확률 판정만 우회한 후보를 반환합니다.
+		local normalizedActivityType = self:NormalizeKey(activityType)
+		local normalizedActivityId = activityId or ""
+		local normalizedNpcId = npcId or ""
+		local normalizedCharacterId = characterId or ""
+		local candidates = self:EvaluateActivityTriggerCandidates(normalizedActivityType, normalizedActivityId, normalizedCharacterId, normalizedNpcId, dayProgress, true)
+
+		local limit = maxTriggerCount
+		if limit <= 0 then
+			limit = 1
+		end
+
+		local selectedTriggers = {}
+		for index, tTrigger in ipairs(candidates) do
+			if index > limit then
+				break
+			end
+			table.insert(selectedTriggers, tTrigger)
+		end
+
+		self:ResetTriggeredUntilTriggerCounts(selectedTriggers, normalizedCharacterId)
+
+		return selectedTriggers
+	end
+
+	method any GetEventIds(any tTriggers)
+		-- 선택된 트리거 목록에서 eventId만 추출해 반환합니다.
+		local eventIds = {}
+		if tTriggers == nil then
+			return eventIds
+		end
+
+		for _, tTrigger in ipairs(tTriggers) do
+			if tTrigger.eventId ~= nil and tTrigger.eventId ~= "" then
+				table.insert(eventIds, tTrigger.eventId)
+			end
+		end
+
+		return eventIds
+	end
+
+	method string GetTriggerCountType(string triggerId)
+		-- triggerId로부터 countType을 조회합니다.
+		local tTrigger = self.tTriggerById[triggerId]
+		if tTrigger == nil then
+			return ""
+		end
+
+		return tTrigger.countType
+	end
+
+	method void SetDayProgress(integer dayProgress)
+		-- 외부 진행 로직에서 조건 판정용 날짜 진행도를 갱신합니다.
+		self.CurrentDayProgress = dayProgress
+	end
+
+	method void ResetWeekCounters()
+		-- 주차가 바뀔 때 week countWindow 카운터를 초기화합니다.
+		self:ResetCountersByWindow("week")
+	end
+
+	method void ResetAllCounters()
+		-- 모든 트리거 카운터를 초기화합니다.
+		self.tCountByTriggerCharacterKey = {}
+	end
+
+	method boolean IsOneTimeTrigger(any tTrigger)
+		-- countWindow가 없으면(none/빈값) 리셋 창이 없는 일회성 트리거로 간주
+		if tTrigger == nil then
+			return false
+		end
+
+		return tTrigger.countWindow == "" or tTrigger.countWindow == "none"
+	end
+
+	method boolean IsTriggerFired(any tTrigger, string characterId)
+		-- 호출 실행 공간에 맞는 완료 캐시로 이미 완료된 일회성 이벤트인지 판정
+		if tTrigger == nil then
+			return false
+		end
+
+		if _EventCompletionManager == nil then
+			return false
+		end
+
+		if self:IsServer() then
+			return _EventCompletionManager:ServerIsEventCompleted(tTrigger.eventId, characterId or "") == true
+		end
+
+		return _EventCompletionManager:ClientIsEventCompleted(tTrigger.eventId, characterId or "") == true
+	end
+
+	method boolean IsEventOneTime(string eventId)
+		-- eventId에 연결된 트리거 중 하나라도 일회성(countWindow=none)이면 true. 서버가 저장 대상 여부를 판정할 때 사용
+		if eventId == nil or eventId == "" then
+			return false
+		end
+
+		if self.IsEventTriggerTableLoaded == false then
+			self:LoadEventTriggerTable()
+		end
+
+		for _, tTrigger in ipairs(self.tTriggers) do
+			if tTrigger.eventId == eventId and self:IsOneTimeTrigger(tTrigger) == true then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	method boolean IsNpcTriggeredEvent(string eventId)
+		-- 클라이언트 공용 실행 요청에서 차단할 NPC 트리거 이벤트 여부 확인
+		if eventId == nil or eventId == "" then
+			return false
+		end
+
+		if self.IsEventTriggerTableLoaded == false then
+			self:LoadEventTriggerTable()
+		end
+
+		for _, tTrigger in ipairs(self.tTriggers) do
+			if tTrigger.eventId == eventId and tTrigger.npcId ~= nil and tTrigger.npcId ~= "" then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	method any BuildTriggerCandidates(string activityType, string activityId, string characterId, string npcId, integer dayProgress, boolean ignoreChance)
+		-- 현재 활동 맥락에서 발동 가능한 후보 트리거 목록을 생성합니다.
+		local candidates = {}
+		local activityKey = self:BuildActivityKey(activityType, activityId)
+		local wildcardKey = self:BuildActivityKey(activityType, "")
+		local sourceLists = { self.tTriggersByActivityKey[activityKey] }
+		if wildcardKey ~= activityKey then
+			table.insert(sourceLists, self.tTriggersByActivityKey[wildcardKey])
+		end
+
+		for _, tSourceList in ipairs(sourceLists) do
+			if tSourceList ~= nil then
+				for _, tTrigger in ipairs(tSourceList) do
+					if self:IsTriggerEligible(tTrigger, activityType, activityId, characterId, npcId, dayProgress, ignoreChance) == true then
+						table.insert(candidates, tTrigger)
+					end
+				end
+			end
+		end
+
+		return candidates
+	end
+
+	method boolean IsTriggerEligible(any tTrigger, string activityType, string activityId, string characterId, string npcId, integer dayProgress, boolean ignoreChance)
+		-- 트리거가 현재 활동/카운트/조건/확률을 모두 통과하는지 확인합니다.
+		if tTrigger == nil or tTrigger.enabled == false then
+			return false
+		end
+
+		if self:IsTriggerMatchedActivity(tTrigger, activityType, activityId, npcId) == false then
+			return false
+		end
+
+		-- 리셋 창이 없는 일회성 트리거는 이미 완료됐다면 다시 선정하지 않는다(도시 스토리 에피소드 등)
+		if self:IsOneTimeTrigger(tTrigger) == true and self:IsTriggerFired(tTrigger, characterId) == true then
+			return false
+		end
+
+		if self:IsCountRequirementMet(tTrigger, characterId) == false then
+			return false
+		end
+
+		if self:IsConditionGroupMet(tTrigger.conditionGroupId, characterId, dayProgress) == false then
+			return false
+		end
+
+		if ignoreChance == true then
+			return true
+		end
+
+		return self:IsChancePassed(tTrigger.chancePercent)
+	end
+
+	method void RecordActivityCount(string activityType, string activityId, string characterId, string npcId)
+		-- 캐릭터별 활동 발생 횟수와 연속 횟수를 트리거 기준으로 갱신합니다.
+		for _, tTrigger in ipairs(self.tTriggers) do
+			if tTrigger.enabled == true and tTrigger.activityType == activityType then
+				local isMatched = self:IsTriggerMatchedActivity(tTrigger, activityType, activityId, npcId)
+				local countKey = self:BuildCounterKey(tTrigger.id, characterId)
+
+				if tTrigger.countType == "total" then
+					if isMatched == true then
+						self.tCountByTriggerCharacterKey[countKey] = (self.tCountByTriggerCharacterKey[countKey] or 0) + 1
+					end
+				elseif tTrigger.countType == "consecutive" then
+					if isMatched == true then
+						self.tCountByTriggerCharacterKey[countKey] = (self.tCountByTriggerCharacterKey[countKey] or 0) + 1
+					else
+						self.tCountByTriggerCharacterKey[countKey] = 0
+					end
+				end
+			end
+		end
+	end
+
+	method boolean IsCountRequirementMet(any tTrigger, string characterId)
+		-- countType과 requiredCount 기준으로 카운트 조건 충족 여부를 반환합니다.
+		if tTrigger.countType == "" or tTrigger.countType == "none" then
+			return true
+		end
+
+		if tTrigger.requiredCount <= 0 then
+			return true
+		end
+
+		local countKey = self:BuildCounterKey(tTrigger.id, characterId)
+		local currentCount = self.tCountByTriggerCharacterKey[countKey] or 0
+		return currentCount >= tTrigger.requiredCount
+	end
+
+	method boolean IsConditionGroupMet(string conditionGroupId, string characterId, integer dayProgress)
+		-- conditionGroupID에 포함된 모든 조건이 충족되는지 확인합니다.
+		if conditionGroupId == nil or conditionGroupId == "" then
+			return true
+		end
+
+		if self.IsConditionTableLoaded == false then
+			self:LoadConditionTable()
+		end
+
+		local tConditions = self.tConditionGroupsById[conditionGroupId]
+		if tConditions == nil or #tConditions <= 0 then
+			log_warning("[EventTriggerManager] condition group not found conditionGroupId=" .. tostring(conditionGroupId))
+			return false
+		end
+
+		for _, tCondition in ipairs(tConditions) do
+			if self:IsConditionMet(tCondition, characterId, dayProgress) == false then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	method boolean IsConditionMet(any tCondition, string characterId, integer dayProgress)
+		-- 단일 조건의 좌변 값을 해석하고 operator/value와 비교합니다.
+		local currentValue = self:ResolveConditionValue(tCondition, characterId, dayProgress)
+		if currentValue == nil then
+			log_warning("[EventTriggerManager] condition value is nil conditionId=" .. tostring(tCondition.id)
+				.. " conditionType=" .. tostring(tCondition.conditionType)
+				.. " targetKey=" .. tostring(tCondition.targetKey))
+			return false
+		end
+
+		local requiredValue = tonumber(tCondition.value) or 0
+		return self:CompareNumber(currentValue, tCondition.operatorKey, requiredValue)
+	end
+
+	method any ResolveConditionValue(any tCondition, string characterId, integer dayProgress)
+		-- conditionType에 따라 현재 캐릭터/진행 상태에서 비교할 값을 가져옵니다.
+		if tCondition.conditionType == "fatigue" then
+			return self:GetCharacterStatValue(characterId, "fatigue")
+		end
+
+		if tCondition.conditionType == "stat" then
+			return self:GetCharacterStatValue(characterId, tCondition.targetKey)
+		end
+
+		if tCondition.conditionType == "weekprogress" then
+			return self:GetCurrentWeekProgress()
+		end
+
+		if tCondition.conditionType == "monthprogress" then
+			return self:GetCurrentMonthProgress()
+		end
+
+		log_warning("[EventTriggerManager] unsupported conditionType=" .. tostring(tCondition.conditionType))
+		return nil
+	end
+
+	method integer GetCurrentWeekProgress()
+		-- 호출 실행 공간에 맞는 진행 캐시에서 현재 주차 반환
+		if _ProgressManager == nil then
+			return 0
+		end
+
+		local tProgress = nil
+		if self:IsServer() then
+			tProgress = _ProgressManager:ServerGetProgress()
+		else
+			tProgress = _ProgressManager:ClientGetProgress()
+		end
+		if tProgress == nil then
+			return 0
+		end
+
+		return tProgress.currentWeek or 0
+	end
+
+	method integer GetCurrentMonthProgress()
+		-- 호출 실행 공간에 맞는 진행 캐시에서 현재 월 반환
+		if _ProgressManager == nil then
+			return 0
+		end
+
+		local tProgress = nil
+		if self:IsServer() then
+			tProgress = _ProgressManager:ServerGetProgress()
+		else
+			tProgress = _ProgressManager:ClientGetProgress()
+		end
+		if tProgress == nil then
+			return 0
+		end
+
+		return tProgress.currentMonth or 0
+	end
+
+	method any GetCharacterStatValue(string characterId, string statKey)
+		-- 호출 실행 공간에 맞는 CharacterManager 캐시에서 캐릭터 스탯 조회
+		if characterId == nil or characterId == "" then
+			return nil
+		end
+
+		local tCharacter = nil
+		if self:IsServer() then
+			tCharacter = _CharacterManager:ServerGetCharacterById(characterId)
+		else
+			tCharacter = _CharacterManager:ClientGetCharacterById(characterId)
+		end
+		if tCharacter == nil then
+			return nil
+		end
+
+		if statKey == "vocal" then
+			return tCharacter.vocal
+		elseif statKey == "dance" then
+			return tCharacter.dance
+		elseif statKey == "visual" then
+			return tCharacter.visual
+		elseif statKey == "fatigue" then
+			return tCharacter.fatigue
+		end
+
+		return nil
+	end
+
+	method boolean CompareNumber(number currentValue, string operatorKey, number requiredValue)
+		-- 숫자 조건 비교 연산자를 처리합니다.
+		if operatorKey == ">=" then
+			return currentValue >= requiredValue
+		elseif operatorKey == "<=" then
+			return currentValue <= requiredValue
+		elseif operatorKey == ">" then
+			return currentValue > requiredValue
+		elseif operatorKey == "<" then
+			return currentValue < requiredValue
+		elseif operatorKey == "==" or operatorKey == "=" then
+			return currentValue == requiredValue
+		elseif operatorKey == "!=" or operatorKey == "~=" then
+			return currentValue ~= requiredValue
+		end
+
+		log_warning("[EventTriggerManager] unsupported condition operator=" .. tostring(operatorKey))
+		return false
+	end
+
+	method boolean IsChancePassed(number chancePercent)
+		-- chancePercent 기준으로 확률 판정을 수행합니다.
+		if chancePercent <= 0 then
+			return false
+		end
+
+		if chancePercent >= 100 then
+			return true
+		end
+
+		local roll = math.random(1, 100)
+		return roll <= chancePercent
+	end
+
+	method boolean IsTriggerMatchedActivity(any tTrigger, string activityType, string activityId, string npcId)
+		-- 트리거의 activityType/activityID/npcID가 현재 활동 맥락과 일치하는지 확인합니다.
+		if tTrigger.activityType ~= activityType then
+			return false
+		end
+
+		if tTrigger.activityId ~= nil and tTrigger.activityId ~= "" and tTrigger.activityId ~= activityId then
+			return false
+		end
+
+		if tTrigger.npcId ~= nil and tTrigger.npcId ~= "" and tTrigger.npcId ~= npcId then
+			return false
+		end
+
+		return true
+	end
+
+	method boolean IsHigherPriority(any left, any right)
+		-- priorityRank가 높고 requiredCount가 큰 트리거를 먼저 정렬합니다.
+		if left.priorityRank ~= right.priorityRank then
+			return left.priorityRank > right.priorityRank
+		end
+
+		if left.requiredCount ~= right.requiredCount then
+			return left.requiredCount > right.requiredCount
+		end
+
+		return left.id < right.id
+	end
+
+	method void ResetTriggeredUntilTriggerCounts(any tSelectedTriggers, string characterId)
+		-- 발동된 트리거 중 untilTrigger countWindow를 가진 카운터를 초기화합니다.
+		if tSelectedTriggers == nil then
+			return
+		end
+
+		for _, tTrigger in ipairs(tSelectedTriggers) do
+			if tTrigger.countWindow == "untiltrigger" then
+				local countKey = self:BuildCounterKey(tTrigger.id, characterId)
+				self.tCountByTriggerCharacterKey[countKey] = 0
+			end
+		end
+	end
+
+	method void ResetCountersByWindow(string countWindow)
+		-- 지정한 countWindow에 해당하는 트리거 카운터를 초기화합니다.
+		local normalizedWindow = self:NormalizeKey(countWindow)
+		for _, tTrigger in ipairs(self.tTriggers) do
+			if tTrigger.countWindow == normalizedWindow then
+				self:ResetCounterByTriggerId(tTrigger.id)
+			end
+		end
+	end
+
+	method void ResetCounterByTriggerId(string triggerId)
+		-- 특정 triggerID에 연결된 모든 캐릭터 카운터를 초기화합니다.
+		local prefix = triggerId .. "|"
+		local prefixLength = string.len(prefix)
+		local removeKeys = {}
+		for countKey, _ in pairs(self.tCountByTriggerCharacterKey) do
+			if string.sub(countKey, 1, prefixLength) == prefix then
+				table.insert(removeKeys, countKey)
+			end
+		end
+
+		for _, countKey in ipairs(removeKeys) do
+			self.tCountByTriggerCharacterKey[countKey] = nil
+		end
+	end
+
+	method integer GetTableKeyCount(any t)
+		-- dictionary table의 key 개수를 계산합니다.
+		local count = 0
+		if t == nil then
+			return count
+		end
+
+		for _, value in pairs(t) do
+			if value ~= nil then
+				count = count + 1
+			end
+		end
+
+		return count
+	end
+
+	method void AddTriggerToActivityCache(any tTrigger)
+		-- activityType/activityID 조합으로 빠르게 조회할 수 있도록 트리거를 캐싱합니다.
+		local activityKey = self:BuildActivityKey(tTrigger.activityType, tTrigger.activityId)
+		if self.tTriggersByActivityKey[activityKey] == nil then
+			self.tTriggersByActivityKey[activityKey] = {}
+		end
+
+		table.insert(self.tTriggersByActivityKey[activityKey], tTrigger)
+	end
+
+	method string BuildActivityKey(string activityType, string activityId)
+		-- activityType과 activityID를 하나의 캐시 키로 변환합니다.
+		return self:NormalizeKey(activityType) .. "|" .. (activityId or "")
+	end
+
+	method string BuildCounterKey(string triggerId, string characterId)
+		-- triggerID와 characterID를 캐릭터별 카운터 키로 변환합니다.
+		return (triggerId or "") .. "|" .. (characterId or "")
+	end
+
+	method integer GetPriorityRank(string priority)
+		-- priority 문자열을 정렬 가능한 정수 순위로 변환합니다.
+		local key = self:NormalizeKey(priority)
+		if key == "urgent" or key == "critical" or key == "emergency" or key == "긴급" then
+			return 4
+		elseif key == "high" or key == "상" then
+			return 3
+		elseif key == "normal" or key == "medium" or key == "중" then
+			return 2
+		elseif key == "low" or key == "하" then
+			return 1
+		end
+
+		return 0
+	end
+
+	method boolean ParseBoolean(string value, boolean defaultValue)
+		-- CSV 문자열을 boolean 값으로 변환합니다.
+		local key = self:NormalizeKey(value)
+		if key == "" then
+			return defaultValue
+		end
+
+		return key == "true" or key == "1" or key == "yes" or key == "y"
+	end
+
+	method string NormalizeKey(string value)
+		-- 비교용 문자열을 nil-safe lower-case 값으로 정규화합니다.
+		if value == nil then
+			return ""
+		end
+
+		return string.lower(value)
+	end
+
+end

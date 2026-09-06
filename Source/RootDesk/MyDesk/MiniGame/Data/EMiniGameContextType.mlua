@@ -1,0 +1,30 @@
+@Logic
+script EMiniGameContextType extends Logic
+
+	-- 미니게임을 호출한 상위 콘텐츠 문맥 enum 상수.
+	property integer None = -1
+	property integer Standalone = 0
+	property integer Event = 1
+	property integer Performance = 2
+
+	method boolean IsValid(integer contextType)
+		-- 알려진 실행 문맥인지 반환한다.
+		return contextType == self.Standalone
+			or contextType == self.Event
+			or contextType == self.Performance
+	end
+
+	method string ToName(integer contextType)
+		-- 디버그 출력용 실행 문맥 이름을 반환한다.
+		if contextType == self.Standalone then
+			return "Standalone"
+		elseif contextType == self.Event then
+			return "Event"
+		elseif contextType == self.Performance then
+			return "Performance"
+		end
+
+		return "None"
+	end
+
+end

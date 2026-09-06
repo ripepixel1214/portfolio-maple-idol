@@ -1,0 +1,348 @@
+-- 이벤트 타입에 따라 결과 적용, 미니게임 시작, 선택지 표시 흐름을 중계합니다.
+@Logic
+script EventExecutor extends Logic
+
+	property string UI_EVENT_RESULT_TITLE_KEY = "ui.common.event_result"
+
+	-- 세션별 대기 이벤트 컨텍스트
+	property any miniGameContextBySession = {}
+
+	property any miniGameResultEventHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 미니게임 결과 이벤트를 구독해 이벤트 결과 적용 흐름으로 연결합니다.
+		self.miniGameContextBySession = {}
+		if _MiniGameManager == nil then
+			log_warning("[EventExecutor] MiniGameManager not found")
+			return
+		end
+
+		self.miniGameResultEventHandler = _MiniGameManager:ConnectEvent(MiniGameResultEvent, self.OnMiniGameCompleted)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 구독한 미니게임 결과 이벤트 핸들러를 정리합니다.
+		if self.miniGameResultEventHandler ~= nil and _MiniGameManager ~= nil then
+			_MiniGameManager:DisconnectEvent(MiniGameResultEvent, self.miniGameResultEventHandler)
+			self.miniGameResultEventHandler = nil
+		end
+		self.miniGameContextBySession = {}
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestExecuteEvent(string eventId, string characterId)
+		-- 호환용 공개 입구에서 NPC 트리거 이벤트 직접 실행을 차단
+		if _EventTriggerManager ~= nil and _EventTriggerManager:IsNpcTriggeredEvent(eventId) == true then
+			log_warning("[EventExecutor] direct npc event request rejected userId=" .. tostring(senderUserId)
+				.. " eventId=" .. tostring(eventId))
+			return false
+		end
+
+		return self:ExecuteEvent(eventId, characterId, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ExecuteEvent(string eventId, string characterId, string requesterUserId)
+		-- 서버에서 이벤트 ID를 기준으로 이벤트 타입에 맞는 실행 흐름을 분기합니다.
+		local tEvent = _EventMaster:GetEvent(eventId)
+		if tEvent == nil then
+			log_warning("[EventExecutor] event not found eventId=" .. tostring(eventId))
+			return false
+		end
+
+		local eventType = tEvent.eventType
+		if _EEventType:IsValid(eventType) == false then
+			log_warning("[EventExecutor] invalid eventType=" .. _EEventType:ToKey(eventType) .. ", eventId=" .. tostring(eventId))
+			return false
+		end
+
+		-- EventTable에 characterId가 지정돼 있으면 그것을 우선하고, 없으면 호출자가 넘긴 인자를 사용한다.
+		local resolvedCharacterId = characterId
+		if tEvent.characterId ~= nil and tEvent.characterId ~= "" then
+			resolvedCharacterId = tEvent.characterId
+		end
+
+		if eventType == _EEventType.Straight then
+			return self:ApplyEventResult(tEvent, true, resolvedCharacterId, requesterUserId)
+		end
+
+		if eventType == _EEventType.MiniGame then
+			return self:StartMiniGameEvent(tEvent, resolvedCharacterId, requesterUserId)
+		end
+
+		if eventType == _EEventType.Choice then
+			return self:StartChoiceEvent(tEvent, resolvedCharacterId, requesterUserId)
+		end
+
+		if eventType == _EEventType.Dialog then
+			return self:StartDialogEvent(tEvent, resolvedCharacterId, requesterUserId)
+		end
+
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean StartDialogEvent(any tEvent, string characterId, string requesterUserId)
+		-- Dialog 이벤트는 연결된 DialogTable 대화를 요청 클라이언트에 열도록 지시합니다.
+		if tEvent.dialogId == nil or tEvent.dialogId == "" then
+			log_warning("[EventExecutor] dialogId is empty eventId=" .. tostring(tEvent.id))
+			return false
+		end
+
+		if requesterUserId ~= nil and requesterUserId ~= "" then
+			self:OpenDialogByEvent(tEvent.dialogId, characterId or "", requesterUserId)
+		else
+			self:OpenDialogByEvent(tEvent.dialogId, characterId or "")
+		end
+
+		return true
+	end
+
+	@ExecSpace("Client")
+	method void OpenDialogByEvent(string dialogId, string characterId)
+		-- 이벤트 실행 흐름에서 필요한 대화 표시를 DialogUILogic의 옵션 기반 Open API로 위임합니다.
+		if _DialogUILogic == nil then
+			log_warning("[EventExecutor] DialogUILogic not found dialogId=" .. tostring(dialogId))
+			return
+		end
+
+		local options = DialogOpenOptions()
+		options.dialogId = dialogId or ""
+		_DialogUILogic:Open(options)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyEventResult(any tEvent, boolean isSuccess, string characterId, string requesterUserId)
+		-- 이벤트 성공/실패 여부에 맞는 결과 ID를 찾아 실제 결과 핸들러에 위임합니다.
+		local eventResultId = ""
+		if isSuccess == true then
+			eventResultId = tEvent.successResultId
+		else
+			eventResultId = tEvent.failResultId
+		end
+
+		if eventResultId == nil or eventResultId == "" then
+			log_warning("[EventExecutor] eventResultId is empty eventId=" .. tostring(tEvent.id) .. ", isSuccess=" .. tostring(isSuccess))
+			self:PushEventExecutionFailed(tEvent.id, "", characterId or "", isSuccess, requesterUserId)
+			return false
+		end
+
+		local applyResult = _EventResultHandler:ApplyEventResultActions(tEvent.id, eventResultId, characterId, requesterUserId)
+		self:SyncResultDataToRequester(requesterUserId)
+		if applyResult == nil or applyResult.isApplied ~= true then
+			self:PushEventExecutionFailed(tEvent.id, eventResultId, characterId or "", isSuccess, requesterUserId)
+			return false
+		end
+
+		self:PushEventExecutionCompleted(tEvent.id, eventResultId, characterId or "", isSuccess, applyResult.hasChange, requesterUserId)
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SyncResultDataToRequester(string requesterUserId)
+		-- 이벤트 결과로 변경된 서버 권위 데이터(진행/캐릭터)를 요청 클라이언트 캐시로 동기화. 결과 핸들러가 저수준 Apply*를 직접 호출해 push가 빠지므로 여기서 보강
+		if requesterUserId == nil or requesterUserId == "" then
+			return
+		end
+
+		if _ProgressManager ~= nil then
+			_ProgressManager:PushProgressToClient(requesterUserId)
+		end
+
+		if _CharacterManager ~= nil then
+			_CharacterManager:PushCharactersToClient(requesterUserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean StartMiniGameEvent(any tEvent, string characterId, string requesterUserId)
+		-- 이벤트에 연결된 미니게임을 이벤트 컨텍스트로 시작하고 결과 대기 상태를 기록합니다.
+		if tEvent.miniGameId == nil or tEvent.miniGameId == "" then
+			log_warning("[EventExecutor] miniGameId is empty eventId=" .. tostring(tEvent.id))
+			return false
+		end
+
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = tEvent.miniGameId
+		tStartOptions.ownerUserId = requesterUserId
+		tStartOptions.contextType = _EMiniGameContextType.Event
+		tStartOptions.contextId = tEvent.id
+		tStartOptions.presentationActorId = characterId or ""
+		local startedSessionId = _MiniGameManager:CreateMiniGameSession(tStartOptions)
+		if startedSessionId == nil or startedSessionId == "" then
+			return false
+		end
+
+		self.miniGameContextBySession[startedSessionId] = {
+			eventId = tEvent.id,
+			characterId = characterId or "",
+			requesterUserId = requesterUserId or ""
+		}
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnMiniGameCompleted(MiniGameResultEvent event)
+		-- 대기 중인 이벤트 미니게임 결과를 성공 여부에 맞는 이벤트 결과 액션으로 적용합니다.
+		if event == nil or event.sessionId == nil or event.sessionId == "" then
+			return
+		end
+
+		local context = self.miniGameContextBySession[event.sessionId]
+		if context == nil then
+			return
+		end
+		if event.contextType ~= _EMiniGameContextType.Event
+			or event.contextId ~= context.eventId then
+			return
+		end
+		if context.requesterUserId ~= ""
+			and event.userId ~= context.requesterUserId then
+			return
+		end
+
+		local tEvent = _EventMaster:GetEvent(context.eventId)
+		if tEvent == nil then
+			log_warning("[EventExecutor] pending event not found eventId=" .. tostring(context.eventId))
+			self:ClearMiniGameContext(event.sessionId)
+			return
+		end
+
+		if event.resultType ~= _EMiniGameResultType.Canceled then
+			self:ApplyEventResult(tEvent, event.isSuccess, context.characterId, context.requesterUserId)
+		end
+		self:ClearMiniGameContext(event.sessionId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearMiniGameContext(string sessionId)
+		-- 지정 세션의 대기 이벤트 컨텍스트 제거
+		if sessionId == nil or sessionId == "" then
+			return
+		end
+		self.miniGameContextBySession[sessionId] = nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean StartChoiceEvent(any tEvent, string characterId, string requesterUserId)
+		-- choice 이벤트에 연결된 선택지 이벤트 ID 목록을 요청 클라이언트 UI에 전달합니다.
+		local tChoiceEventIds = _EventMaster:GetChoiceEventIds(tEvent.id)
+		if self:HasChoiceEventId(tChoiceEventIds) == false then
+			log_warning("[EventExecutor] choice event ids are empty eventId=" .. tostring(tEvent.id))
+			return false
+		end
+
+		if requesterUserId ~= nil and requesterUserId ~= "" then
+			_ChoiceEventUILogic:Open(tChoiceEventIds, characterId or "", requesterUserId)
+		else
+			_ChoiceEventUILogic:Open(tChoiceEventIds, characterId or "")
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HasChoiceEventId(any tChoiceEventIds)
+		-- 선택지 이벤트 ID 목록에 실제로 사용할 ID가 하나라도 있는지 확인합니다.
+		if tChoiceEventIds == nil then
+			return false
+		end
+
+		for index = 1, 5 do
+			local choiceEventId = tChoiceEventIds[index]
+			if choiceEventId ~= nil and choiceEventId ~= "" then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushEventExecutionCompleted(string eventId, string eventResultId, string characterId, boolean isSuccess, boolean shouldOpenPopup, string requesterUserId)
+		-- 이벤트 실행 완료 결과를 요청 클라이언트에 전달합니다. 요청자가 없으면 기존 호출 흐름처럼 전체 클라이언트에 반영합니다.
+		if requesterUserId ~= nil and requesterUserId ~= "" then
+			self:SyncEventExecutionCompleted(eventId, eventResultId, characterId, isSuccess, requesterUserId)
+			if shouldOpenPopup == true then
+				self:OpenEventResultPopup(eventId, eventResultId, requesterUserId)
+			end
+			return
+		end
+
+		self:SyncEventExecutionCompleted(eventId, eventResultId, characterId, isSuccess)
+		if shouldOpenPopup == true then
+			self:OpenEventResultPopup(eventId, eventResultId)
+		end
+	end
+
+	@ExecSpace("Client")
+	method void SyncEventExecutionCompleted(string eventId, string eventResultId, string characterId, boolean isSuccess)
+		-- 서버에서 완료된 이벤트 실행 결과를 클라이언트 이벤트로 반영합니다.
+		local eventExecutionCompletedEvent = EventExecutionCompletedEvent()
+		eventExecutionCompletedEvent.eventId = eventId or ""
+		eventExecutionCompletedEvent.eventResultId = eventResultId or ""
+		eventExecutionCompletedEvent.characterId = characterId or ""
+		eventExecutionCompletedEvent.isSuccess = isSuccess
+		self:SendEvent(eventExecutionCompletedEvent)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushEventExecutionFailed(string eventId, string eventResultId, string characterId, boolean isSuccess, string requesterUserId)
+		-- 결과 액션 적용 실패를 요청 클라이언트에 전달합니다. 실패 시에는 결과 팝업을 열지 않습니다.
+		if requesterUserId ~= nil and requesterUserId ~= "" then
+			self:SyncEventExecutionFailed(eventId, eventResultId, characterId, isSuccess, requesterUserId)
+			return
+		end
+
+		self:SyncEventExecutionFailed(eventId, eventResultId, characterId, isSuccess)
+	end
+
+	@ExecSpace("Client")
+	method void SyncEventExecutionFailed(string eventId, string eventResultId, string characterId, boolean isSuccess)
+		-- 서버에서 결과 적용에 실패한 이벤트를 클라이언트 이벤트로 반영합니다.
+		local eventExecutionFailedEvent = EventExecutionFailedEvent()
+		eventExecutionFailedEvent.eventId = eventId or ""
+		eventExecutionFailedEvent.eventResultId = eventResultId or ""
+		eventExecutionFailedEvent.characterId = characterId or ""
+		eventExecutionFailedEvent.isSuccess = isSuccess
+		self:SendEvent(eventExecutionFailedEvent)
+	end
+
+	@ExecSpace("Client")
+	method void OpenEventResultPopup(string eventId, string eventResultId)
+		-- 이벤트 결과 설명이 있으면 범용 결과 팝업으로 표시합니다.
+		if eventResultId == nil or eventResultId == "" then
+			return
+		end
+
+		if _EventResultMaster == nil or _ResultPopupUILogic == nil then
+			return
+		end
+
+		local message = _EventResultMaster:GetFormattedDescriptionByEvent(eventId, eventResultId)
+		if message == nil or message == "" then
+			return
+		end
+
+		-- 결과 팝업을 띄우기 직전, 진행하던 미니게임 UI 패널을 즉시 닫는다. (미니게임 자체 자동 종료 지연을 기다리지 않음)
+		if _MiniGameUIRouter ~= nil then
+			_MiniGameUIRouter:CloseActive()
+		end
+
+		-- 이벤트 대화가 열려 있으면 함께 닫는다. (도시 이벤트: 결과 팝업이 대화의 마지막이라 대화 닫힘=이벤트 완료 흐름과 일치)
+		-- IsDialogOpen 가드로 대화가 없는 이벤트에서 불필요한 DialogClosedEvent 발생을 막는다.
+		if _DialogUILogic ~= nil and _DialogUILogic:IsDialogOpen() == true then
+			_DialogUILogic:Close()
+		end
+
+		local title = "이벤트 결과"
+		if _LocalizationLogic ~= nil then
+			title = _LocalizationLogic:GetText(self.UI_EVENT_RESULT_TITLE_KEY, title)
+		end
+		_ResultPopupUILogic:OpenWithTitle(title, message, nil)
+	end
+end

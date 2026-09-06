@@ -1,0 +1,260 @@
+---@description "NPC 상호작용/이벤트/대화 및 DefaultUI를 제외한 모든 UI가 열려 있는 동안 로컬 플레이어 조작(키보드 입력)을 잠그고 중복 상호작용을 막는 전역 게이트. 활성 holder가 하나라도 있으면 잠금 상태로 본다."
+@Logic
+script NpcInteractionGateLogic extends Logic
+
+	-- 현재 잠금을 점유 중인 holder 집합 (key=holder 이름, value=true)
+	property any holders = {}
+
+	-- 현재 활성 holder 개수
+	property integer holderCount = 0
+
+	-- 이동을 잠그기 직전의 PlayerControllerComponent.Enable 값 (복구용)
+	property boolean savedControllerEnable = true
+
+	-- 이동을 잠근 맵 이름. 맵을 넘긴 뒤 이전 맵의 조작 상태를 복원하지 않기 위해 사용합니다.
+	@HideFromInspector
+	property string frozenMapName = ""
+
+	-- 현재 로컬 플레이어 이동이 게이트에 의해 잠겨 있는지
+	property boolean isPlayerFrozen = false
+
+	property any visibilityChangedHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- DefaultUI를 제외한 모든 UI의 표시 상태를 공통 알림 로직으로부터 구독해 입력 잠금에 반영합니다.
+		if _UIVisibilityNotifierLogic ~= nil then
+			self.visibilityChangedHandler = _UIVisibilityNotifierLogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 맵 전환 컴포넌트가 컨트롤러를 다시 켜더라도 holder가 남아 있는 동안에는 입력 잠금을 유지합니다.
+		if self.holderCount <= 0 then
+			return
+		end
+
+		if self.isPlayerFrozen == false then
+			self:FreezePlayer()
+			return
+		end
+
+		self:MaintainPlayerFreeze()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 공통 UI 표시 상태 이벤트 구독을 해제합니다.
+		if self.visibilityChangedHandler ~= nil and _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:DisconnectEvent(UIVisibilityChangedEvent, self.visibilityChangedHandler)
+		end
+
+		self.visibilityChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsLocked()
+		-- 활성 holder가 하나라도 있으면 잠금 상태로 본다.
+		return self.holderCount > 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUIVisibilityChanged(any uiVisibilityChangedEvent)
+		-- DefaultUI를 제외한 모든 UI의 표시 상태를 같은 uiId holder에 반영합니다.
+		if uiVisibilityChangedEvent == nil then
+			return
+		end
+
+		local uiId = uiVisibilityChangedEvent.uiId or ""
+		if self:IsBlockingUi(uiId) == false then
+			return
+		end
+
+		if uiVisibilityChangedEvent.isOpen == true then
+			self:Hold(uiId)
+		else
+			self:Unhold(uiId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsBlockingUi(string uiId)
+		-- 비어 있거나 DefaultUI를 가리키는 식별자는 입력 잠금 사유에서 제외합니다.
+		if uiId == nil or uiId == "" then
+			return false
+		end
+
+		local normalizedUiId = string.lower(uiId)
+		return normalizedUiId ~= "default" and normalizedUiId ~= "defaultui"
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean TryBeginInteraction()
+		-- 이미 잠겨 있으면 상호작용 시작을 거부한다(연타/중복 상호작용 차단).
+		if self:IsLocked() == true then
+			return false
+		end
+
+		self:Hold("interaction")
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Hold(string holderKey)
+		-- holder를 추가하고, 첫 holder라면 로컬 플레이어 이동을 잠근다.
+		if holderKey == nil or holderKey == "" then
+			return
+		end
+
+		if self.holders[holderKey] == true then
+			return
+		end
+
+		self.holders[holderKey] = true
+		self.holderCount = self.holderCount + 1
+
+		-- 첫 holder가 추가되는 순간에만 이동을 잠근다.
+		if self.holderCount == 1 then
+			self:FreezePlayer()
+		end
+
+		log("[NpcInteractionGate] hold key=" .. holderKey .. " count=" .. tostring(self.holderCount))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Unhold(string holderKey)
+		-- holder를 제거하고, 모든 holder가 해제되면 로컬 플레이어 이동을 복구한다.
+		if holderKey == nil or holderKey == "" then
+			return
+		end
+
+		if self.holders[holderKey] ~= true then
+			return
+		end
+
+		self.holders[holderKey] = nil
+		self.holderCount = self.holderCount - 1
+		if self.holderCount < 0 then
+			self.holderCount = 0
+		end
+
+		log("[NpcInteractionGate] unhold key=" .. holderKey .. " count=" .. tostring(self.holderCount))
+
+		-- 마지막 holder가 빠지는 순간에만 이동을 복구한다.
+		if self.holderCount <= 0 then
+			self:RestorePlayer()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FreezePlayer()
+		-- 로컬 플레이어의 조작을 끄고 잔여 이동을 멈춘다. 잠그기 직전의 Enable 값을 저장해 둔다.
+		local player = _UserService.LocalPlayer
+		if isvalid(player) == false then
+			return
+		end
+
+		self.frozenMapName = ""
+		if isvalid(player.CurrentMap) == true then
+			self.frozenMapName = player.CurrentMap.Name
+		end
+
+		local controller = player:GetComponent("PlayerControllerComponent")
+		if isvalid(controller) == true then
+			self.savedControllerEnable = controller.Enable
+			controller.Enable = false
+		end
+
+		-- 잔여 입력으로 미끄러지지 않도록 즉시 정지
+		local move = player.MovementComponent
+		if isvalid(move) == true then
+			move:Stop()
+		end
+
+		self.isPlayerFrozen = true
+		log("[NpcInteractionGate] freeze player=" .. tostring(player.Name))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void MaintainPlayerFreeze()
+		-- 잠금 도중 맵이 바뀌면 목적지 맵의 정상 조작 상태를 새 복원값으로 저장하고 잠금 자체는 계속 유지합니다.
+		local player = _UserService.LocalPlayer
+		if isvalid(player) == false then
+			return
+		end
+
+		local currentMap = player.CurrentMap
+		local currentMapName = ""
+		if isvalid(currentMap) == true then
+			currentMapName = currentMap.Name
+		end
+
+		if currentMapName ~= "" and currentMapName ~= self.frozenMapName then
+			self.frozenMapName = currentMapName
+			self.savedControllerEnable = self:ResolveControllerEnableForMap(currentMap)
+			log("[NpcInteractionGate] carry freeze to map=" .. currentMapName
+				.. " restoreEnable=" .. tostring(self.savedControllerEnable))
+		end
+
+		local controller = player:GetComponent("PlayerControllerComponent")
+		if isvalid(controller) == true and controller.Enable == true then
+			controller.Enable = false
+			local move = player.MovementComponent
+			if isvalid(move) == true then
+				move:Stop()
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ResolveControllerEnableForMap(Entity map)
+		-- PlayerDisableComponent가 조작을 막는 맵은 false, 일반 플레이 맵은 true를 반환합니다.
+		if isvalid(map) == false then
+			return self.savedControllerEnable
+		end
+
+		local playerDisable = map:GetComponent("script.PlayerDisableComponent")
+		if isvalid(playerDisable) == true
+			and playerDisable.Enable == true
+			and playerDisable.BlockControl == true then
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestorePlayer()
+		-- 같은 맵이면 잠그기 직전 상태로, 맵이 바뀌었다면 목적지 맵의 정상 조작 상태로 복구합니다.
+		if self.isPlayerFrozen == false then
+			return
+		end
+
+		local player = _UserService.LocalPlayer
+		if isvalid(player) == true then
+			local controller = player:GetComponent("PlayerControllerComponent")
+			if isvalid(controller) == true then
+				local currentMapName = ""
+				if isvalid(player.CurrentMap) == true then
+					currentMapName = player.CurrentMap.Name
+				end
+
+				local mapChanged = self.frozenMapName ~= ""
+					and currentMapName ~= ""
+					and self.frozenMapName ~= currentMapName
+				if mapChanged == true then
+					self.savedControllerEnable = self:ResolveControllerEnableForMap(player.CurrentMap)
+				end
+
+				controller.Enable = self.savedControllerEnable
+			end
+		end
+
+		self.isPlayerFrozen = false
+		self.savedControllerEnable = true
+		self.frozenMapName = ""
+		log("[NpcInteractionGate] restore player")
+	end
+
+end

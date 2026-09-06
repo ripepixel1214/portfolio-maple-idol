@@ -1,0 +1,859 @@
+---@description "공연 지휘자. 공연 큐를 로컬 시계(OnUpdate)로 시간순 재생하고 큐 타입별 핸들러로 분기한다. v1: 클라이언트 재생."
+@Logic
+script PerformanceConductor extends Logic
+
+	property boolean isPlaying = false
+
+	property string currentPerformanceId = ""
+
+	-- 진입 후 공연 재생(BGM+큐) 시작까지의 딜레이(초). 이 동안 무대는 준비된 채 함성만 재생
+	property number startDelaySeconds = 5
+
+	-- 시작 딜레이 대기 중 여부
+	property boolean isWaitingToStart = false
+
+	-- 남은 시작 딜레이(초)
+	property number startDelayRemaining = 0
+
+	-- 진입 시 즉시 재생할 함성 효과음 RUID
+	property string crowdCheerRuid = "4cb1653159ea487eb5a35cf72073bc68"
+
+	-- 로컬 재생 시계(초)
+	property number elapsed = 0
+	-- 다음에 dispatch할 큐 인덱스 (time 오름차순)
+	property integer nextCueIndex = 1
+	-- 현재 공연 큐 리스트 (PerformanceCueRow[], time 오름차순)
+	property any cues = {}
+	-- 현재 공연 헤더 (PerformanceRow)
+	property any header = nil
+	-- 자동 숨김 대기 목록 [{preset=EPerformanceUIPreset 값, hideTime}] — ui_show가 duration 후 자동 숨김
+	property any pendingHides = {}
+
+	-- 역할별 댄서 엔티티 레지스트리 {center=Entity, sub_L=Entity, sub_R=Entity}
+	property any dancers = {}
+
+	-- 진행 중인 캐릭터 이동 트윈 목록 [{entity, fromX, fromY, toX, toY, z, elapsed, duration}]
+	property any charMoves = {}
+
+	-- 공연 중 플레이어 이동을 잠갔는지 여부 (종료 시 해제용)
+	property boolean playerParked = false
+
+	-- 공연 중 플레이어를 배치할 무대 앵커 좌표 (맵 진입 위치)
+	property number stageAnchorX = 0
+	property number stageAnchorY = 0
+
+	-- 공연 전용 단일 카메라 엔티티 이름
+	property string stageCameraName = "PerformanceCameraCenter"
+
+	-- 공연 전 사용하던 카메라 (종료 시 복구)
+	property any savedCamera = nil
+
+	-- 진행 중인 카메라 이동(팬) 트윈 {cam, fromX, fromY, toX, toY, elapsed, duration} 또는 nil
+	property any cameraMove = nil
+
+	-- 현재 공연 카메라 CameraComponent + 진입 시 CameraOffset (종료 시 원복용)
+	property any stageCam = nil
+	property Vector2 stageCamBaseOffset = Vector2(0, 0)
+
+	-- 역할별 배정된 캐릭터 (PerformanceRoleAssignment 구조체) — 공연 시작 시 코스튬 적용에 사용
+	property any tRoleAssignment = nil
+
+	-- 진입 대기 중인 공연 id (맵 로드 완료를 기다렸다가 시작)
+	property string pendingPerformanceId = ""
+
+	-- 진입 대기 중인 역할 배정 (PerformanceRoleAssignment 구조체)
+	property any pendingRoleAssignment = nil
+
+	-- 공연 맵 이름 (단일 진입점에서 이동할 대상 맵 루트 이름)
+	property string performanceMapName = "Map_Performance"
+
+	@ExecSpace("ClientOnly")
+	method void StartPerformanceFlow(string performanceId, PerformanceRoleAssignment roleAssignment)
+		-- 공연 단일 진입점: 역할 배정(PerformanceRoleAssignment)을 저장하고 공연 맵으로 이동한 뒤, 맵이 준비되면 자동으로 공연을 시작
+		if performanceId == nil or performanceId == "" then
+			log_warning("[Conductor] StartPerformanceFlow: performanceId가 비어 있음")
+			return
+		end
+
+		self.pendingPerformanceId = performanceId
+		self.pendingRoleAssignment = roleAssignment
+
+		-- 공연 흐름 시작 즉시 기본 HUD를 숨긴다(맵 로드 전 잔상 방지). 종료 시 복구.
+		self:SetHudHidden(true)
+
+		local player = _UserService.LocalPlayer
+		if player == nil or player.PlayerComponent == nil then
+			log_warning("[Conductor] StartPerformanceFlow: LocalPlayer 없음")
+			return
+		end
+
+		-- 공연 맵으로 이동 (이미 공연 맵이면 다음 OnUpdate에서 바로 시작됨)
+		player.PlayerComponent:MoveToMapPosition(self.performanceMapName, Vector2(self.stageAnchorX, self.stageAnchorY))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TryBeginPendingPerformance()
+		-- 공연 맵 로드가 끝나 무대 댄서가 준비되면 대기 중이던 공연을 시작 (맵 진입 브릿지)
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return
+		end
+		local map = player.CurrentMap
+		if isvalid(map) == false then
+			return
+		end
+		-- 무대 댄서(DancerCenter)가 맵에 나타났는지로 맵 준비 완료를 판정
+		if isvalid(map:GetChildByName("DancerCenter", true)) == false then
+			return
+		end
+
+		local pid = self.pendingPerformanceId
+		self.tRoleAssignment = self.pendingRoleAssignment
+		self.pendingPerformanceId = ""
+		self.pendingRoleAssignment = nil
+		self:StartPerformance(pid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartPerformance(string performanceId)
+		-- 공연을 로컬에서 재생 시작 (BGM + 시계 + 큐 dispatch 준비 + 무대 셋업)
+		if _PerformanceMaster == nil then
+			log_warning("[Conductor] PerformanceMaster 없음")
+			return
+		end
+
+		local tHeader = _PerformanceMaster:GetPerformance(performanceId)
+		if tHeader == nil then
+			log_warning("[Conductor] 공연을 찾을 수 없음 id=" .. tostring(performanceId))
+			return
+		end
+
+		self.header = tHeader
+		self.cues = _PerformanceMaster:GetCues(performanceId)
+		self.currentPerformanceId = performanceId
+		self.elapsed = 0
+		self.nextCueIndex = 1
+		self.pendingHides = {}
+		self.charMoves = {}
+		self.cameraMove = nil
+		-- 재생(큐 시계)은 아직 시작하지 않는다: startDelaySeconds 후 BeginPerformancePlayback에서 시작
+		self.isPlaying = false
+
+		-- 공연 중 기본 HUD(DefaultUI) 숨김 (F10 직접 시작 등 흐름 진입을 거치지 않는 경로 대비, 멱등)
+		self:SetHudHidden(true)
+
+		-- 무대 셋업: 역할별 댄서 확보 + 플레이어 고정 (딜레이 동안 무대가 준비된 채로 보이도록 즉시 수행)
+		self:SetupStage()
+
+		-- 진입 즉시 함성 효과음 재생
+		if _SoundManager ~= nil and self.crowdCheerRuid ~= "" then
+			_SoundManager:PlaySfx(self.crowdCheerRuid, 1)
+		end
+
+		-- startDelaySeconds 후 실제 공연 재생(BGM+큐) 시작하도록 대기 진입
+		self.isWaitingToStart = true
+		self.startDelayRemaining = self.startDelaySeconds
+
+		log("[Conductor] 공연 진입 id=" .. performanceId ..
+			" name=" .. tHeader.name ..
+			" cues=" .. tostring(#self.cues) ..
+			" length=" .. tostring(tHeader.length) ..
+			" startDelay=" .. tostring(self.startDelaySeconds))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginPerformancePlayback()
+		-- 시작 딜레이 종료 후 실제 재생 시작: BGM 재생 + 큐 시계 진행
+		self.isWaitingToStart = false
+		self.startDelayRemaining = 0
+		self.elapsed = 0
+		self.nextCueIndex = 1
+		self.isPlaying = true
+
+		if self.header ~= nil and self.header.bgmRuid ~= nil and self.header.bgmRuid ~= "" then
+			_SoundManager:PlayBGM(self.header.bgmRuid, self.header.bgmVolume)
+		end
+
+		log("[Conductor] 공연 재생 시작 id=" .. tostring(self.currentPerformanceId))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishPerformance()
+		-- 공연 정상 종료: 현재 배정/공연 id를 캡처해 서버에 점수 산출을 요청한 뒤 무대를 정리
+		if self.isPlaying == false then
+			return
+		end
+
+		local pid = self.currentPerformanceId
+		---@type PerformanceRoleAssignment
+		local assignment = self.tRoleAssignment
+		local tAssignmentPlain = {}
+		if assignment ~= nil then
+			tAssignmentPlain = assignment:ToPlainTable()
+		end
+
+		-- 무대/카메라/플레이어 정리 (currentPerformanceId 등은 여기서 초기화됨)
+		self:StopPerformance()
+
+		-- 서버 권위 결과 산출 요청 (결과는 SyncPerformanceResult로 되돌아와 점수 UI 표시)
+		if _PerformanceResultManager ~= nil then
+			_PerformanceResultManager:RequestFinishPerformance(pid, tAssignmentPlain)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopPerformance()
+		-- 공연 중지 및 상태 초기화 (시작 딜레이 대기 중에 중단되는 경우도 무대 셋업을 정리해야 하므로 함께 처리)
+		if self.isPlaying == false and self.isWaitingToStart == false then
+			return
+		end
+
+		self.isWaitingToStart = false
+		self.startDelayRemaining = 0
+		self.isPlaying = false
+		_SoundManager:StopBGM(0.5)
+		-- 공연 종료 시 카메라 줌 초기화 후 원래 카메라로 복구 (일반 게임플레이로 복귀)
+		_CameraService:ZoomReset()
+		self:RestoreCamera()
+		-- 남아있는 UI 오버레이 전부 숨김
+		if _PerformanceEffectLogic ~= nil then
+			_PerformanceEffectLogic:HideAll()
+		end
+		-- 댄서를 기본 자세로 되돌리고 플레이어 조작/중력 복구
+		self:ResetDancers()
+		self:RestorePlayer()
+		-- 기본 HUD(DefaultUI) 복구
+		self:SetHudHidden(false)
+
+		log("[Conductor] 공연 종료 id=" .. self.currentPerformanceId .. " elapsed=" .. tostring(self.elapsed))
+
+		self.currentPerformanceId = ""
+		self.cues = {}
+		self.header = nil
+		self.nextCueIndex = 1
+		self.elapsed = 0
+		self.pendingHides = {}
+		self.charMoves = {}
+		self.cameraMove = nil
+		self.dancers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 진입 대기 중이면 맵 로드 완료를 감지해 공연을 시작
+		if self.pendingPerformanceId ~= "" then
+			self:TryBeginPendingPerformance()
+		end
+
+		-- 시작 딜레이 대기 중이면 카운트다운 후 재생 시작 (이 동안 큐 시계는 진행하지 않음)
+		if self.isWaitingToStart == true then
+			self.startDelayRemaining = self.startDelayRemaining - delta
+			if self.startDelayRemaining <= 0 then
+				self:BeginPerformancePlayback()
+			end
+			return
+		end
+
+		-- 재생 중이면 로컬 시계를 진행하고 도달한 큐를 순서대로 dispatch
+		if self.isPlaying == false then
+			return
+		end
+
+		self.elapsed = self.elapsed + delta
+
+		while self.nextCueIndex <= #self.cues do
+			local tCue = self.cues[self.nextCueIndex]
+			if tCue.time > self.elapsed then
+				break
+			end
+			self:DispatchCue(tCue)
+			self.nextCueIndex = self.nextCueIndex + 1
+		end
+
+		-- 진행 중인 캐릭터 이동 트윈 갱신
+		self:UpdateCharMoves(delta)
+
+		-- 진행 중인 카메라 이동(팬) 트윈 갱신
+		self:UpdateCameraMove(delta)
+
+		-- duration 경과한 UI 연출 자동 숨김
+		if #self.pendingHides > 0 then
+			local remaining = {}
+			for _, ph in ipairs(self.pendingHides) do
+				if ph.hideTime <= self.elapsed then
+					self:HideUIPreset(ph.preset)
+				else
+					table.insert(remaining, ph)
+				end
+			end
+			self.pendingHides = remaining
+		end
+
+		-- 공연 길이 도달 시 정상 종료 (점수 산출 → 결과 UI)
+		if self.header ~= nil and self.header.length > 0 and self.elapsed >= self.header.length then
+			self:FinishPerformance()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DispatchCue(any tCue)
+		-- 큐 타입에 맞는 핸들러로 분기 (확장 지점: 여기에 분기 1개 추가)
+		local cueType = tCue.cueType
+
+		if cueType == _EPerformanceCueType.Sfx then
+			self:HandleSfx(tCue)
+		elseif cueType == _EPerformanceCueType.BgmVolume then
+			self:HandleBgmVolume(tCue)
+		elseif cueType == _EPerformanceCueType.MiniGame then
+			self:HandleMiniGame(tCue)
+		elseif cueType == _EPerformanceCueType.CameraZoom then
+			self:HandleCameraZoom(tCue)
+		elseif cueType == _EPerformanceCueType.CameraShake then
+			self:HandleCameraShake(tCue)
+		elseif cueType == _EPerformanceCueType.UIShow then
+			self:HandleUIShow(tCue)
+		elseif cueType == _EPerformanceCueType.CharMove then
+			self:HandleCharMove(tCue)
+		elseif cueType == _EPerformanceCueType.CharAnim then
+			self:HandleCharAnim(tCue)
+		elseif cueType == _EPerformanceCueType.CharEmotion then
+			self:HandleCharEmotion(tCue)
+		elseif cueType == _EPerformanceCueType.CameraMove then
+			self:HandleCameraMove(tCue)
+		else
+			-- 정의되지 않은 큐 타입(데이터 오타 등): 경고로 노출
+			self:HandleUnknownCue(tCue)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleSfx(any tCue)
+		-- 효과음 재생 (단발성)
+		if tCue.stringParam ~= "" then
+			_SoundManager:PlaySfx(tCue.stringParam, tCue.num1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleBgmVolume(any tCue)
+		-- BGM 볼륨 조정 (즉시 적용, 페이드는 추후) — 유저 설정 볼륨이 곱해지도록 SoundManager 경유
+		_SoundManager:SetBgmBaseVolume(tCue.num1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleMiniGame(any tCue)
+		-- 공연 큐에 맞춰 서버 세션 시작 요청
+		if _MiniGameManager == nil then
+			log_warning("[Conductor] MiniGameManager 없음")
+			return
+		end
+
+		local perfId = self.currentPerformanceId or ""
+		if _MiniGamePlayLogic == nil then
+			log_warning("[Conductor] MiniGamePlayLogic 없음")
+			return
+		end
+
+		_MiniGameManager:RequestStartMiniGame(tCue.targetId, _EMiniGameContextType.Performance, perfId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleCameraZoom(any tCue)
+		-- 큐 길이(duration)에 걸쳐 목표 배율(num1 %)로 줌
+		local zoomDuration = tCue.duration
+		if zoomDuration <= 0 then
+			zoomDuration = 0.01
+		end
+		_CameraService:ZoomTo(tCue.num1, zoomDuration)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleCameraShake(any tCue)
+		-- 현재 카메라를 num1 강도로 duration초 흔들기
+		local cam = _CameraService:GetCurrentCameraComponent()
+		if isvalid(cam) == false then
+			log_warning("[Conductor] 현재 카메라 없음 (shake)")
+			return
+		end
+		local shakeDuration = tCue.duration
+		if shakeDuration <= 0 then
+			shakeDuration = 0.3
+		end
+		cam:ShakeCamera(tCue.num1, shakeDuration)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleUIShow(any tCue)
+		-- 공연 UI 오버레이 표시: targetId 프리셋 문자열을 enum으로 변환해 전달 (오타는 여기서 걸러짐)
+		local preset = _EPerformanceUIPreset:FromKey(tCue.targetId)
+		if _EPerformanceUIPreset:IsValid(preset) == false then
+			log_warning("[Conductor] 알 수 없는 UI 프리셋 targetId=" .. tostring(tCue.targetId))
+			return
+		end
+		if _PerformanceEffectLogic ~= nil then
+			_PerformanceEffectLogic:ShowPreset(preset)
+		end
+		-- duration 후 자동 숨김 예약 (duration<=0 이면 공연 종료 시까지 유지)
+		if tCue.duration > 0 then
+			table.insert(self.pendingHides, { preset = preset, hideTime = self.elapsed + tCue.duration })
+		end
+	end
+	
+	@ExecSpace("ClientOnly")
+	method void HideUIPreset(integer preset)
+		-- 공연 UI 오버레이 숨김
+		if _PerformanceEffectLogic ~= nil then
+			_PerformanceEffectLogic:HidePreset(preset)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleCharAnim(any tCue)
+		-- 지정 역할(center/sub_L/sub_R) 댄서에게 아바타 바디 액션 애니메이션 재생 (단발성)
+		local dancer = self:GetDancer(tCue.targetId)
+		if dancer == nil then
+			log_warning("[Conductor] charAnim 댄서 없음 role=" .. tostring(tCue.targetId))
+			return
+		end
+
+		local bodyState = _AvatarActionStateUtil:GetBodyActionState(tCue.stringParam)
+		if bodyState == MapleAvatarBodyActionState.Invalid then
+			log_warning("[Conductor] charAnim 유효하지 않은 동작=" .. tostring(tCue.stringParam))
+			return
+		end
+
+		local event = BodyActionStateChangeEvent()
+		event.ActionState = bodyState
+		event.needResetAction = true
+		dancer:SendEvent(event)
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleCharEmotion(any tCue)
+		-- 지정 역할(center/sub_L/sub_R) 댄서에게 표정(EmotionalType)을 재생 (지속형: duration 동안 유지 후 기본 표정 자동 복귀)
+		local dancer = self:GetDancer(tCue.targetId)
+		if dancer == nil then
+			log_warning("[Conductor] charEmotion 댄서 없음 role=" .. tostring(tCue.targetId))
+			return
+		end
+
+		local emotion = _AvatarActionStateUtil:GetEmotionType(tCue.stringParam)
+		if emotion == EmotionalType.Invalid then
+			log_warning("[Conductor] charEmotion 유효하지 않은 표정=" .. tostring(tCue.stringParam))
+			return
+		end
+
+		local renderer = dancer.AvatarRendererComponent
+		if isvalid(renderer) == false then
+			log_warning("[Conductor] charEmotion AvatarRenderer 없음 role=" .. tostring(tCue.targetId))
+			return
+		end
+
+		-- 표정 유지시간(초) = 큐 길이(duration). 이 시간 동안 표정을 유지하고, 끝나면 PlayEmotion이 기본 표정으로 자동 복귀시킨다.
+		local emotionDuration = tCue.duration
+		if emotionDuration <= 0 then
+			emotionDuration = 2.0
+		end
+		renderer:PlayEmotion(emotion, emotionDuration)
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleCharMove(any tCue)
+		-- 지정 역할 댄서를 duration초 동안 (num1,num2)로 이동. 댄서는 서버 권위 Kinematicbody이므로
+		-- 위치를 클라에서 직접 못 바꾼다 → ActorMovementComponent의 서버 RPC로 속도 이동 후 도착 시 정렬.
+		local dancer = self:GetDancer(tCue.targetId)
+		if dancer == nil then
+			log_warning("[Conductor] charMove 댄서 없음 role=" .. tostring(tCue.targetId))
+			return
+		end
+
+		local am = self:GetActorMovement(dancer)
+		if am == nil then
+			log_warning("[Conductor] charMove ActorMovement 없음 role=" .. tostring(tCue.targetId))
+			return
+		end
+
+		-- 같은 댄서의 기존 이동이 있으면 제거(최신 큐가 우선)
+		self:RemoveCharMoveFor(dancer)
+
+		local cur = dancer.TransformComponent.WorldPosition
+		local target = Vector2(tCue.num1, tCue.num2)
+		local dx = target.x - cur.x
+		local dy = target.y - cur.y
+		local dist = math.sqrt(dx * dx + dy * dy)
+
+		local moveDuration = tCue.duration
+		if moveDuration <= 0 then
+			moveDuration = 0.01
+		end
+
+		if dist < 0.05 then
+			-- 이미 목표 부근 → 즉시 정렬
+			am:RequestMoveToPosition(target)
+		else
+			local speed = dist / moveDuration
+			am:RequestApplyMoveMovement(Vector2(dx / dist, dy / dist), speed)
+			table.insert(self.charMoves, { entity = dancer, am = am, target = target, endTime = self.elapsed + moveDuration })
+		end
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharMoves(number delta)
+		-- 이동은 서버에서 MoveVelocity로 진행 중 → 예정 시간 도달 시 목표 위치로 정지·정렬(서버 RPC)
+		if self.charMoves == nil or #self.charMoves == 0 then
+			return
+		end
+
+		local remaining = {}
+		for _, mv in ipairs(self.charMoves) do
+			if isvalid(mv.entity) and isvalid(mv.am) then
+				if self.elapsed >= mv.endTime then
+					mv.am:RequestMoveToPosition(mv.target)
+				else
+					table.insert(remaining, mv)
+				end
+			end
+		end
+		self.charMoves = remaining
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetActorMovement(any dancer)
+		-- 댄서의 ActorMovementComponent 반환 (서버 이동 RPC 라우팅용)
+		if isvalid(dancer) == false then
+			return nil
+		end
+		---@type ActorMovementComponent
+		local am = dancer:GetComponent("script.ActorMovementComponent")
+		if isvalid(am) == false then
+			return nil
+		end
+		return am
+	end
+
+	method any GetRolePosition(string role)
+		-- 역할별 초기 무대 위치. 화면 기준 center=가운데, sub_L=왼쪽, sub_R=오른쪽.
+		if role == "center" then return Vector2(0, 0) end
+		if role == "sub_L" then return Vector2(-2.6, 0) end
+		if role == "sub_R" then return Vector2(2.6, 0) end
+		return Vector2(0, 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RemoveCharMoveFor(any dancer)
+		-- 특정 댄서에 걸린 기존 이동 트윈 제거
+		if self.charMoves == nil then
+			return
+		end
+		local remaining = {}
+		for _, mv in ipairs(self.charMoves) do
+			if mv.entity ~= dancer then
+				table.insert(remaining, mv)
+			end
+		end
+		self.charMoves = remaining
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetDancer(string role)
+		-- 역할 키로 댄서 엔티티를 반환, 없거나 무효면 nil
+		if self.dancers == nil then
+			return nil
+		end
+		local dancer = self.dancers[role]
+		if isvalid(dancer) == false then
+			return nil
+		end
+		return dancer
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetupStage()
+		-- 공연 시작 시 무대 준비: 역할별 댄서 확보 + 무대 카메라 전환 + 플레이어 고정
+		self:ResolveDancers()
+		self:SwitchToStageCamera()
+		if self:HasAnyDancer() then
+			self:ParkPlayer()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SwitchToStageCamera()
+		-- 단일 공연 카메라를 확보해 즉시(컷) 전환한다. 공연 전 카메라는 종료 복구용으로 저장.
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return
+		end
+		local map = player.CurrentMap
+		if isvalid(map) == false then
+			return
+		end
+
+		local camEnt = map:GetChildByName(self.stageCameraName, true)
+		if isvalid(camEnt) == false then
+			log("[Conductor] 공연 카메라 없음 name=" .. self.stageCameraName .. " (플레이어 카메라 유지)")
+			return
+		end
+		local cam = camEnt.CameraComponent
+		if isvalid(cam) == false then
+			log("[Conductor] 공연 카메라에 CameraComponent 없음")
+			return
+		end
+
+		-- 공연 전 카메라 저장 + 공연 카메라 진입 CameraOffset 기억(종료 시 원복)
+		self.savedCamera = _CameraService:GetCurrentCameraComponent()
+		self.stageCam = cam
+		self.stageCamBaseOffset = cam.CameraOffset
+
+		local prevBlend = _CameraService.TransitionBlendTime
+		_CameraService.TransitionBlendTime = 0
+		_CameraService:SwitchCameraTo(cam)
+		_CameraService.TransitionBlendTime = prevBlend
+	end
+
+	method string RoleSuffix(string role)
+		-- 역할 키(center/sub_L/sub_R)를 엔티티 이름 접미어(Center/SubL/SubR)로 변환
+		if role == "center" then return "Center" end
+		if role == "sub_L" then return "SubL" end
+		if role == "sub_R" then return "SubR" end
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreCamera()
+		-- 공연 종료 시 공연 카메라의 팬(CameraOffset)을 진입값으로 되돌리고, 저장해둔 원래 카메라로 복구
+		if isvalid(self.stageCam) then
+			self.stageCam.CameraOffset = self.stageCamBaseOffset
+		end
+		self.stageCam = nil
+
+		if isvalid(self.savedCamera) == false then
+			self.savedCamera = nil
+			return
+		end
+
+		local prevBlend = _CameraService.TransitionBlendTime
+		_CameraService.TransitionBlendTime = 0
+		_CameraService:SwitchCameraTo(self.savedCamera)
+		_CameraService.TransitionBlendTime = prevBlend
+		self.savedCamera = nil
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResolveDancers()
+		-- 현재 맵에서 역할별 댄서(DancerCenter/SubL/SubR)를 찾아 레지스트리에 저장
+		self.dancers = {}
+
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return
+		end
+
+		local map = player.CurrentMap
+		if isvalid(map) == false then
+			log_warning("[Conductor] 현재 맵 없음 (댄서 탐색 실패)")
+			return
+		end
+
+		local dancerRoles = { "center", "sub_L", "sub_R" }
+		for _, role in ipairs(dancerRoles) do
+			self.dancers[role] = map:GetChildByName("Dancer" .. self:RoleSuffix(role), true)
+		end
+
+		for role, dancer in pairs(self.dancers) do
+			if isvalid(dancer) then
+				-- 역할별 배정 캐릭터의 저장 코스튬을 댄서 아바타에 적용
+				self:ApplyDancerCostume(dancer, role)
+				-- 역할별 초기 무대 위치로 정렬 (서버 권위 Kinematicbody → AM RPC)
+				local am = self:GetActorMovement(dancer)
+				if am ~= nil then
+					am:RequestMoveToPosition(self:GetRolePosition(role))
+				end
+			end
+		end
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasAnyDancer()
+		-- 유효한 댄서가 하나라도 있는지 확인
+		if self.dancers == nil then
+			return false
+		end
+		for _, dancer in pairs(self.dancers) do
+			if isvalid(dancer) then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDancerCostume(any dancer, string role)
+		-- 역할(role)에 배정된 캐릭터에 공연 전용 고정 코스튬을 댄서 아바타(CostumeManagerComponent)에 적용. 저장 코스튬은 사용하지 않음
+		if isvalid(dancer) == false then
+			return
+		end
+
+		local costume = dancer.CostumeManagerComponent
+		if isvalid(costume) == false then
+			return
+		end
+
+		---@type PerformanceRoleAssignment
+		local assignment = self.tRoleAssignment
+		local characterId = ""
+		if assignment ~= nil then
+			characterId = assignment:GetByRole(role)
+		end
+		if characterId == "" then
+			log_warning("[Conductor] 역할에 배정된 캐릭터 없음 role=" .. tostring(role))
+			return
+		end
+		if _CharacterCostumeManager == nil then
+			log_warning("[Conductor] CharacterCostumeManager 없음")
+			return
+		end
+
+		-- 공연 고정 코스튬을 우선 적용. 계정 기본 치장이 빈 슬롯으로 새지 않도록 커스텀 전용으로 고정
+		if _PerformanceCostumeMaster ~= nil then
+			local tFixedCostume = _PerformanceCostumeMaster:GetCostume(characterId)
+			if tFixedCostume ~= nil then
+				costume.UseCustomEquipOnly = true
+				_CharacterCostumeManager:ClientApplyCostumeToManagerComponent(tFixedCostume, costume)
+				return
+			end
+			log_warning("[Conductor] 공연 고정 코스튬 없음 characterId=" .. tostring(characterId))
+		end
+
+		-- 폴백: 클라이언트 로컬 캐시의 저장 코스튬을 댄서 CostumeManagerComponent에 적용
+		local applied = _CharacterCostumeManager:ClientApplyCurrentCostumeToManagerComponent(characterId, costume)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetDancers()
+		-- 댄서를 기본 서기 자세로 되돌림 (공연 종료 시)
+		if self.dancers == nil then
+			return
+		end
+		for _, dancer in pairs(self.dancers) do
+			if isvalid(dancer) then
+				local am = self:GetActorMovement(dancer)
+				if am ~= nil then
+					am:RequestStopMove()
+				end
+				local event = BodyActionStateChangeEvent()
+				event.ActionState = MapleAvatarBodyActionState.Stand
+				event.needResetAction = true
+				dancer:SendEvent(event)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ParkPlayer()
+		-- 공연 중 관객(로컬 플레이어)이 무대 밖으로 돌아다니지 않도록 이동을 잠금.
+		-- Map_Performance는 RectTile(중력 없음)이라 중력 파킹이 무의미 → 기존 이동 잠금 게이트를 재사용해 조작을 끈다.
+		if _NpcInteractionGateLogic == nil then
+			return
+		end
+		_NpcInteractionGateLogic:Hold("performance")
+		self.playerParked = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestorePlayer()
+		-- 공연 중 걸어둔 이동 잠금을 해제
+		if self.playerParked == false then
+			return
+		end
+		if _NpcInteractionGateLogic ~= nil then
+			_NpcInteractionGateLogic:Unhold("performance")
+		end
+		self.playerParked = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetHudHidden(boolean hidden)
+		-- 공연 중 기본 HUD(DefaultUI)와 스마트폰 UI를 숨기거나 복구한다. (대상이 없으면 각각 무시)
+		if _UIBlockerLogic ~= nil then
+			_UIBlockerLogic:SetVisible("performance", not hidden)
+			return
+		end
+
+		if _DefaultUILogic ~= nil then
+			_DefaultUILogic:SetVisibleRoot(not hidden)
+		end
+		if _SmartPhoneUILogic ~= nil then
+			_SmartPhoneUILogic:SetVisibleRoot(not hidden)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleCameraMove(any tCue)
+		-- 현재 카메라를 duration초 동안 목표 위치(num1,num2 월드유닛)로 팬(CameraOffset 트윈)
+		local cam = _CameraService:GetCurrentCameraComponent()
+		if isvalid(cam) == false then
+			log_warning("[Conductor] 현재 카메라 없음 (move)")
+			return
+		end
+
+		local moveDuration = tCue.duration
+		if moveDuration <= 0 then
+			-- duration이 없으면 즉시 이동
+			cam.CameraOffset = Vector2(tCue.num1, tCue.num2)
+			self.cameraMove = nil
+			return
+		end
+
+		local from = cam.CameraOffset
+		self.cameraMove = {
+			cam = cam,
+			fromX = from.x, fromY = from.y,
+			toX = tCue.num1, toY = tCue.num2,
+			elapsed = 0, duration = moveDuration
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCameraMove(number delta)
+		-- 진행 중인 카메라 팬을 매 프레임 smoothstep으로 보간해 CameraOffset을 갱신
+		if self.cameraMove == nil then
+			return
+		end
+
+		local mv = self.cameraMove
+		if isvalid(mv.cam) == false then
+			self.cameraMove = nil
+			return
+		end
+
+		mv.elapsed = mv.elapsed + delta
+		local t = mv.elapsed / mv.duration
+		if t >= 1 then
+			mv.cam.CameraOffset = Vector2(mv.toX, mv.toY)
+			self.cameraMove = nil
+			return
+		end
+
+		-- smoothstep(3t²-2t³)으로 부드럽게 가감속
+		local k = t * t * (3 - 2 * t)
+		local x = mv.fromX + (mv.toX - mv.fromX) * k
+		local y = mv.fromY + (mv.toY - mv.fromY) * k
+		mv.cam.CameraOffset = Vector2(x, y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleUnknownCue(any tCue)
+		-- 정의되지 않은 큐 타입 — CSV의 type 오타 등 데이터 오류일 가능성이 높으므로 경고로 노출
+		log_warning("[Conductor] 알 수 없는 큐 타입 @" .. tostring(tCue.time) ..
+			" cueType=" .. tostring(tCue.cueType) ..
+			" track=" .. tCue.track ..
+			" target=" .. tCue.targetId)
+	end
+
+end

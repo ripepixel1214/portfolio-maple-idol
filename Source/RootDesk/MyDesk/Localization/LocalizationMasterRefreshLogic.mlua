@@ -1,0 +1,117 @@
+@Logic
+@ExecSpace("ClientOnly")
+script LocalizationMasterRefreshLogic extends Logic
+
+	property any languageChangedHandler = nil
+
+	method void OnBeginPlay()
+		-- 언어 변경 구독과 최초 Master 캐시 갱신
+		if _LocalizationLogic ~= nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+		self:RefreshLocalizedMasters()
+	end
+
+	method void OnEndPlay()
+		-- 언어 변경 구독 해제
+		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
+			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+		end
+		self.languageChangedHandler = nil
+	end
+
+	method void OnLanguageChanged(LanguageChangedEvent event)
+		-- 변경된 언어 기준 Master 캐시 갱신
+		if event == nil then
+			return
+		end
+		self:RefreshLocalizedMasters()
+	end
+
+	method void RefreshLocalizedMasters()
+		-- 번역 문자열을 보유하는 Master 캐시 일괄 갱신
+		if _ActivityMaster ~= nil then self:ReloadActivityMaster() end
+		if _ActorMaster ~= nil then self:ReloadActorMaster() end
+		if _ActorSpeechMaster ~= nil then self:ReloadActorSpeechMaster() end
+		if _CharacterTypeMaster ~= nil then self:ReloadCharacterTypeMaster() end
+		if _ConditionMaster ~= nil then self:ReloadConditionMaster() end
+		if _DialogMaster ~= nil then self:ReloadDialogMaster() end
+		if _EventMaster ~= nil then self:ReloadEventMaster() end
+		if _EventResultMaster ~= nil then self:ReloadEventResultMaster() end
+		if _GameGoalMaster ~= nil then self:ReloadGameGoalMaster() end
+		if _ItemMaster ~= nil then self:ReloadItemMaster() end
+		if _ShopItemMaster ~= nil then self:ReloadShopItemMaster() end
+	end
+
+	method void ReloadActivityMaster()
+		-- 활동 Master 갱신
+		_ActivityMaster.IsActivityLoaded = false
+		_ActivityMaster:LoadActivities()
+	end
+
+	method void ReloadActorMaster()
+		-- 액터 Master 갱신
+		_ActorMaster.isCached = false
+		_ActorMaster:CacheAll()
+		if _LocalizationLogic ~= nil then
+			for _, tActor in pairs(_ActorMaster.tActorById) do
+				tActor.name = _LocalizationLogic:GetText(tActor.nameKey or "", "")
+			end
+		end
+	end
+
+	method void ReloadActorSpeechMaster()
+		-- 액터 대사 Master 갱신
+		_ActorSpeechMaster.isCached = false
+		_ActorSpeechMaster:CacheAll()
+	end
+
+	method void ReloadCharacterTypeMaster()
+		-- 캐릭터 타입 Master 갱신
+		_CharacterTypeMaster.IsCharacterTypeLoaded = false
+		_CharacterTypeMaster:LoadCharacterType()
+	end
+
+	method void ReloadConditionMaster()
+		-- 컨디션 Master 갱신
+		_ConditionMaster.IsLoaded = false
+		_ConditionMaster:LoadGrades()
+	end
+
+	method void ReloadDialogMaster()
+		-- 대화 Master 갱신
+		_DialogMaster.isCached = false
+		_DialogMaster:CacheAll()
+	end
+
+	method void ReloadEventMaster()
+		-- 이벤트 Master 갱신
+		_EventMaster.IsEventTableLoaded = false
+		_EventMaster:LoadEventTable()
+	end
+
+	method void ReloadEventResultMaster()
+		-- 이벤트 결과 Master 갱신
+		_EventResultMaster.IsEventResultTableLoaded = false
+		_EventResultMaster:LoadEventResultTable()
+	end
+
+	method void ReloadGameGoalMaster()
+		-- 목표 Master 갱신
+		_GameGoalMaster.IsGameGoalLoaded = false
+		_GameGoalMaster:LoadGameGoal()
+	end
+
+	method void ReloadItemMaster()
+		-- 아이템 Master 갱신
+		_ItemMaster.IsLoaded = false
+		_ItemMaster:LoadItems()
+	end
+
+	method void ReloadShopItemMaster()
+		-- 상점 Master 갱신
+		_ShopItemMaster.IsLoaded = false
+		_ShopItemMaster:LoadShopItems()
+	end
+
+end
