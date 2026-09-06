@@ -1,0 +1,961 @@
+@Logic
+@ExecSpace("ClientOnly")
+script MiniGameUILogic extends Logic
+
+	-- UI 그룹 경로 (마커 풀 경로 해석용)
+	property string GROUP_PATH = "/ui/MiniGamePlayUI"
+	property string TIMING_MARKER_PATH = "/Panel/TimingStage/TimingMarker"
+	property string COMMAND_BOX_PATH = "/Panel/CommandStage/CommandBox"
+	property string DRAG_INDICATOR_NAME = "DragIndicator"
+	property string LIGHT_STICK_PATH = "/Panel/GaugeStage/LightStick"
+
+	-- 미니게임을 진행하는 캐릭터 id. 세션 시작 시 주입.
+	property string presentationActorId = ""
+
+	-- UI 엔티티 바인딩 (UIBuilder가 UUID를 주입). UI 미구성 시 nil로 동작해 안전하게 무시된다.
+	property Entity playGroup = "bf41fc6e-9b0d-47c7-8cfc-e6a14911a76c"
+	property TextGUIRendererComponent instructionText = "b619eb3f-f226-4747-9bcc-0f137c6392ca"
+	property TextGUIRendererComponent timerLabel = "14078559-03c8-4772-aea9-5d2120ab7c3a"
+	property TextGUIRendererComponent counterLabel = "76a90c99-e7ec-4771-9dfc-97739d9d5b5d"
+	-- 타이머 루트(아이콘+라벨). 게이지 스테이지에서는 통째로 숨긴다.
+	property Entity timerRoot = "9b59a441-c9c0-470f-a7de-c27d1d83a817"
+
+	-- 결과 오버레이 (성공=Success / 실패=Failed 엔티티 토글)
+	property Entity successOverlay = "6f9d1929-de33-40b9-a987-ba3ee26d1040"
+	property Entity failedOverlay = "a1435e22-1251-466a-9db3-de043b162a0a"
+	-- 결과 오버레이 애니메이션 RUID (인스펙터에서 지정된 스프라이트와 동일). Loop 재생 + 길이 타이머로 "1회 재생 후 숨김"을 구현
+	property string successAnimRuid = "6d5a507b49764376bc71df113c5d7cf2"
+	property string failedAnimRuid = "ec808ad55fd04cc787d06f02db1a6c39"
+	property number successAnimDuration = 1.0
+	property number failedAnimDuration = 1.0
+	property number overlayHideTimer = 0
+
+	-- 연타(Mash) 스테이지 / 게이지 채우기 스테이지 (SelectStage가 게임에 맞는 컨테이너 하나만 표시)
+	property Entity mashStage = "5d379062-2267-4644-b83d-293bce4dbc67"
+	property Entity gaugeStage = "7cb0f5e1-d2b9-42af-947e-39f91eed34c9"
+	-- 모바일 연타 입력 버튼 참조
+	property ButtonComponent mobilePrimaryInputButton = "67e52479-f1e8-4632-8aa8-eacc2748fbcd"
+	@HideFromInspector
+	property any mobilePrimaryInputButtonHandler = nil
+	property SpriteGUIRendererComponent gaugeFill = "2326d346-5572-4c6c-a7eb-7852ce4bd220"
+	-- 게이지 스테이지 응원봉 컨테이너(입력마다 흔들림). 경로로 해석해 LightStickSwayComponent를 사용
+	property Entity gaugeLightStick = nil
+	-- 일반(비공연) 게이지 스테이지 응원봉의 위로 팝 도달 y. 공연 오타게(기본 200)보다 작게 설정해 위아래 움직임을 줄인다.
+	property number gaugeSwayPopTargetY = 120
+
+	-- 타이밍 스테이지 (Timing)
+	property Entity timingStage = "2e1cfd57-a1da-4c44-988b-91d27f5300ed"
+	property Entity timingCursor = "925aa91b-b02a-43e5-8d42-e04e4adfdfc5"
+	-- 타이밍 트랙 (마커/커서 좌표 기준: 트랙 Transform에서 중심/너비를 읽어 자동 정렬 → Transform 변경에 대응)
+	property Entity timingTrack = "506016e4-65cd-440e-b016-3fbfc2b0f0b9"
+	-- 타이밍 정답 입력 시 커서 위치에 띄우는 작은 성공 이펙트 (Loop 재생 + 길이 타이머로 "1회 재생 후 숨김")
+	property Entity timingHitEffect = "bf327ef7-e4a6-4bce-892a-e1c09d8a9ed8"
+	property string timingHitEffectRuid = "6d5a507b49764376bc71df113c5d7cf2"
+	property number timingHitEffectDuration = 1.0
+	property number timingHitHideTimer = 0
+	-- 타이밍 실패(헛입력) 시 커서 위치에 띄우는 작은 실패 이펙트 (성공 이펙트와 대칭)
+	property Entity timingMissEffect = "a8c6a802-2384-4241-8524-6a5135b22bfe"
+	property string timingMissEffectRuid = "5a0242fe7ba142feb86f825c1a3ec29a"
+	property number timingMissEffectDuration = 1.0
+	property number timingMissHideTimer = 0
+	-- 타이밍 남은 시도 횟수 표시 라벨 [남은 / 최대] (에디터에서 만든 텍스트 엔티티를 UUID로 직접 바인딩)
+	property Entity timingAttemptLabel = "ad982d4f-8eea-48ab-9c27-42ab428b7770"
+
+	-- 커맨드 스테이지 (Command). 아이콘 배치/렌더/이펙트는 CommandBox의 MiniGameCommandBox 컴포넌트가 담당한다.
+	property Entity commandStage = "baaac4af-b4a9-47a5-b58f-faae4f366852"
+	property Entity commandBox = nil
+
+	-- 드래그 스테이지 (Drag)
+	property Entity dragStage = "771dde5b-b8fc-4455-8056-4a17e0c3735d"
+	-- 드래그 그리기 영역 (좌표 기준: DragArea 중심이 원점 → Transform 변경에 자동 대응)
+	property Entity dragArea = "f9c6724d-ab51-4b6e-a408-c9fddfec5141"
+	-- 드래그 실시간 일치율(%) 표시 텍스트 (그리는 도중에도 갱신)
+	property TextGUIRendererComponent dragPercentLabel = "242b984d-fa50-4835-928c-8c042a0e178e"
+
+	-- 스테이지 캐릭터 표시
+	property CostumeManagerComponent mashAvatar = "36ca6c01-ab2c-4d78-9515-97ef9fbac32a"
+	property CostumeManagerComponent gaugeAvatar = "f9675247-3111-425a-8b2d-ec8e42132f0d"
+	property SpriteGUIRendererComponent timingPortrait = "2f63f269-adea-46a1-82b1-b5d72f1de683"
+	-- 연타(Mash) 스테이지 오른쪽 내 캐릭터 아바타
+	property Entity mashMyAvatar = "f41ad28e-04fe-40e7-a7d9-0f8197440d21"
+	property boolean mashPoseDown = false
+
+	-- 타이밍 마커 풀 (경로로 해석)
+	property any markers = {}
+	-- 타이밍 트랙 좌표 캐시 (SetupTiming에서 트랙 Transform으로부터 갱신). 마커/커서를 트랙에 맞춰 배치하는 기준
+	property number trackCenterX = -125
+	property number trackCenterY = -50
+	property number trackHalfWidth = 250
+
+	-- 드래그 점 동적 생성용 (가이드/잉크 점을 DotTemplate 복제로 생성)
+	property Entity dotTemplate = "fc53fa43-3e7e-438b-b823-e95bfdb8fc33"
+	property any spawnedDots = {}
+	property integer dotSeq = 0
+	-- 잉크 점 최소 간격(px) / 직전 잉크 좌표
+	property number inkMinSpacing = 9
+	property number lastInkX = 0
+	property number lastInkY = 0
+	property boolean hasLastInk = false
+
+	-- 결과 표시 후 자동 종료 타이머
+	property boolean isResultShown = false
+	property number resultCloseTimer = 0
+	property number resultCloseDelay = 2.0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 타이밍 마커/커맨드 아이콘을 해석하고 결과 오버레이를 준비한 뒤 UI를 숨긴다.
+		self:ConnectMobilePrimaryInputButton()
+		self:ResolveMarkers()
+		self:ResolveCommandBox()
+		self:ResolveGaugeLightStick()
+		self:SetupResultOverlays()
+		self:SetVisible(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 모바일 연타 버튼 이벤트 구독 해제
+		self:DisconnectMobilePrimaryInputButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectMobilePrimaryInputButton()
+		-- 모바일 공용 입력 버튼 클릭 이벤트 구독
+		if Environment:IsMobilePlatform() == false then
+			self:SetMobilePrimaryInputEnabled(false)
+			return
+		end
+
+		if self.mobilePrimaryInputButton ~= nil and self.mobilePrimaryInputButtonHandler == nil then
+			self.mobilePrimaryInputButtonHandler = self.mobilePrimaryInputButton.Entity:ConnectEvent(ButtonClickEvent, self.OnMobilePrimaryInputClicked)
+		end
+
+		self:SetMobilePrimaryInputEnabled(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectMobilePrimaryInputButton()
+		-- 모바일 공용 입력 버튼 클릭 이벤트 구독 해제
+		if self.mobilePrimaryInputButton ~= nil and self.mobilePrimaryInputButtonHandler ~= nil then
+			self.mobilePrimaryInputButton.Entity:DisconnectEvent(ButtonClickEvent, self.mobilePrimaryInputButtonHandler)
+			self.mobilePrimaryInputButtonHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnMobilePrimaryInputClicked(ButtonClickEvent event)
+		-- 현재 입력 타입에 맞는 모바일 공용 입력 전달
+		if _MiniGameInputHubLogic ~= nil then
+			_MiniGameInputHubLogic:SubmitMobilePrimaryInput()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetMobilePrimaryInputEnabled(boolean enabled)
+		-- 실제 입력 활성 상태에 따른 모바일 공용 입력 버튼 제어
+		if self.mobilePrimaryInputButton == nil or self.mobilePrimaryInputButton.Entity == nil then
+			return
+		end
+
+		self.mobilePrimaryInputButton.Entity.Enable = Environment:IsMobilePlatform() == true and enabled == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetupResultOverlays()
+		-- 결과 오버레이(성공/실패)를 Loop 재생으로 두고, 1회 재생 길이(초)를 클립 프레임에서 계산해 둔다.
+		-- (Onetime은 1회 완료 후 재-Enable해도 다시 재생되지 않으므로, Loop + 길이 타이머로 "1회 재생 후 숨김"을 구현한다.)
+		self.successAnimDuration = self:ComputeAnimDuration(self.successAnimRuid, self.successOverlay)
+		self.failedAnimDuration = self:ComputeAnimDuration(self.failedAnimRuid, self.failedOverlay)
+		-- 타이밍 성공 이펙트도 동일하게 Loop 재생 + 1회 재생 길이(초)를 계산해 둔다.
+		self.timingHitEffectDuration = self:ComputeAnimDuration(self.timingHitEffectRuid, self.timingHitEffect)
+		self:SetEntityEnable(self.timingHitEffect, false)
+		-- 타이밍 실패 이펙트도 동일하게 Loop 재생 + 1회 재생 길이(초)를 계산해 둔다.
+		self.timingMissEffectDuration = self:ComputeAnimDuration(self.timingMissEffectRuid, self.timingMissEffect)
+		self:SetEntityEnable(self.timingMissEffect, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number ComputeAnimDuration(string ruid, Entity overlay)
+		-- 오버레이를 Loop 재생으로 설정하고, 애니메이션 1회 재생 길이(초)=Σ(프레임 Delay)/PlayRate 를 반환한다. (실패 시 1.0)
+		if overlay ~= nil then
+			local renderer = overlay.SpriteGUIRendererComponent
+			if renderer ~= nil then
+				renderer.AnimClipPlayType = SpriteAnimClipPlayType.Loop
+			end
+		end
+
+		if ruid == nil or ruid == "" then
+			return 1.0
+		end
+
+		local clip = _ResourceService:LoadAnimationClipAndWait(ruid)
+		if clip == nil or clip.Frames == nil then
+			return 1.0
+		end
+
+		local total = 0
+		local list = clip.Frames:ToTable()
+		for i = 1, #list do
+			total = total + list[i].Delay
+		end
+
+		local rate = clip.PlayRate
+		if rate == nil or rate <= 0 then
+			rate = 1
+		end
+
+		local duration = total / rate
+		if duration <= 0 then
+			return 1.0
+		end
+
+		return duration
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResolveMarkers()
+		-- 타이밍 마커 엔티티를 경로로 해석한다.
+		self.markers = {}
+		for i = 1, 6 do
+			local marker = _EntityService:GetEntityByPath(self.GROUP_PATH .. self.TIMING_MARKER_PATH .. tostring(i))
+			self.markers[i] = marker
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any SpawnDot(number localX, number localY)
+		-- DotTemplate를 복제해 드래그 영역 로컬 좌표에 점 하나를 생성한다. 색은 DotTemplate 원본을 그대로 사용
+		local area = self.dragArea
+		if area == nil then
+			area = self.dragStage
+		end
+		if self.dotTemplate == nil or area == nil then
+			return nil
+		end
+
+		self.dotSeq = self.dotSeq + 1
+		local clone = _SpawnService:SpawnByEntity(self.dotTemplate, "DragDot" .. tostring(self.dotSeq), Vector3(0, 0, 0), area)
+		if clone == nil then
+			return nil
+		end
+
+		local transform = clone.UITransformComponent
+		if transform ~= nil then
+			transform.anchoredPosition = Vector2(localX, localY)
+		end
+
+		clone.Enable = true
+		self.spawnedDots[#self.spawnedDots + 1] = clone
+		return clone
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearDragDots()
+		-- 생성된 가이드/잉크 점을 모두 제거하고 궤적 상태를 초기화한다.
+		if self.spawnedDots ~= nil then
+			for i = 1, #self.spawnedDots do
+				local dot = self.spawnedDots[i]
+				if dot ~= nil then
+					_EntityService:Destroy(dot)
+				end
+			end
+		end
+
+		self.spawnedDots = {}
+		self.hasLastInk = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BuildDragGuide(any localPoints)
+		-- 이전 점을 모두 제거하고, 주어진 로컬 좌표에 가이드 점(흰색)을 생성한다.
+		self:ClearDragDots()
+		if localPoints == nil then
+			return
+		end
+
+		for i = 1, #localPoints do
+			local p = localPoints[i]
+			-- 가이드 점은 DotTemplate 색상을 그대로 사용(별도 색 지정 없음)
+			self:SpawnDot(p.x, p.y)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ScreenToDragLocal(number screenX, number screenY)
+		-- 화면 좌표를 DragArea 로컬 좌표(Vector2)로 변환한다. (DragArea 중심이 원점 → Transform 변경에 자동 대응)
+		local area = self.dragArea
+		if area == nil then
+			area = self.dragStage
+		end
+		if area == nil then
+			return nil
+		end
+
+		local transform = area.UITransformComponent
+		if transform == nil then
+			return nil
+		end
+
+		return _UILogic:ScreenToLocalUIPosition(Vector2(screenX, screenY), transform)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddInkLocalPoint(number localX, number localY)
+		-- 실제 그린 경로에 잉크 점(시안)을 생성한다. 직전 점과 너무 가까우면 생략하며, 풀 없이 계속 누적된다.
+		if self.hasLastInk == true then
+			local dx = localX - self.lastInkX
+			local dy = localY - self.lastInkY
+			if (dx * dx + dy * dy) < (self.inkMinSpacing * self.inkMinSpacing) then
+				return
+			end
+		end
+
+		-- 잉크(실제 그린 경로) 점은 가이드와 구분되도록 시안색으로 표시
+		local dot = self:SpawnDot(localX, localY)
+		if dot ~= nil then
+			local renderer = dot.SpriteGUIRendererComponent
+			if renderer ~= nil then
+				renderer.Color = Color(0.21, 0.84, 0.91, 1)
+			end
+		end
+		self.lastInkX = localX
+		self.lastInkY = localY
+		self.hasLastInk = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(string title, string instruction, string presentationActorId)
+		-- 새 세션 공통 영역을 숨김 상태로 초기화
+		if self.playGroup == nil then
+			return
+		end
+
+		self:SetVisible(false)
+		self:HideAllStages()
+		self.presentationActorId = presentationActorId or ""
+		self:ApplyStageCharacter(self.presentationActorId)
+		self.isResultShown = false
+		self.resultCloseTimer = 0
+
+		self:SetText(self.instructionText, self:FormatInstruction(instruction, self.presentationActorId))
+		self:SetGuiText(self.timerLabel, "00 : 00")
+		self:SetGuiText(self.counterLabel, "0")
+		self:SetText(self.dragPercentLabel, "0%")
+		self:SetEntityEnable(self.successOverlay, false)
+		self:SetEntityEnable(self.failedOverlay, false)
+		self.overlayHideTimer = 0
+		self:SetEntityEnable(self.timingHitEffect, false)
+		self.timingHitHideTimer = 0
+		self:SetEntityEnable(self.timingMissEffect, false)
+		self.timingMissHideTimer = 0
+		self:SetAnyText(self.timingAttemptLabel, "")
+		-- 이전 세션의 커맨드 아이콘이 표시 직후 잠깐 보이지 않도록, UI를 켜기 전에 모두 숨긴다.
+		self:HideAllCommandIcons()
+		self:SetFill(0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideAllStages()
+		-- 세션 준비 중 모든 스테이지 비표시
+		self:SetEntityEnable(self.mashStage, false)
+		self:SetEntityEnable(self.gaugeStage, false)
+		self:SetEntityEnable(self.timingStage, false)
+		self:SetEntityEnable(self.commandStage, false)
+		self:SetEntityEnable(self.dragStage, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		-- 스테이지와 입력 준비가 끝난 미니게임 UI 표시
+		self:SetVisible(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideAllCommandIcons()
+		-- 커맨드 아이콘 숨김/이펙트 초기화를 CommandBox 컴포넌트에 위임한다. (세션 간 잔상 방지)
+		local box = self:GetCommandBox()
+		if box ~= nil then
+			box:HideAll()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestartDragIndicator()
+		-- 커맨드 스테이지 재진입 시 드래그 안내를 재생
+		if self.commandStage == nil then
+			return
+		end
+
+		local indicatorEntity = self.commandStage:GetChildByName(self.DRAG_INDICATOR_NAME)
+		if indicatorEntity == nil or indicatorEntity.DragIndicator == nil then
+			return
+		end
+
+		indicatorEntity.DragIndicator:RestartIndicator()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectStage(integer inputType, boolean useGauge)
+		-- 입력 타입/게이지 사용 여부에 맞는 스테이지 컨테이너 하나만 표시하고 나머지는 숨긴다.
+		local isMash = (inputType == _EMiniGameInputType.Mash)
+		local isGaugeStage = (isMash and useGauge == true)
+		self:SetEntityEnable(self.mashStage, isMash and useGauge == false)
+		self:SetEntityEnable(self.gaugeStage, isGaugeStage)
+		self:SetEntityEnable(self.timingStage, inputType == _EMiniGameInputType.Timing)
+		self:SetEntityEnable(self.commandStage, inputType == _EMiniGameInputType.Command)
+		if inputType == _EMiniGameInputType.Command then
+			self:RestartDragIndicator()
+		end
+		self:SetEntityEnable(self.dragStage, inputType == _EMiniGameInputType.Drag)
+		-- 게이지 스테이지에서는 타이머(아이콘+라벨)를 비활성화한다.
+		self:SetEntityEnable(self.timerRoot, isGaugeStage == false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatInstruction(string instruction, string charId)
+		-- 안내 문구의 {characterName} 토큰을 진행 캐릭터 이름으로 치환한다. (토큰이 없으면 원문 유지)
+		local text = instruction or ""
+		if _RuntimeActorManager == nil or charId == nil or charId == "" then
+			return text
+		end
+
+		local charName = _RuntimeActorManager:ClientGetActorName(charId)
+		if charName == nil then
+			charName = ""
+		end
+
+		return _TemplateTextFormatter:FormatText(text, "{characterName}", charName)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyStageCharacter(string presentationActorId)
+		-- 중앙: 대상(없으면 내 선택) 캐릭터 코스튬 / 오른쪽: 항상 내 선택 캐릭터 / 타이밍: 대상 상반신 일러스트.
+		local myCharId = ""
+		if _CharacterManager ~= nil then
+			myCharId = _CharacterManager:ClientGetSelectedCharacterId()
+		end
+
+		local charId = presentationActorId
+		if charId == nil or charId == "" then
+			charId = myCharId
+		end
+
+		-- 중앙 아바타 (대상 캐릭터)
+		self:ApplyCostumeToManager(self.mashAvatar, charId)
+		self:ApplyCostumeToManager(self.gaugeAvatar, charId)
+		-- 연타 스테이지 오른쪽: 캐릭터 코스튬이 아니라 내 계정 기본 아바타를 그대로 출력 (게이지 스테이지는 내 아바타 미표시)
+		self:ApplyMyDefaultAvatar(self.mashMyAvatar)
+		self.mashPoseDown = false
+
+		-- 타이밍 스테이지: 대상 캐릭터의 가로형 상반신 일러스트(portraitHorizontal)를 표시
+		if self.timingPortrait ~= nil and _RuntimeActorManager ~= nil and charId ~= nil and charId ~= "" then
+			local portraitRuid = _RuntimeActorManager:ClientGetActorPortraitHorizontalRuid(charId, "")
+			if portraitRuid ~= nil and portraitRuid ~= "" then
+				self.timingPortrait.ImageRUID = DataRef(portraitRuid)
+				self.timingPortrait.Entity.Enable = true
+			else
+				self.timingPortrait.Entity.Enable = false
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumeToManager(CostumeManagerComponent costume, string charId)
+		-- 지정 CostumeManager에 캐릭터 코스튬을 적용한다. (nil 안전)
+		if costume == nil or charId == nil or charId == "" or _CharacterCostumeManager == nil then
+			return
+		end
+
+		_CharacterCostumeManager:ClientApplyCurrentCostumeToManagerComponent(charId, costume)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalUserId()
+		-- 로컬 플레이어(내 계정)의 UserId를 반환한다. (nil 안전)
+		if _UserService == nil then
+			return ""
+		end
+
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return ""
+		end
+
+		local playerComp = player.PlayerComponent
+		if playerComp == nil then
+			return ""
+		end
+
+		return playerComp.UserId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyMyDefaultAvatar(Entity avatarEntity)
+		-- 아바타 엔티티에 내 계정 기본 아바타를 그대로 출력한다. 캐릭터 코스튬 대신 DefaultEquipUserId로 내 계정 장비를 복제한다. (nil 안전)
+		if avatarEntity == nil then
+			return
+		end
+
+		local costume = avatarEntity.CostumeManagerComponent
+		if costume == nil then
+			return
+		end
+
+		local userId = self:GetLocalUserId()
+		if userId == nil or userId == "" then
+			return
+		end
+
+		costume.UseCustomEquipOnly = false
+		costume.DefaultEquipUserId = userId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayMashPose()
+		-- 연타할 때마다 내 캐릭터 아바타를 기본(stand)↔엎드리기(prone)로 토글
+		self.mashPoseDown = not self.mashPoseDown
+		local action = "stand1"
+		if self.mashPoseDown == true then
+			action = "prone"
+		end
+
+		self:SetAvatarAction(self.mashMyAvatar, action)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAvatarAction(Entity avatarEntity, string action)
+		-- UI 아바타의 바디 엔티티에 액션 애니메이션을 재생한다. (nil 안전)
+		if avatarEntity == nil then
+			return
+		end
+
+		local renderer = avatarEntity.AvatarGUIRendererComponent
+		if renderer == nil then
+			return
+		end
+
+		local body = renderer:GetBodyEntity()
+		if body == nil or isvalid(body) == false then
+			return
+		end
+
+		local event = ActionStateChangedEvent()
+		event.CoreActionName = action
+		event.PartsActionName = action
+		event.PlayType = SpriteAnimClipPlayType.Loop
+		body:SendEvent(event)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshTrackMetrics()
+		-- 타이밍 트랙 Transform에서 중심 좌표/절반 너비를 읽어 캐시한다. (마커/커서는 트랙과 같은 부모·앵커 → 같은 좌표계)
+		if self.timingTrack == nil then
+			return
+		end
+
+		local transform = self.timingTrack.UITransformComponent
+		if transform == nil then
+			return
+		end
+
+		self.trackCenterX = transform.anchoredPosition.x
+		self.trackCenterY = transform.anchoredPosition.y
+		self.trackHalfWidth = transform.RectSize.x / 2
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetupTiming(any timings, number duration)
+		-- 목표 타이밍 위치에 마커를 배치하고 커서를 시작 위치로 되돌린다. (마커/커서는 트랙 좌표에 맞춰 배치)
+		if self.markers == nil then
+			return
+		end
+
+		self:RefreshTrackMetrics()
+		local half = self.trackHalfWidth
+		local cx = self.trackCenterX
+		local cy = self.trackCenterY
+		local count = 0
+		if timings ~= nil then
+			count = #timings
+		end
+
+		for i = 1, #self.markers do
+			local marker = self.markers[i]
+			if marker ~= nil then
+				if i <= count and duration > 0 then
+					local x = cx - half + (timings[i] / duration) * (half * 2)
+					self:SetPos(marker, x, cy)
+					marker.Enable = true
+				else
+					marker.Enable = false
+				end
+			end
+		end
+
+		self:SetPos(self.timingCursor, cx - half, cy)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateTimingCursor(number elapsed, number duration)
+		-- 경과 시간에 따라 타이밍 커서를 트랙 좌->우로 이동한다.
+		if self.timingCursor == nil or duration <= 0 then
+			return
+		end
+
+		local ratio = elapsed / duration
+		if ratio < 0 then
+			ratio = 0
+		end
+		if ratio > 1 then
+			ratio = 1
+		end
+
+		self:SetPos(self.timingCursor, self.trackCenterX - self.trackHalfWidth + ratio * self.trackHalfWidth * 2, self.trackCenterY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayTimingHit()
+		-- 타이밍 정답 입력 시 커서의 현재 위치에 작은 성공 이펙트를 1회 재생한다. (커서와 같은 부모·앵커라 좌표 그대로 복사)
+		if self.timingHitEffect == nil or self.timingCursor == nil then
+			return
+		end
+
+		local cursorTransform = self.timingCursor.UITransformComponent
+		local effectTransform = self.timingHitEffect.UITransformComponent
+		if cursorTransform == nil or effectTransform == nil then
+			return
+		end
+
+		local pos = cursorTransform.anchoredPosition
+		effectTransform.anchoredPosition = Vector2(pos.x, pos.y)
+		-- Loop 재생이므로 켜는 즉시 처음부터 재생된다. 1회 재생 길이만큼만 표시하고 OnUpdate에서 숨긴다.
+		self.timingHitEffect.Enable = true
+		self.timingHitHideTimer = self.timingHitEffectDuration
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayTimingMiss()
+		-- 타이밍 실패(헛입력) 시 커서의 현재 위치에 작은 실패 이펙트를 1회 재생한다. (성공 이펙트와 대칭)
+		if self.timingMissEffect == nil or self.timingCursor == nil then
+			return
+		end
+
+		local cursorTransform = self.timingCursor.UITransformComponent
+		local effectTransform = self.timingMissEffect.UITransformComponent
+		if cursorTransform == nil or effectTransform == nil then
+			return
+		end
+
+		local pos = cursorTransform.anchoredPosition
+		effectTransform.anchoredPosition = Vector2(pos.x, pos.y)
+		self.timingMissEffect.Enable = true
+		self.timingMissHideTimer = self.timingMissEffectDuration
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateTimingAttempts(integer remaining, integer max)
+		-- 남은 시도 횟수를 [남은 / 최대] 형식으로 표시한다.
+		self:SetAnyText(self.timingAttemptLabel, string.format("[%d / %d]", remaining, max))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAnyText(Entity entity, string value)
+		-- 텍스트 엔티티에 문자열을 설정한다. (TextGUIRenderer/TextComponent 어느 쪽이든 동작, nil 안전)
+		if entity == nil then
+			return
+		end
+
+		local gui = entity.TextGUIRendererComponent
+		if gui ~= nil then
+			gui.Text = value
+			return
+		end
+
+		local legacy = entity.TextComponent
+		if legacy ~= nil then
+			legacy.Text = value
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetupCommand(any names)
+		-- 커맨드 시퀀스 표시를 CommandBox 컴포넌트에 위임한다.
+		local box = self:GetCommandBox()
+		if box ~= nil then
+			return box:SetSequence(names)
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCommandVisualReady()
+		-- 커맨드 화살표 리소스 사전 로드 완료 여부 반환
+		local box = self:GetCommandBox()
+		if box == nil then
+			return false
+		end
+		return box:IsArrowResourcesReady()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCommandProgress(integer doneCount)
+		-- 커맨드 진행 표시를 CommandBox 컴포넌트에 위임한다.
+		local box = self:GetCommandBox()
+		if box ~= nil then
+			box:SetProgress(doneCount)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCommandError()
+		-- 커맨드 오답 이펙트를 CommandBox 컴포넌트에 위임한다.
+		local box = self:GetCommandBox()
+		if box ~= nil then
+			box:ShowError()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCommandHit(integer index)
+		-- 정답 입력 아이콘 강조를 CommandBox 컴포넌트에 위임한다.
+		local box = self:GetCommandBox()
+		if box ~= nil then
+			box:PlayHit(index)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResolveCommandBox()
+		-- CommandBox 엔티티를 경로로 해석한다. (아이콘/이펙트는 CommandBox의 MiniGameCommandBox 컴포넌트가 관리)
+		self.commandBox = _EntityService:GetEntityByPath(self.GROUP_PATH .. self.COMMAND_BOX_PATH)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCommandBox()
+		-- CommandBox의 MiniGameCommandBox 컴포넌트를 반환한다. (nil 안전)
+		if self.commandBox == nil then
+			return nil
+		end
+		return self.commandBox.MiniGameCommandBox
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResolveGaugeLightStick()
+		-- 게이지 스테이지 응원봉(LightStick) 컨테이너를 경로로 해석하고, 일반 상황용으로 팝 크기를 공연보다 작게 낮춘다.
+		self.gaugeLightStick = _EntityService:GetEntityByPath(self.GROUP_PATH .. self.LIGHT_STICK_PATH)
+		if self.gaugeLightStick == nil then
+			return
+		end
+
+		-- 위아래 팝은 popTargetY가 결정한다(공연 오타게=200 기본). 일반 게이지 스테이지는 이 인스턴스에만 더 작은 값을 적용
+		local sway = self.gaugeLightStick.LightStickSwayComponent
+		if sway ~= nil then
+			sway.popTargetY = self.gaugeSwayPopTargetY
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayGaugeSway()
+		-- 게이지 스테이지 응원봉을 1회 흔든다(위로 팝). 연타 포즈(PlayMashPose)와 분리된 게이지 전용 입력 연출이며, 게이지 입력일 때만 라우터가 호출한다.
+		if self.gaugeLightStick == nil or isvalid(self.gaugeLightStick) == false then
+			return
+		end
+
+		local sway = self.gaugeLightStick.LightStickSwayComponent
+		if sway ~= nil then
+			sway:SwayOnce()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateHud(any tHudState)
+		-- 진행도/타이머/게이지를 갱신한다. displayText는 표시용 진행 문자열(예: "2 / 3", "83%")이다.
+		if self.playGroup == nil or self.isResultShown == true or tHudState == nil then
+			return
+		end
+
+		if tHudState.showTimer == true then
+			self:SetGuiText(self.timerLabel, self:FormatTime(tHudState.timeRemaining))
+		else
+			self:SetGuiText(self.timerLabel, "")
+		end
+
+		local fillRatio = tHudState.progress
+		if tHudState.useGauge == true then
+			fillRatio = tHudState.gaugeRatio
+		end
+		self:SetFill(fillRatio)
+
+		self:SetGuiText(self.counterLabel, tHudState.displayText)
+		-- 드래그 스테이지: 실시간 일치율(%)을 전용 텍스트에도 표시한다. (그리는 도중에도 갱신됨)
+		self:SetText(self.dragPercentLabel, tHudState.displayText)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowResult(boolean success, string reason, string detailText)
+		-- 성공/실패 애니메이션 오버레이를 재생하고 자동 종료 타이머를 시작한다. (결과 텍스트는 오버레이로 대체됨)
+		if self.playGroup == nil then
+			return
+		end
+
+		-- 성공 시 Success, 실패 시 Failed 오버레이 표시 (사용자 취소류는 미표시)
+		local isCancel = (reason == "cancel" or reason == "restart" or reason == "clear")
+		local showSuccess = success == true and isCancel == false
+		local showFailed = success == false and isCancel == false
+		self:SetEntityEnable(self.successOverlay, showSuccess)
+		self:SetEntityEnable(self.failedOverlay, showFailed)
+		-- 오버레이는 Loop 재생이므로 켜지는 즉시 매번 처음부터 재생된다. 1회 재생 길이만큼만 표시하고 OnUpdate에서 자동으로 숨긴다.
+		if showSuccess == true then
+			self.overlayHideTimer = self.successAnimDuration
+		elseif showFailed == true then
+			self.overlayHideTimer = self.failedAnimDuration
+		else
+			self.overlayHideTimer = 0
+		end
+		self.isResultShown = true
+		self.resultCloseTimer = self.resultCloseDelay
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- UI를 닫고 생성된 드래그 점을 모두 제거한다.
+		self.isResultShown = false
+		self.resultCloseTimer = 0
+		self.overlayHideTimer = 0
+		self.timingHitHideTimer = 0
+		self.timingMissHideTimer = 0
+		self:ClearDragDots()
+		self:SetEntityEnable(self.successOverlay, false)
+		self:SetEntityEnable(self.failedOverlay, false)
+		self:SetEntityEnable(self.timingHitEffect, false)
+		self:SetEntityEnable(self.timingMissEffect, false)
+		self:SetVisible(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 결과 오버레이 숨김 타이머와 결과 자동 종료 타이머를 처리한다. (커맨드 오답/정답 이펙트는 MiniGameCommandBox 컴포넌트가 자체 처리)
+		-- 결과 오버레이: 애니메이션 1회 재생 길이가 지나면 즉시 숨긴다.
+		if self.overlayHideTimer > 0 then
+			self.overlayHideTimer = self.overlayHideTimer - delta
+			if self.overlayHideTimer <= 0 then
+				self.overlayHideTimer = 0
+				self:SetEntityEnable(self.successOverlay, false)
+				self:SetEntityEnable(self.failedOverlay, false)
+			end
+		end
+
+		-- 타이밍 성공 이펙트: 1회 재생 길이가 지나면 숨긴다.
+		if self.timingHitHideTimer > 0 then
+			self.timingHitHideTimer = self.timingHitHideTimer - delta
+			if self.timingHitHideTimer <= 0 then
+				self.timingHitHideTimer = 0
+				self:SetEntityEnable(self.timingHitEffect, false)
+			end
+		end
+
+		-- 타이밍 실패 이펙트: 1회 재생 길이가 지나면 숨긴다.
+		if self.timingMissHideTimer > 0 then
+			self.timingMissHideTimer = self.timingMissHideTimer - delta
+			if self.timingMissHideTimer <= 0 then
+				self.timingMissHideTimer = 0
+				self:SetEntityEnable(self.timingMissEffect, false)
+			end
+		end
+
+		if self.isResultShown == false then
+			return
+		end
+
+		self.resultCloseTimer = self.resultCloseTimer - delta
+		if self.resultCloseTimer <= 0 then
+			self:Close()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisible(boolean show)
+		-- UI 그룹 표시 상태를 변경한다.
+		if self.playGroup == nil then
+			return
+		end
+
+		self.playGroup.Enable = show
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityEnable(Entity entity, boolean show)
+		-- 엔티티 표시 상태를 변경한다. (nil 안전)
+		if entity == nil then
+			return
+		end
+
+		entity.Enable = show
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPos(Entity entity, number x, number y)
+		-- 엔티티의 anchoredPosition을 설정한다. (UI 위치는 anchoredPosition만 사용)
+		if entity == nil then
+			return
+		end
+
+		local transform = entity.UITransformComponent
+		if transform ~= nil then
+			transform.anchoredPosition = Vector2(x, y)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(TextGUIRendererComponent textComponent, string value)
+		-- 텍스트 컴포넌트의 표시 문자열을 설정한다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = value
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetGuiText(TextGUIRendererComponent guiText, string value)
+		-- TextGUIRenderer 컴포넌트의 표시 문자열을 설정한다. (nil 안전)
+		if guiText == nil then
+			return
+		end
+
+		guiText.Text = value
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatTime(number seconds)
+		-- 남은 시간(초)을 {mm : ss} 형태 문자열로 변환한다.
+		local total = math.ceil(seconds)
+		if total < 0 then
+			total = 0
+		end
+
+		local minutes = math.floor(total / 60)
+		local secs = total % 60
+		return string.format("%02d : %02d", minutes, secs)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetFill(number ratio)
+		-- 게이지 이미지의 채움 비율(0~1)을 설정한다. (SpriteGUIRendererComponent.Type = Filled)
+		if self.gaugeFill == nil then
+			return
+		end
+
+		local clamped = ratio
+		if clamped < 0 then
+			clamped = 0
+		end
+		if clamped > 1 then
+			clamped = 1
+		end
+
+		self.gaugeFill.FillAmount = clamped
+	end
+
+end

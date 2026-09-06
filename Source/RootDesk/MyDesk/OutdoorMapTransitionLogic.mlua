@@ -1,0 +1,262 @@
+@Logic
+script OutdoorMapTransitionLogic extends Logic
+
+	property string DOWNTOWN_MAP_NAME = "Map_Downtown"
+
+	property string DOWNTOWN_DISPLAY_NAME = "번화가"
+
+	property string DOWNTOWN_PORTAL_PATH = "/maps/Map_Downtown/MapPortal"
+
+	property string STUDIO_MAP_NAME = "Map_Studio"
+
+	property string NIGHT_MARKET_MAP_NAME = "Map_NightMarket"
+
+	property string NIGHT_MARKET_DISPLAY_NAME = "야시장"
+
+	property string NIGHT_MARKET_PORTAL_PATH = "/maps/Map_NightMarket/MapPortal"
+
+	property boolean NIGHT_MARKET_ENABLED = true
+
+	property integer moveRequestSequence = 0
+
+	property string pendingMoveRequestId = ""
+
+	property any processedServerMoveRequestIds = {}
+
+	property any processedServerMoveRequestIdOrder = {}
+
+	property integer MAX_PROCESSED_REQUEST_ID_COUNT = 32
+
+	property boolean isServerMoveInProgress = false
+
+	property any serverMoveLockTimerId = nil
+
+	property number serverMoveLockDuration = 2
+
+	@HideFromInspector
+	property any userLeaveHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 서버 이동 요청 캐시와 사용자 이탈 구독 초기화
+		self.processedServerMoveRequestIds = {}
+		self.processedServerMoveRequestIdOrder = {}
+		self:ClearServerMoveLock()
+		if self.userLeaveHandler == nil and _UserService ~= nil then
+			self.userLeaveHandler = _UserService:ConnectEvent(UserLeaveEvent, self.OnUserLeave)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 사용자 이탈 구독과 서버 이동 잠금 정리
+		if self.userLeaveHandler ~= nil and _UserService ~= nil then
+			_UserService:DisconnectEvent(UserLeaveEvent, self.userLeaveHandler)
+			self.userLeaveHandler = nil
+		end
+		if self.serverMoveLockTimerId ~= nil then
+			_TimerService:ClearTimer(self.serverMoveLockTimerId)
+		end
+		self:ClearServerMoveLock()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserLeave(UserLeaveEvent event)
+		-- 사용자 이탈 시 재전송 방지 캐시와 이동 잠금 정리
+		self.processedServerMoveRequestIds = {}
+		self.processedServerMoveRequestIdOrder = {}
+		if self.serverMoveLockTimerId ~= nil then
+			_TimerService:ClearTimer(self.serverMoveLockTimerId)
+		end
+		self:ClearServerMoveLock()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenMapSelection()
+		-- 외출 맵 선택 UI 공통 진입
+		if _NpcInteractionGateLogic ~= nil and _NpcInteractionGateLogic:IsLocked() == true then
+			return
+		end
+		if _OutdoorMapTransitionUILogic ~= nil then
+			_OutdoorMapTransitionUILogic:Open()
+		end
+	end
+
+	method table GetMapList()
+		-- 이동 가능한 외출 맵 목록 구성
+		local mapList = {
+			{
+				mapName = self.DOWNTOWN_MAP_NAME,
+				displayName = self.DOWNTOWN_DISPLAY_NAME,
+				portalPath = self.DOWNTOWN_PORTAL_PATH
+			}
+		}
+
+		if self.NIGHT_MARKET_ENABLED == true then
+			table.insert(mapList, {
+				mapName = self.NIGHT_MARKET_MAP_NAME,
+				displayName = self.NIGHT_MARKET_DISPLAY_NAME,
+				portalPath = self.NIGHT_MARKET_PORTAL_PATH
+			})
+		end
+
+		return mapList
+	end
+
+	method table GetDestinations(string currentMapName)
+		-- 현재 맵을 제외한 목적지 목록 반환
+		local destinations = {}
+		for _, mapInfo in ipairs(self:GetMapList()) do
+			if mapInfo.mapName ~= currentMapName then
+				table.insert(destinations, mapInfo)
+			end
+		end
+		return destinations
+	end
+
+	method any FindMap(string mapName)
+		for _, mapInfo in ipairs(self:GetMapList()) do
+			if mapInfo.mapName == mapName then
+				return mapInfo
+			end
+		end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void MoveToMap(string mapName)
+		-- 공통 맵 전환 연출 후 서버 이동 요청
+		if self.pendingMoveRequestId ~= ""
+			or self:FindMap(mapName) == nil
+			or _MapTransitionHelper == nil then
+			return
+		end
+
+		self.moveRequestSequence = self.moveRequestSequence + 1
+		self.pendingMoveRequestId = "outdoor:" .. tostring(self.moveRequestSequence)
+		local requestId = self.pendingMoveRequestId
+		_MapTransitionHelper:RequestMoveToMap(mapName, function()
+			self:RequestMoveToOutdoorMap(requestId, mapName)
+		end)
+	end
+
+	@ExecSpace("Server")
+	method void RequestMoveToOutdoorMap(string requestId, string destinationMapName)
+		-- 요청자 진행 단계와 허용된 외출 맵 관계를 검증한 뒤 서버 이동 처리
+		if requestId == nil or requestId == ""
+			or self:TryRecordProcessedMoveRequestId(requestId) == false then
+			self:RejectMoveRequest(requestId or "", destinationMapName, "invalid_request", senderUserId, "")
+			return
+		end
+		if self.isServerMoveInProgress == true then
+			self:RejectMoveRequest(requestId, destinationMapName, "move_in_progress", senderUserId, "")
+			return
+		end
+
+		local user = _UserService:GetUserEntityByUserId(senderUserId)
+		if user == nil or isvalid(user) == false or user.CurrentMap == nil then
+			self:RejectMoveRequest(requestId, destinationMapName, "invalid_user", senderUserId, "")
+			return
+		end
+		local currentMapName = user.CurrentMap.Name
+
+		if _ProgressManager == nil or _ProgressManager:CanUseProgress(senderUserId) == false then
+			self:RejectMoveRequest(requestId, destinationMapName, "progress_unavailable", senderUserId, currentMapName)
+			return
+		end
+
+		local progress = _ProgressManager:ServerGetProgress()
+		if progress == nil or progress.eCurrentStep ~= _EProgressStep.Step_Weekend then
+			self:RejectMoveRequest(requestId, destinationMapName, "invalid_progress", senderUserId, currentMapName)
+			return
+		end
+
+		local isAllowedSource = currentMapName == self.STUDIO_MAP_NAME
+			or currentMapName == self.DOWNTOWN_MAP_NAME
+			or currentMapName == self.NIGHT_MARKET_MAP_NAME
+		local mapInfo = self:FindMap(destinationMapName)
+		if isAllowedSource == false or mapInfo == nil or destinationMapName == currentMapName then
+			self:RejectMoveRequest(requestId, destinationMapName, "invalid_destination", senderUserId, currentMapName)
+			return
+		end
+
+		log("[OutdoorMapTransition] move accepted userId=" .. tostring(senderUserId)
+			.. " requestId=" .. tostring(requestId)
+			.. " from=" .. tostring(currentMapName)
+			.. " to=" .. tostring(destinationMapName)
+			.. " reason=accepted")
+		self.isServerMoveInProgress = true
+		self:PushMoveResult(requestId, true, "", senderUserId)
+		_TeleportService:TeleportToEntityPath(user, mapInfo.portalPath)
+		if self.serverMoveLockTimerId ~= nil then
+			_TimerService:ClearTimer(self.serverMoveLockTimerId)
+		end
+		self.serverMoveLockTimerId = _TimerService:SetTimerOnce(function()
+			self:ClearServerMoveLock()
+		end, self.serverMoveLockDuration)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearServerMoveLock()
+		-- 서버 이동 중복 방지 잠금과 타이머 참조 초기화
+		self.isServerMoveInProgress = false
+		self.serverMoveLockTimerId = nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryRecordProcessedMoveRequestId(string requestId)
+		-- 최근 외출 이동 요청 ID만 보관하는 FIFO 캐시 기록
+		if requestId == nil or requestId == ""
+			or self.processedServerMoveRequestIds[requestId] == true then
+			return false
+		end
+
+		self.processedServerMoveRequestIds[requestId] = true
+		table.insert(self.processedServerMoveRequestIdOrder, requestId)
+		while #self.processedServerMoveRequestIdOrder > self.MAX_PROCESSED_REQUEST_ID_COUNT do
+			local expiredRequestId = table.remove(self.processedServerMoveRequestIdOrder, 1)
+			if expiredRequestId ~= nil then
+				self.processedServerMoveRequestIds[expiredRequestId] = nil
+			end
+		end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RejectMoveRequest(string requestId, string destinationMapName, string reason, string userId, string currentMapName)
+		-- 외출 이동 거절 상관관계 로그 기록과 대상 클라이언트 통지
+		log_warning("[OutdoorMapTransition] move rejected userId=" .. tostring(userId)
+			.. " requestId=" .. tostring(requestId)
+			.. " from=" .. tostring(currentMapName)
+			.. " to=" .. tostring(destinationMapName)
+			.. " reason=" .. tostring(reason))
+		if userId ~= nil and userId ~= "" then
+			self:PushMoveResult(requestId, false, reason, userId)
+		end
+	end
+
+	@ExecSpace("Client")
+	method void PushMoveResult(string requestId, boolean isAccepted, string reason)
+		-- 서버 이동 승인 결과를 클라이언트 전환 연출 상태에 반영
+		if requestId ~= self.pendingMoveRequestId then
+			return
+		end
+
+		self.pendingMoveRequestId = ""
+		if isAccepted == true then
+			return
+		end
+
+		log_warning("[OutdoorMapTransition] move rejected requestId=" .. tostring(requestId)
+			.. " reason=" .. tostring(reason))
+
+		if _MapTransitionHelper ~= nil then
+			_MapTransitionHelper:CancelPendingTransition()
+		end
+
+		if _OutdoorMapTransitionUILogic ~= nil then
+			_OutdoorMapTransitionUILogic:Open()
+		end
+	end
+
+end

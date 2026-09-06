@@ -1,0 +1,318 @@
+@Component
+@ExecSpace("ClientOnly")
+script MiniGameCommandBox extends Component
+
+	-- 커맨드 아이콘 바 컴포넌트. CommandBox 엔티티에 붙어 자식(CommandIcon1~N / ErrorFlash)을 스스로 관리한다.
+	-- 두 미니게임 UI 스킨(MiniGameUILogic / MiniGamePerformanceUILogic)이 공용으로 사용해 중복 로직을 제거한다.
+	-- 공개 API: SetSequence(names) / IsArrowResourcesReady() / SetProgress(doneCount) / PlayHit(index) / ShowError() / HideAll()
+
+	-- 커맨드 아이콘 최대 개수(5~8 지원) / 배치 여백·최대 크기
+	property integer commandIconCount = 8
+	property number commandBoxPadding = 30
+	property number commandIconMaxSize = 70
+	-- 오답 빨간 플래시 지속 시간(초) / 그 시간 동안 깜빡이는 횟수
+	property number commandErrorDuration = 1.0
+	property integer commandErrorBlinks = 2
+	-- 정답 강조(팝+외곽 발광) 튜닝값
+	property number hitDuration = 0.22
+	property number hitScalePeak = 1.45
+	property number hitOutlineWidth = 6
+	-- 커맨드 방향별 화살표 이미지 RUID (인스펙터에서 지정)
+	property string arrowUpRuid = "6516507c4c8644898fad0eb012121119"
+	property string arrowDownRuid = "57ce2b1cd81e4f6baa464e9f9d79b643"
+	property string arrowLeftRuid = "9e2420affcd748afbdebe34617a0077e"
+	property string arrowRightRuid = "8d9eb632549f4242b269d7a048047491"
+	-- 화살표 리소스 사전 로드 완료 여부
+	property boolean arrowResourcesReady = false
+	-- 화살표 리소스 사전 로드 요청 여부
+	property boolean arrowResourcesRequested = false
+
+	property Entity errorFlash = nil
+
+	-- 런타임 상태 (자식 해석 여부 / 아이콘 풀 / 오답 플래시 / 현재 시퀀스 / 아이콘별 강조 타이머 / 오답 타이머)
+	@HideFromInspector
+	property boolean resolved = false
+	@HideFromInspector
+	property any commandIcons = {}
+	@HideFromInspector
+	property any commandNames = {}
+	@HideFromInspector
+	property any hitTimers = {}
+	@HideFromInspector
+	property number commandErrorTimer = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 로드 시 자식을 미리 해석한다. (Enable 타이밍에 따라 지연될 수 있어 각 공개 API에서도 재확인)
+		self:EnsureResolved()
+		self:PreloadArrowResources()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PreloadArrowResources()
+		-- 공연 cue 이전 네 방향 화살표 리소스 사전 로드
+		if self.arrowResourcesRequested == true then
+			return
+		end
+
+		self.arrowResourcesRequested = true
+		_ResourceService:PreloadAsync({
+			self.arrowUpRuid,
+			self.arrowDownRuid,
+			self.arrowLeftRuid,
+			self.arrowRightRuid
+		}, function()
+			self.arrowResourcesReady = true
+			if self.commandNames ~= nil and #self.commandNames > 0 then
+				self:Render(0)
+			end
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnsureResolved()
+		-- 자식(CommandIcon*/ErrorFlash)을 최초 1회 해석한다. (Enable 타이밍과 무관하게 지연 해석)
+		if self.resolved == true then
+			return
+		end
+
+		self.commandIcons = {}
+		for i = 1, self.commandIconCount do
+			self.commandIcons[i] = self.Entity:GetChildByName("CommandIcon" .. tostring(i))
+		end
+		self.errorFlash = self.Entity:GetChildByName("ErrorFlash")
+		self.resolved = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetSequence(any names)
+		-- 커맨드 시퀀스를 저장하고, 개수에 맞춰 아이콘을 배치한 뒤 진행 0 상태로 표시한다.
+		self:EnsureResolved()
+		self.commandNames = names or {}
+		self:ComputeLayout(#self.commandNames)
+		if self.arrowResourcesReady == false then
+			self:HideAll()
+			return false
+		end
+		self:Render(0)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsArrowResourcesReady()
+		-- 화살표 아이콘 즉시 표시 가능 여부 반환
+		return self.arrowResourcesReady
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetProgress(integer doneCount)
+		-- 현재까지 입력한 개수에 맞춰 커맨드 표시를 갱신한다.
+		self:EnsureResolved()
+		self:Render(doneCount)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayHit(integer index)
+		-- 정답 입력 시 해당 커맨드 아이콘에 팝+외곽 발광 강조를 재생한다.
+		self:EnsureResolved()
+		if index < 1 or index > #self.commandIcons then
+			return
+		end
+		if self.commandIcons[index] == nil then
+			return
+		end
+
+		self.hitTimers[index] = self.hitDuration
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowError()
+		-- 커맨드 오답 시 지정 시간 동안 빨간 이펙트를 깜빡인다. (실제 깜빡임은 OnUpdate에서 처리)
+		self:EnsureResolved()
+		if self.errorFlash == nil then
+			return
+		end
+
+		self.errorFlash.Enable = true
+		self.commandErrorTimer = self.commandErrorDuration
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideAll()
+		-- 모든 커맨드 아이콘을 숨기고 강조 효과 상태를 초기화한다. (세션 간 이전 커맨드/효과 잔상 방지)
+		self:EnsureResolved()
+		self.hitTimers = {}
+		for i = 1, #self.commandIcons do
+			local icon = self.commandIcons[i]
+			if icon ~= nil then
+				self:ResetIconEffect(icon)
+				icon.Enable = false
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ComputeLayout(integer count)
+		-- 커맨드 개수(5~8)에 맞춰 아이콘을 CommandBox 폭 안에 균등 배치하고 크기를 맞춘다.
+		if self.commandIcons == nil or count <= 0 then
+			return
+		end
+
+		local boxWidth = 500
+		local boxTransform = self.Entity.UITransformComponent
+		if boxTransform ~= nil then
+			boxWidth = boxTransform.RectSize.x
+		end
+
+		local usable = boxWidth - self.commandBoxPadding * 2
+		if usable <= 0 then
+			usable = boxWidth
+		end
+
+		local spacing = usable / count
+		local iconSize = spacing * 0.85
+		if iconSize > self.commandIconMaxSize then
+			iconSize = self.commandIconMaxSize
+		end
+
+		for i = 1, #self.commandIcons do
+			local icon = self.commandIcons[i]
+			if icon ~= nil and i <= count then
+				local iconTransform = icon.UITransformComponent
+				if iconTransform ~= nil then
+					local x = -usable / 2 + spacing * (i - 0.5)
+					iconTransform.anchoredPosition = Vector2(x, 0)
+					iconTransform.RectSize = Vector2(iconSize, iconSize)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render(integer doneCount)
+		-- 남은 커맨드를 방향에 맞는 화살표 이미지로 표시하고, 이미 입력한(완료) 커맨드는 숨긴다.
+		if self.commandIcons == nil then
+			return
+		end
+
+		local count = 0
+		if self.commandNames ~= nil then
+			count = #self.commandNames
+		end
+
+		for i = 1, #self.commandIcons do
+			local icon = self.commandIcons[i]
+			if icon ~= nil then
+				local hit = self.hitTimers[i]
+				if hit ~= nil and hit > 0 then
+					-- 정답 강조 이펙트 재생 중: OnUpdate가 처리하므로 그대로 둔다.
+				elseif i <= count and i > doneCount then
+					local renderer = icon.SpriteGUIRendererComponent
+					if renderer ~= nil then
+						renderer.ImageRUID = DataRef(self:ArrowRuid(self.commandNames[i]))
+					end
+					icon.Enable = true
+				else
+					icon.Enable = false
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ArrowRuid(string keyName)
+		-- 방향키 이름을 화살표 이미지 RUID(프로퍼티)로 변환한다.
+		if keyName == "Up" then
+			return self.arrowUpRuid
+		elseif keyName == "Down" then
+			return self.arrowDownRuid
+		elseif keyName == "Left" then
+			return self.arrowLeftRuid
+		elseif keyName == "Right" then
+			return self.arrowRightRuid
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyHitEffect(Entity icon, number p)
+		-- p: 0(강조 시작)~1(종료). 팝 스케일과 외곽선 발광을 점점 옅게 한다.
+		local scale = 1 + (self.hitScalePeak - 1) * (1 - p)
+		local transform = icon.UITransformComponent
+		if transform ~= nil then
+			transform.UIScale = Vector3(scale, scale, 1)
+		end
+
+		local renderer = icon.SpriteGUIRendererComponent
+		if renderer ~= nil then
+			renderer.Outline = true
+			renderer.OutlineColor = Color(1, 0.95, 0.4, 1)
+			renderer.OutlineWidth = self.hitOutlineWidth * (1 - p)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetIconEffect(Entity icon)
+		-- 아이콘의 강조 효과(스케일/외곽선)를 기본 상태로 되돌린다.
+		local transform = icon.UITransformComponent
+		if transform ~= nil then
+			transform.UIScale = Vector3(1, 1, 1)
+		end
+
+		local renderer = icon.SpriteGUIRendererComponent
+		if renderer ~= nil then
+			renderer.Outline = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 오답 플래시 깜빡임과 정답 강조 진행을 처리한다.
+		if self.resolved == false then
+			return
+		end
+
+		if self.commandErrorTimer > 0 then
+			self.commandErrorTimer = self.commandErrorTimer - delta
+			if self.commandErrorTimer <= 0 then
+				self.commandErrorTimer = 0
+				if self.errorFlash ~= nil then
+					self.errorFlash.Enable = false
+				end
+			elseif self.errorFlash ~= nil then
+				-- 지정 시간 동안 commandErrorBlinks번 깜빡인다. (짝수 구간 on / 홀수 구간 off)
+				local blinks = self.commandErrorBlinks
+				if blinks < 1 then
+					blinks = 1
+				end
+				local elapsed = self.commandErrorDuration - self.commandErrorTimer
+				local halfPeriod = self.commandErrorDuration / (blinks * 2)
+				local phase = math.floor(elapsed / halfPeriod)
+				self.errorFlash.Enable = (phase % 2 == 0)
+			end
+		end
+
+		-- 정답 입력 아이콘 강조(팝+발광) 진행: 재생이 끝나면 소비된 아이콘을 숨긴다.
+		for i = 1, #self.commandIcons do
+			local remain = self.hitTimers[i]
+			if remain ~= nil and remain > 0 then
+				remain = remain - delta
+				local icon = self.commandIcons[i]
+				if remain <= 0 then
+					self.hitTimers[i] = 0
+					if icon ~= nil then
+						self:ResetIconEffect(icon)
+						icon.Enable = false
+					end
+				else
+					self.hitTimers[i] = remain
+					if icon ~= nil then
+						self:ApplyHitEffect(icon, 1 - remain / self.hitDuration)
+					end
+				end
+			end
+		end
+	end
+
+end

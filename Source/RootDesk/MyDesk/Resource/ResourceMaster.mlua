@@ -1,0 +1,84 @@
+@Logic
+script ResourceMaster extends Logic
+
+	property any tResourceRuidById = {}
+
+	property boolean isCached = false
+
+	method void OnBeginPlay()
+		-- 리소스 마스터 테이블을 캐싱합니다.
+		self:CacheAll()
+	end
+
+	method void EnsureCached()
+		-- 다른 로직이 먼저 접근하면 필요한 캐시를 지연 초기화합니다.
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- ResourceTable을 resourceId 기준 조회 맵으로 다시 구성합니다.
+		if self.isCached == true then
+			return
+		end
+		
+		self.tResourceRuidById = {}
+		
+		local dataSet = _DataService:GetTable("ResourceTable")
+		if dataSet == nil then
+			log_warning("[ResourceMaster] ResourceTable not found")
+			return
+		end
+		
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local resourceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "resourceId", "")
+			if resourceId ~= "" then
+				self.tResourceRuidById[resourceId] = _DataTableUtil:SafeGetString(dataSet, rowIndex, "ruid", "")
+			end
+		end
+		
+		self.isCached = true
+	end
+
+	method string ResolveResourceId(string resourceId)
+		-- 리소스 아이디를 실제 RUID로 변환하고, 없으면 입력값을 그대로 반환합니다.
+		self:CacheAll()
+		if resourceId == nil or resourceId == "" then
+			return ""
+		end
+		
+		local ruid = self.tResourceRuidById[resourceId] or ""
+		if ruid ~= "" then
+			return ruid
+		end
+		
+		if string.len(resourceId) ~= 32 or string.match(resourceId, "^[0-9a-fA-F]+$") == nil then
+			log_warning(resourceId .. "와 매칭되는 ruid는 등록되지 않았습니다.")
+		end
+		
+		return resourceId
+	end
+
+	method boolean HasResourceId(string resourceId)
+		-- resourceId가 ResourceTable에 등록돼(빈 문자열이 아닌 ruid 보유) 있는지 확인. ResolveResourceId와 달리 미등록 시 경고 로그를 남기지 않음
+		self:CacheAll()
+		if resourceId == nil or resourceId == "" then
+			return false
+		end
+
+		local ruid = self.tResourceRuidById[resourceId] or ""
+		return ruid ~= ""
+	end
+
+	method integer GetResourceCount()
+		-- 캐싱된 리소스 수를 계산합니다.
+		self:CacheAll()
+		
+		local count = 0
+		for _, _ in pairs(self.tResourceRuidById) do
+			count = count + 1
+		end
+		
+		return count
+	end
+
+end

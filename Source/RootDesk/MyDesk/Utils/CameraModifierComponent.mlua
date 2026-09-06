@@ -1,0 +1,158 @@
+---@description "영역 진입 시 활성 카메라의 CameraOffset/ZoomRatio를 부드럽게 바꾸고, 이탈 시 원래 값으로 복원하는 컴포넌트. TriggerComponent와 함께 부착하며 클라 전용으로 동작한다."
+@Component
+script CameraModifierComponent extends Component
+
+	property boolean ModifyOffset = true
+
+	property boolean ModifyZoom = true
+
+	-- 영역 진입 시 적용할 카메라 오프셋 (월드 좌표 기준)
+	property Vector2 TargetOffset = Vector2(0, 0)
+
+	-- 영역 진입 시 적용할 줌 비율 (CameraComponent 제약상 30~500)
+	property number TargetZoomRatio = 100
+
+	-- 적용/복원 전환에 걸리는 시간(초). 0이면 즉시 적용
+	property number TransitionDuration = 0.5
+
+	-- TriggerEnterEvent 구독 핸들 (해제용)
+	@HideFromInspector
+	property any _enterHandler = nil
+
+	-- TriggerLeaveEvent 구독 핸들 (해제용)
+	@HideFromInspector
+	property any _leaveHandler = nil
+
+	@HideFromInspector
+	property any _camera = nil
+
+	@HideFromInspector
+	property Vector2 _baseOffset = Vector2(0, 0)
+
+	@HideFromInspector
+	property number _baseZoom = 100
+
+	-- 원본 기준값 캡처 완료 여부
+	@HideFromInspector
+	property boolean _captured = false
+
+	-- 전환 진행 중 여부
+	@HideFromInspector
+	property boolean _transitioning = false
+
+	-- 전환 경과 시간(초)
+	@HideFromInspector
+	property number _elapsed = 0
+
+	-- 전환 시 보간 시작값
+	@HideFromInspector
+	property Vector2 _fromOffset = Vector2(0, 0)
+	@HideFromInspector
+	property number _fromZoom = 100
+
+	-- 전환 시 보간 도착값
+	@HideFromInspector
+	property Vector2 _toOffset = Vector2(0, 0)
+	@HideFromInspector
+	property number _toZoom = 100
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self._enterHandler = self.Entity:ConnectEvent(TriggerEnterEvent, self.OnEnterArea)
+		self._leaveHandler = self.Entity:ConnectEvent(TriggerLeaveEvent, self.OnLeaveArea)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		if self._enterHandler then
+			self.Entity:DisconnectEvent(TriggerEnterEvent, self._enterHandler)
+		end
+		if self._leaveHandler then
+			self.Entity:DisconnectEvent(TriggerLeaveEvent, self._leaveHandler)
+		end
+	end
+
+	method void OnEnterArea(TriggerEnterEvent event)
+		-- 진입한 대상이 로컬 플레이어일 때만 목표값으로 전환을 시작한다.
+		if not self:IsLocalPlayer(event.TriggerBodyEntity) then return end
+		local camera = self:EnsureCamera()
+		if not isvalid(camera) then return end
+		self:StartTransition(self.TargetOffset, self.TargetZoomRatio)
+	end
+
+	method void OnLeaveArea(TriggerLeaveEvent event)
+		-- 이탈한 대상이 로컬 플레이어일 때만 원본값으로 복원 전환을 시작한다.
+		if not self:IsLocalPlayer(event.TriggerBodyEntity) then return end
+		local camera = self:EnsureCamera()
+		if not isvalid(camera) then return end
+		self:StartTransition(self._baseOffset, self._baseZoom)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 전환 중이 아니면 매 프레임 비용을 들이지 않는다.
+		if not self._transitioning then return end
+		if not isvalid(self._camera) then return end
+
+		self._elapsed = self._elapsed + delta
+		-- 전환 시간이 0이면 즉시 도착(1), 아니면 경과 비율을 0~1로 클램프한다.
+		local t = 1
+		if self.TransitionDuration > 0 then
+			t = self._elapsed / self.TransitionDuration
+			if t > 1 then t = 1 end
+		end
+
+		-- 활성화된 프로퍼티만 시작값→목표값으로 보간한다.
+		if self.ModifyOffset then
+			self._camera.CameraOffset = self:LerpVec2(self._fromOffset, self._toOffset, t)
+		end
+		if self.ModifyZoom then
+			self._camera.ZoomRatio = self:LerpNum(self._fromZoom, self._toZoom, t)
+		end
+
+		-- 목표에 도달하면 전환을 종료한다.
+		if t >= 1 then
+			self._transitioning = false
+		end
+	end
+
+	method any EnsureCamera()
+		-- 활성 카메라를 캐시하고, 최초 1회 원본 오프셋/줌을 복원 기준값으로 저장한다.
+		if not isvalid(self._camera) then
+			self._camera = _CameraService:GetCurrentCameraComponent()
+		end
+		if isvalid(self._camera) and not self._captured then
+			self._baseOffset = self._camera.CameraOffset
+			self._baseZoom = self._camera.ZoomRatio
+			self._captured = true
+		end
+		return self._camera
+	end
+
+	method void StartTransition(Vector2 toOffset, number toZoom)
+		-- 현재 카메라 상태를 시작값으로, 인자를 목표값으로 잡아 전환을 개시한다.
+		self._fromOffset = self._camera.CameraOffset
+		self._fromZoom = self._camera.ZoomRatio
+		self._toOffset = toOffset
+		self._toZoom = toZoom
+		self._elapsed = 0
+		self._transitioning = true
+	end
+
+	method boolean IsLocalPlayer(Entity target)
+		-- 대상 엔티티가 이 클라의 로컬 플레이어인지 판별한다.
+		if not isvalid(target) then return false end
+		return target == _UserService.LocalPlayer
+	end
+
+	method Vector2 LerpVec2(Vector2 a, Vector2 b, number t)
+		-- 두 Vector2를 t(0~1)로 선형 보간한다.
+		return Vector2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+	end
+
+	method number LerpNum(number a, number b, number t)
+		-- 두 수치를 t(0~1)로 선형 보간한다.
+		return a + (b - a) * t
+	end
+
+end

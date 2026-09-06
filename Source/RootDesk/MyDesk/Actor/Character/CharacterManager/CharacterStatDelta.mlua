@@ -1,0 +1,45 @@
+@Struct
+script CharacterStatDelta
+
+	property string characterId = ""
+
+	property number vocal = 0
+
+	property number dance = 0
+
+	property number visual = 0
+
+	property number fatigue = 0
+
+	property number intimacy = 0
+
+	method any ToPlainTable()
+		-- CharacterStatDelta를 RPC에 안전한 plain table로 변환합니다.
+		local tData = {}
+		tData.characterId = self.characterId
+		tData.vocal = self.vocal
+		tData.dance = self.dance
+		tData.visual = self.visual
+		tData.fatigue = self.fatigue
+		tData.intimacy = self.intimacy
+
+		return tData
+	end
+
+	method any FromPlainTable(any tPlain)
+		-- plain table에서 CharacterStatDelta를 복원합니다.
+		if tPlain == nil then
+			return self
+		end
+
+		self.characterId = tPlain.characterId or ""
+		self.vocal = tPlain.vocal or 0
+		self.dance = tPlain.dance or 0
+		self.visual = tPlain.visual or 0
+		self.fatigue = tPlain.fatigue or 0
+		self.intimacy = tPlain.intimacy or 0
+
+		return self
+	end
+
+end

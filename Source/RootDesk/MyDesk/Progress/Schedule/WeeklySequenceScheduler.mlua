@@ -1,0 +1,752 @@
+﻿@Logic
+script WeeklySequenceScheduler extends Logic
+
+	property table WeeklyPlan = {}
+
+	property integer CurrentDay = 0
+
+	property boolean IsRunning = false
+
+	property any tAppliedActivityDayByIndex = {}
+
+	property any tActivityApplyResultsByDay = {}
+
+	property any tTriggeredEventResultsByDay = {}
+
+	property any activityAppliedHandler = nil
+
+	property boolean IsWaitingForActivityApplyResult = false
+
+	property integer PendingActivityApplyDay = 0
+
+	property string PendingActivityApplyRequestId = ""
+
+	property integer ActivityApplyRequestSerial = 0
+
+	property any eventCompletedHandler = nil
+
+	property any eventFailedHandler = nil
+
+	property boolean IsWaitingForTriggeredEventCompletion = false
+
+	property any resultPopupVisibilityChangedHandler = nil
+
+	property boolean IsWaitingForResultPopupClose = false
+
+	property boolean IsWaitingForTriggeredEventWarning = false
+
+	property string PendingTriggeredEventId = ""
+
+	property string PendingTriggeredEventCharacterId = ""
+
+	property integer PendingTriggeredEventDay = 0
+
+	property string PendingWarningEventId = ""
+
+	property string PendingWarningEventCharacterId = ""
+
+	property integer PendingWarningEventDay = 0
+
+	property integer MinTriggeredEventCountPerWeek = 0
+
+	property integer MaxTriggeredEventCountPerWeek = 1
+
+	property integer WeeklyTriggeredEventLimit = 0
+
+	property integer WeeklyTriggeredEventCount = 0
+
+	property string PostAnimationTriggeredEventId = ""
+
+	property string PostAnimationTriggeredEventCharacterId = ""
+
+	property integer PostAnimationTriggeredEventDay = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 주간 시퀀스 진행에 필요한 외부 완료 이벤트를 연결합니다.
+		if _ActivityHandler ~= nil then
+			self.activityAppliedHandler = _ActivityHandler:ConnectEvent(ActivityAppliedEvent, self.OnActivityApplied)
+		end
+
+		if _EventExecutor ~= nil then
+			self.eventCompletedHandler = _EventExecutor:ConnectEvent(EventExecutionCompletedEvent, self.OnTriggeredEventCompleted)
+			self.eventFailedHandler = _EventExecutor:ConnectEvent(EventExecutionFailedEvent, self.OnTriggeredEventFailed)
+		end
+
+		if _ResultPopupUILogic ~= nil then
+			self.resultPopupVisibilityChangedHandler = _ResultPopupUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnResultPopupVisibilityChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 주간 시퀀스 진행 중 연결한 이벤트 핸들러를 정리합니다.
+		if self.activityAppliedHandler ~= nil and _ActivityHandler ~= nil then
+			_ActivityHandler:DisconnectEvent(ActivityAppliedEvent, self.activityAppliedHandler)
+			self.activityAppliedHandler = nil
+		end
+
+		if self.eventCompletedHandler ~= nil and _EventExecutor ~= nil then
+			_EventExecutor:DisconnectEvent(EventExecutionCompletedEvent, self.eventCompletedHandler)
+			self.eventCompletedHandler = nil
+		end
+
+		if self.eventFailedHandler ~= nil and _EventExecutor ~= nil then
+			_EventExecutor:DisconnectEvent(EventExecutionFailedEvent, self.eventFailedHandler)
+			self.eventFailedHandler = nil
+		end
+
+		if self.resultPopupVisibilityChangedHandler ~= nil and _ResultPopupUILogic ~= nil then
+			_ResultPopupUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.resultPopupVisibilityChangedHandler)
+			self.resultPopupVisibilityChangedHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean OnSequenceDayPresentationEnd(integer day)
+		-- UI의 하루 연출 시간이 끝났을 때 현재 상태 기준으로 돌발 이벤트 또는 다음 일차 진행을 시도합니다.
+		if self.IsRunning == false or self.CurrentDay ~= day then
+			return true
+		end
+
+		if self.IsWaitingForActivityApplyResult == true or self.IsWaitingForTriggeredEventCompletion == true or self.IsWaitingForResultPopupClose == true or self.IsWaitingForTriggeredEventWarning == true then
+			return false
+		end
+
+		return self:ContinueAfterSequenceDayPresentation(day)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean StartWeeklySequence(table weeklyPlan)
+		-- 주간 활동 시퀀스를 초기화하고 1일차부터 진행합니다.
+		local normalizedPlan = self:NormalizeWeeklyPlan(weeklyPlan)
+		if normalizedPlan == nil then
+			return false
+		end
+
+		self.WeeklyPlan = normalizedPlan
+		self.CurrentDay = 0
+		self.IsRunning = true
+		self.tAppliedActivityDayByIndex = {}
+		self.tActivityApplyResultsByDay = {}
+		self.tTriggeredEventResultsByDay = {}
+		self:ClearActivityApplyRequest()
+		self.WeeklyTriggeredEventCount = 0
+		self.WeeklyTriggeredEventLimit = _UtilLogic:RandomIntegerRange(self.MinTriggeredEventCountPerWeek, self.MaxTriggeredEventCountPerWeek)
+		self:ClearTriggeredEvent()
+		self:ClearTriggeredEventWarning()
+		self:ClearPostAnimationTriggeredEvent()
+
+		if _EventTriggerManager ~= nil then
+			_EventTriggerManager:ResetWeekCounters()
+		end
+
+		if _ScheduleProgressUILogic ~= nil then
+			_ScheduleProgressUILogic:OpenWeeklySequence()
+			self:ShowAndApplySequenceDay(1)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetSequence()
+		-- 주간 활동 시퀀스 상태를 초기화합니다.
+		self.WeeklyPlan = {}
+		self.CurrentDay = 0
+		self.IsRunning = false
+		self.tAppliedActivityDayByIndex = {}
+		self.tActivityApplyResultsByDay = {}
+		self.tTriggeredEventResultsByDay = {}
+		self:ClearActivityApplyRequest()
+		self.WeeklyTriggeredEventCount = 0
+		self.WeeklyTriggeredEventLimit = 0
+		self:ClearTriggeredEvent()
+		self:ClearTriggeredEventWarning()
+		self:ClearPostAnimationTriggeredEvent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowAndApplySequenceDay(integer day)
+		-- 지정한 일차를 UI에 표시하고 곧바로 활동 적용과 돌발 이벤트 판정을 시작합니다.
+		if self.IsRunning == false then
+			return
+		end
+
+		local slot = self.WeeklyPlan[day]
+		if slot == nil then
+			return
+		end
+
+		self.CurrentDay = day
+		if _ScheduleProgressUILogic ~= nil then
+			_ScheduleProgressUILogic:ShowSequenceDay(day, slot)
+		end
+
+		self:ApplyActivity(day)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ContinueAfterSequenceDayPresentation(integer day)
+		-- 하루 연출 대기 시간이 끝나면 예약된 돌발 이벤트를 먼저 실행하고, 없으면 다음 날로 진행합니다.
+		if self.IsRunning == false or self.CurrentDay ~= day then
+			return true
+		end
+
+		if self:HasPostAnimationTriggeredEvent() == true then
+			local eventId = self.PostAnimationTriggeredEventId
+			local characterId = self.PostAnimationTriggeredEventCharacterId
+			local day = self.PostAnimationTriggeredEventDay
+			self:ClearPostAnimationTriggeredEvent()
+
+			if self:StartTriggeredEventWarning(eventId, characterId, day) == true then
+				return true
+			end
+		end
+
+		self:AdvanceAfterDay()
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AdvanceAfterDay()
+		-- 현재 일차를 마치고 다음 일차 또는 주간 완료 흐름으로 이동합니다.
+		if self.CurrentDay >= 5 then
+			self:CompleteWeeklySequence()
+			return
+		end
+
+		local nextDay = self.CurrentDay + 1
+		self:ShowAndApplySequenceDay(nextDay)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteWeeklySequence()
+		-- 주간 활동 시퀀스를 완료하고 진행 단계를 다음 단계로 넘깁니다.
+		local weeklyTotals = self:BuildWeeklyTotals()
+		self.IsRunning = false
+
+		if _ProgressManager ~= nil then
+			-- 요청 시점 단계를 함께 보내 서버가 중복 요청을 거절할 수 있게 한다
+			_ProgressManager:RequestMoveToNextStep(_ProgressManager:ClientGetCurrentStep())
+		end
+
+		if _ScheduleProgressUILogic ~= nil then
+			_ScheduleProgressUILogic:CompleteWeeklySequence(weeklyTotals)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ApplyActivity(integer day)
+		-- 해당 일차의 활동 적용을 요청하고, 결과 수신 후 돌발 이벤트 흐름으로 이어갑니다.
+		local slot = self.WeeklyPlan[day]
+		if slot == nil then
+			return false
+		end
+
+		if self.tAppliedActivityDayByIndex[day] == true then
+			return false
+		end
+
+		if self:IsActivitySlot(slot) == false then
+			log_warning("[WeeklySequenceScheduler] unsupported activity day=" .. tostring(day)
+				.. " activityId=" .. tostring(slot.activityId))
+			return false
+		end
+
+		if _ActivityHandler == nil then
+			log_warning("[WeeklySequenceScheduler] ActivityHandler not found. activity apply skipped day=" .. tostring(day))
+			return false
+		end
+
+		if self.IsWaitingForActivityApplyResult == true then
+			return true
+		end
+
+		self.ActivityApplyRequestSerial = self.ActivityApplyRequestSerial + 1
+		local requestId = "weeklySequence:" .. tostring(self.ActivityApplyRequestSerial)
+		self.IsWaitingForActivityApplyResult = true
+		self.PendingActivityApplyDay = day
+		self.PendingActivityApplyRequestId = requestId
+
+		_ActivityHandler:RequestApplyActivity(requestId, slot.characterId, self:GetSlotActivityId(slot))
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnActivityApplied(any activityAppliedEvent)
+		-- 서버에서 활동 적용 결과를 받으면 현재 일차의 후속 돌발 이벤트 흐름을 진행합니다.
+		if self.IsWaitingForActivityApplyResult == false then
+			return
+		end
+
+		if activityAppliedEvent == nil or activityAppliedEvent.result == nil then
+			return
+		end
+
+		local result = ActivityApplyResult():FromPlainTable(activityAppliedEvent.result)
+		if self.PendingActivityApplyRequestId ~= "" and result.requestId ~= self.PendingActivityApplyRequestId then
+			return
+		end
+
+		local day = self.PendingActivityApplyDay
+		local slot = self.WeeklyPlan[day]
+		self:ClearActivityApplyRequest()
+
+		if result.success ~= true then
+			log_warning("[WeeklySequenceScheduler] activity apply failed day=" .. tostring(day)
+				.. " characterId=" .. tostring(slot ~= nil and slot.characterId or "")
+				.. " activityId=" .. tostring(slot ~= nil and self:GetSlotActivityId(slot) or ""))
+			self:ClearPostAnimationTriggeredEvent()
+			return
+		end
+
+		self.tActivityApplyResultsByDay[day] = result.activityResult or {}
+		if _ScheduleProgressUILogic ~= nil then
+			_ScheduleProgressUILogic:QueueActivityResultPresentation(day, self.tActivityApplyResultsByDay[day])
+		end
+		self:ContinueAfterActivityApplied(day)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearActivityApplyRequest()
+		-- 활동 적용 결과 대기 상태를 초기화합니다.
+		self.IsWaitingForActivityApplyResult = false
+		self.PendingActivityApplyDay = 0
+		self.PendingActivityApplyRequestId = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ContinueAfterActivityApplied(integer day)
+		-- 서버 활동 적용 성공 이후 돌발 이벤트 실행 여부를 결정합니다.
+		local slot = self.WeeklyPlan[day]
+		if slot == nil then
+			return false
+		end
+
+		self.tAppliedActivityDayByIndex[day] = true
+
+		local eventId = self:EvaluateDailyTriggeredEventId(day, slot)
+
+		if eventId == nil or eventId == "" then
+			self:ClearPostAnimationTriggeredEvent()
+			return false
+		end
+
+		self:QueuePostAnimationTriggeredEvent(eventId, slot.characterId, day)
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void QueuePostAnimationTriggeredEvent(string eventId, string characterId, integer day)
+		-- 하루 연출이 끝난 뒤 실행할 돌발 이벤트를 예약합니다.
+		self.PostAnimationTriggeredEventId = eventId or ""
+		self.PostAnimationTriggeredEventCharacterId = characterId or ""
+		self.PostAnimationTriggeredEventDay = day
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasPostAnimationTriggeredEvent()
+		-- 하루 연출 이후 실행 대기 중인 돌발 이벤트가 있는지 반환합니다.
+		return self.PostAnimationTriggeredEventId ~= nil and self.PostAnimationTriggeredEventId ~= ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearPostAnimationTriggeredEvent()
+		-- 하루 연출 이후 실행 대기 중인 돌발 이벤트 예약을 초기화합니다.
+		self.PostAnimationTriggeredEventId = ""
+		self.PostAnimationTriggeredEventCharacterId = ""
+		self.PostAnimationTriggeredEventDay = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method string EvaluateDailyTriggeredEventId(integer day, any slot)
+		-- 하루 액티비티 적용이 끝난 뒤 현재 상태 기준으로 당일 돌발 이벤트 하나를 평가합니다.
+		if _EventTriggerManager == nil then
+			log_warning("[WeeklySequenceScheduler] EventTriggerManager not found. daily triggered event skipped day=" .. tostring(day))
+			return ""
+		end
+
+		if slot == nil or self:IsActivitySlot(slot) == false then
+			return ""
+		end
+
+		local remainingCount = self.WeeklyTriggeredEventLimit - self.WeeklyTriggeredEventCount
+		if remainingCount <= 0 then
+			return ""
+		end
+
+		_EventTriggerManager:SetDayProgress(day)
+		local tTriggers = _EventTriggerManager:EvaluateActivityTriggers(
+			self:NormalizeSlotActivityType(slot),
+			self:GetSlotActivityId(slot),
+			slot.characterId,
+			"",
+			day,
+			remainingCount)
+
+		if tTriggers == nil or #tTriggers <= 0 then
+			return ""
+		end
+
+		local tEventIds = _EventTriggerManager:GetEventIds(tTriggers)
+		if tEventIds == nil or #tEventIds <= 0 then
+			return ""
+		end
+
+		return tEventIds[1] or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean StartTriggeredEvent(string eventId, string characterId, integer day)
+		-- 돌발 이벤트 하나를 EventExecutor에 전달하기 위한 대기 상태를 시작합니다.
+		if eventId == nil or eventId == "" then
+			return false
+		end
+
+		if _EventExecutor == nil then
+			log_warning("[WeeklySequenceScheduler] EventExecutor not found. triggered event skipped.")
+			return false
+		end
+
+		self.PendingTriggeredEventId = eventId
+		self.PendingTriggeredEventCharacterId = characterId or ""
+		self.PendingTriggeredEventDay = day
+		self.IsWaitingForTriggeredEventCompletion = true
+
+		local hasStarted = self:ExecuteTriggeredEvent()
+		if hasStarted == false then
+			self:ClearTriggeredEvent()
+			return false
+		end
+
+		self.WeeklyTriggeredEventCount = self.WeeklyTriggeredEventCount + 1
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean StartTriggeredEventWarning(string eventId, string characterId, integer day)
+		-- 돌발 이벤트 실행 전 Warning 표시를 요청합니다. 표시할 수 없으면 곧바로 이벤트를 실행합니다.
+		if eventId == nil or eventId == "" then
+			return false
+		end
+
+		self.PendingWarningEventId = eventId
+		self.PendingWarningEventCharacterId = characterId or ""
+		self.PendingWarningEventDay = day
+
+		if _ScheduleProgressUILogic ~= nil and _ScheduleProgressUILogic:PlayTriggeredEventWarning(day) == true then
+			self.IsWaitingForTriggeredEventWarning = true
+			return true
+		end
+
+		self:ClearTriggeredEventWarning()
+		return self:StartTriggeredEvent(eventId, characterId, day)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTriggeredEventWarningEnd(integer day)
+		-- Warning 표시가 끝나면 대기 중인 돌발 이벤트를 실행합니다.
+		if self.IsWaitingForTriggeredEventWarning == false or self.PendingWarningEventDay ~= day then
+			return
+		end
+
+		local eventId = self.PendingWarningEventId
+		local characterId = self.PendingWarningEventCharacterId
+		local warningDay = self.PendingWarningEventDay
+		self:ClearTriggeredEventWarning()
+
+		if self:StartTriggeredEvent(eventId, characterId, warningDay) == false and self.IsRunning == true then
+			self:AdvanceAfterDay()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearTriggeredEventWarning()
+		-- 돌발 이벤트 Warning 표시 대기 상태를 초기화합니다.
+		self.IsWaitingForTriggeredEventWarning = false
+		self.PendingWarningEventId = ""
+		self.PendingWarningEventCharacterId = ""
+		self.PendingWarningEventDay = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ExecuteTriggeredEvent()
+		-- 대기 중인 돌발 이벤트 하나를 실행합니다.
+		local eventId = self.PendingTriggeredEventId
+		if eventId == nil or eventId == "" then
+			return false
+		end
+
+		if _EventMaster ~= nil and _EventMaster:GetEvent(eventId) == nil then
+			log_warning("[WeeklySequenceScheduler] triggered event not found eventId=" .. tostring(eventId))
+			return false
+		end
+
+		_EventExecutor:RequestExecuteEvent(eventId, self.PendingTriggeredEventCharacterId)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTriggeredEventCompleted(any eventExecutionCompletedEvent)
+		-- EventExecutor가 대기 중인 단일 돌발 이벤트 완료를 알리면 하루 연출 대기를 재개합니다.
+		if self.IsWaitingForTriggeredEventCompletion == false then
+			return
+		end
+
+		if eventExecutionCompletedEvent == nil then
+			return
+		end
+
+		local currentEventId = self.PendingTriggeredEventId
+		local currentDay = self.PendingTriggeredEventDay
+		local isCurrentEventCompleted = currentEventId == eventExecutionCompletedEvent.eventId
+		if isCurrentEventCompleted == false and _EventMaster ~= nil then
+			isCurrentEventCompleted = _EventMaster:IsEventCompletionFor(currentEventId or "", eventExecutionCompletedEvent.eventId or "")
+		end
+
+		if isCurrentEventCompleted == false then
+			return
+		end
+
+		-- 완료된 돌발 이벤트를 서버에 보고(서버가 일회성 여부 판정 후 저장, 반복 트리거는 무영향)
+		if _EventCompletionManager ~= nil then
+			_EventCompletionManager:RequestMarkEventCompleted(currentEventId or "", self.PendingTriggeredEventCharacterId or "")
+		end
+
+		self.tTriggeredEventResultsByDay[currentDay] = self:BuildTriggeredEventResultData(eventExecutionCompletedEvent)
+
+		if eventExecutionCompletedEvent.eventResultId ~= nil and eventExecutionCompletedEvent.eventResultId ~= "" then
+			self.IsWaitingForTriggeredEventCompletion = false
+			self.IsWaitingForResultPopupClose = true
+			return
+		end
+
+		self:FinishTriggeredEvent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTriggeredEventFailed(any eventExecutionFailedEvent)
+		-- 결과 적용 실패는 완료로 저장하지 않고 현재 돌발 이벤트 대기만 종료합니다.
+		if self.IsWaitingForTriggeredEventCompletion == false or eventExecutionFailedEvent == nil then
+			return
+		end
+
+		local currentEventId = self.PendingTriggeredEventId
+		local isCurrentEventFailed = currentEventId == eventExecutionFailedEvent.eventId
+		if isCurrentEventFailed == false and _EventMaster ~= nil then
+			isCurrentEventFailed = _EventMaster:IsEventCompletionFor(currentEventId or "", eventExecutionFailedEvent.eventId or "")
+		end
+
+		if isCurrentEventFailed == false then
+			return
+		end
+
+		log_warning("[WeeklySequenceScheduler] triggered event result apply failed eventId=" .. tostring(eventExecutionFailedEvent.eventId))
+		self:FinishTriggeredEvent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildTriggeredEventResultData(any eventExecutionCompletedEvent)
+		-- 돌발 이벤트 완료 이벤트에서 주간 결과 합산에 필요한 plain table을 만듭니다.
+		local result = nil
+		if _EventResultMaster ~= nil then
+			result = _EventResultMaster:BuildEventResultDataByEvent(
+				eventExecutionCompletedEvent.eventId or "",
+				eventExecutionCompletedEvent.eventResultId or "",
+				eventExecutionCompletedEvent.characterId or "")
+		end
+
+		if result == nil then
+			result = {}
+			result.eventId = eventExecutionCompletedEvent.eventId or ""
+			result.eventResultId = eventExecutionCompletedEvent.eventResultId or ""
+			result.characterId = eventExecutionCompletedEvent.characterId or ""
+			result.characterStatDelta = CharacterStatDelta():ToPlainTable()
+			result.progressStatDelta = ProgressStatDelta():ToPlainTable()
+			result.actions = {}
+		end
+
+		result.isSuccess = eventExecutionCompletedEvent.isSuccess
+
+		return result
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnResultPopupVisibilityChanged(UIVisibilityChangedEvent event)
+		-- 결과 팝업이 닫히면 대기 중인 돌발 이벤트 흐름을 다음 일차로 이어갑니다.
+		if self.IsWaitingForResultPopupClose == false then
+			return
+		end
+
+		if event == nil or event.uiId ~= "resultPopup" or event.isOpen == true then
+			return
+		end
+
+		self:FinishTriggeredEvent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishTriggeredEvent()
+		-- 돌발 이벤트 처리를 마치면 곧바로 다음 일차 또는 주간 완료 흐름으로 이동합니다.
+		self:ClearTriggeredEvent()
+		if self.IsRunning == true then
+			self:AdvanceAfterDay()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearTriggeredEvent()
+		-- 돌발 이벤트 대기 상태를 초기화합니다.
+		self.IsWaitingForTriggeredEventCompletion = false
+		self.IsWaitingForResultPopupClose = false
+		self.PendingTriggeredEventId = ""
+		self.PendingTriggeredEventCharacterId = ""
+		self.PendingTriggeredEventDay = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildWeeklyTotals()
+		-- 주간 활동 결과를 실제 적용 델타 기준으로 캐릭터별 합산값으로 만듭니다.
+		local weeklyTotals = {}
+
+		for day = 1, 5 do
+			local slot = self.WeeklyPlan[day]
+			if self:IsActivitySlot(slot) == true then
+				local activityResult = self.tActivityApplyResultsByDay[day]
+				if activityResult ~= nil then
+					self:AddWeeklyTotalDelta(weeklyTotals, activityResult.characterId or slot.characterId,
+						activityResult.vocal or 0,
+						activityResult.dance or 0,
+						activityResult.visual or 0,
+						activityResult.fandom or 0,
+						activityResult.fatigue or 0)
+				else
+					local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(slot.activityId) or nil
+					if activity ~= nil then
+						self:AddWeeklyTotalDelta(weeklyTotals, slot.characterId,
+							activity.vocal or 0,
+							activity.dance or 0,
+							activity.visual or 0,
+							activity.fandom or 0,
+							activity.fatigue or 0)
+					else
+						log_warning("[WeeklySequenceScheduler] weekly summary activity not found activityId=" .. tostring(slot.activityId))
+					end
+				end
+			end
+
+			local triggeredEventResult = self.tTriggeredEventResultsByDay[day]
+			if triggeredEventResult ~= nil then
+				local characterStatDelta = triggeredEventResult.characterStatDelta or {}
+				local progressStatDelta = triggeredEventResult.progressStatDelta or {}
+				self:AddWeeklyTotalDelta(weeklyTotals, triggeredEventResult.characterId or "",
+					characterStatDelta.vocal or 0,
+					characterStatDelta.dance or 0,
+					characterStatDelta.visual or 0,
+					progressStatDelta.fandom or 0,
+					characterStatDelta.fatigue or 0)
+			end
+		end
+
+		return weeklyTotals
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddWeeklyTotalDelta(table weeklyTotals, string characterId, number vocal, number dance, number visual, number fandom, number fatigue)
+		-- 캐릭터별 주간 합산 테이블에 하루치 실제 적용 델타를 더합니다.
+		local safeCharacterId = characterId or ""
+		local total = nil
+		for _, existingTotal in ipairs(weeklyTotals) do
+			if existingTotal.characterId == safeCharacterId then
+				total = existingTotal
+				break
+			end
+		end
+
+		if total == nil then
+			total = { characterId = safeCharacterId, vocal = 0, dance = 0, visual = 0, fandom = 0, fatigue = 0 }
+			table.insert(weeklyTotals, total)
+		end
+
+		total.vocal = total.vocal + (vocal or 0)
+		total.dance = total.dance + (dance or 0)
+		total.visual = total.visual + (visual or 0)
+		total.fandom = total.fandom + (fandom or 0)
+		total.fatigue = total.fatigue + (fatigue or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method table NormalizeWeeklyPlan(table weeklyPlan)
+		-- 외부에서 받은 주간 편성 데이터를 시퀀스 실행 형식으로 보정합니다.
+		if weeklyPlan == nil then
+			return nil
+		end
+
+		local normalized = {}
+		for day = 1, 5 do
+			local slot = weeklyPlan[day]
+			if slot == nil then
+				return nil
+			end
+
+			local characterId = slot.characterId or ""
+			local activityId = self:GetSlotActivityId(slot)
+			local activityType = self:NormalizeSlotActivityType(slot)
+			if activityType == "" or activityId == "" then
+				log_warning("[WeeklySequenceScheduler] weekly plan normalize failed, [activity : " .. slot.activityId .. "]")
+				return nil
+			end
+
+			local normalizedSlot = WeeklyPlanData()
+			normalizedSlot.characterId = characterId
+			normalizedSlot.activityId = activityId
+			normalized[day] = normalizedSlot
+		end
+
+		return normalized
+	end
+
+	@ExecSpace("ClientOnly")
+	method string NormalizeSlotActivityType(any slot)
+		-- 활동 테이블 row의 type 값을 기준으로 활동 타입을 결정합니다.
+		if slot == nil then
+			return ""
+		end
+
+		local activityId = self:GetSlotActivityId(slot)
+		if activityId == "" then
+			return ""
+		end
+
+		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) or nil
+		if activity ~= nil and activity.type ~= nil and activity.type ~= "" then
+			return string.lower(activity.type)
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSlotActivityId(any slot)
+		-- 편성 슬롯에서 활동 ID를 가져옵니다.
+		if slot == nil then
+			return ""
+		end
+
+		return slot.activityId or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsActivitySlot(any slot)
+		-- 활동 적용 대상 슬롯인지 확인합니다.
+		local activityId = self:GetSlotActivityId(slot)
+		if activityId == "" then
+			return false
+		end
+
+		return true
+	end
+
+end

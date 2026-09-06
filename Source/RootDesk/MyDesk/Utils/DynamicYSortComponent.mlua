@@ -1,0 +1,91 @@
+---@description "동적 엔티티(플레이어·캐릭터 등)의 OrderInLayer를 매 프레임 발밑 Y로부터 계산해, 정적 오브젝트와 같은 SortingLayer 안에서 앞뒤로 동적 정렬한다"
+@Component
+script DynamicYSortComponent extends Component
+
+	-- Y값을 OrderInLayer 정수로 환산하는 배율. StaticYSortComponent와 반드시 동일해야 함
+	property number SortResolution = 100
+
+	-- 원점에서 발밑까지의 Y 오프셋(보통 0 또는 음수). 발밑 기준 정렬용 보정
+	property number FootOffsetY = 0
+
+	-- 여러 스프라이트 파츠를 직접 자식으로 묶은 복합 엔티티인지 여부. true면 발밑 order를 자식 렌더러에 일괄 적용
+	property boolean IsCompositeEntity = false
+
+	-- 마지막으로 적용한 order (중복 쓰기 방지)
+	@HideFromInspector
+	property integer _lastOrder = 0
+
+	-- order 최초 적용 여부
+	@HideFromInspector
+	property boolean _applied = false
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 점프/공중 상태에서는 발밑 Y가 일시적으로 올라가 order가 뒤로 튀어(오브젝트 뒤로 숨음) 보이므로, 최초 지면 order를 적용한 뒤에는 착지 전까지 마지막 order를 유지한다
+		if self._applied and self:IsAirborne() then
+			return
+		end
+
+		-- 발밑 Y로 order를 계산해, 값이 바뀐 프레임에만 렌더러에 적용한다. (작은 Y = 큰 order = 앞)
+		local feetY = self.Entity.TransformComponent.WorldPosition.y + self.FootOffsetY
+		local order = math.floor(-feetY * self.SortResolution)
+
+		-- order가 그대로면 렌더러 해석/쓰기를 생략한다.
+		if self._applied and order == self._lastOrder then return end
+
+		-- 렌더러가 아직 준비 안 됐으면 이번 프레임은 넘기고 다음 프레임에 다시 시도한다.
+		if not self:ApplyOrder(order) then return end
+		self._lastOrder = order
+		self._applied = true
+	end
+
+	method boolean IsAirborne()
+		-- 엔티티의 물리 바디가 지면에 닿아있지 않으면(점프/낙하) true. 바디가 없는 대상(정적 캐릭터 등)은 항상 지면으로 간주해 기존 정렬을 유지
+		local kinematic = self.Entity.KinematicbodyComponent
+		if isvalid(kinematic) then
+			return kinematic:IsOnGround() == false
+		end
+
+		local rigid = self.Entity.RigidbodyComponent
+		if isvalid(rigid) then
+			return rigid:IsOnGround() == false
+		end
+
+		local sideview = self.Entity.SideviewbodyComponent
+		if isvalid(sideview) then
+			return sideview:IsOnGround() == false
+		end
+
+		return false
+	end
+
+	method boolean ApplyOrder(integer order)
+		-- 대상 렌더러에 order를 적용한다. 복합이면 자식 스프라이트 일괄, 아니면 AvatarRenderer > SpriteRenderer 순으로 해석. 적용 성공 시 true
+		if self.IsCompositeEntity then
+			local applied = false
+			for _, child in ipairs(self.Entity.Children:ToTable()) do
+				local r = child.SpriteRendererComponent
+				if isvalid(r) then
+					r.OrderInLayer = order
+					applied = true
+				end
+			end
+			return applied
+		end
+
+		local avatar = self.Entity.AvatarRendererComponent
+		if isvalid(avatar) then
+			avatar.OrderInLayer = order
+			return true
+		end
+
+		local sprite = self.Entity.SpriteRendererComponent
+		if isvalid(sprite) then
+			sprite.OrderInLayer = order
+			return true
+		end
+
+		return false
+	end
+
+end

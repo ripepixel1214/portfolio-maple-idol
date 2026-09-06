@@ -1,0 +1,434 @@
+---@description "튜토리얼 발생 조건, 진행, 완료를 관리하는 manager logic"
+@Logic
+script TutorialManager extends Logic
+
+	-- 트리거 정의 목록(순서대로 평가). 각 항목: { id, triggerType, mapName?, step?, month?, week?, actionType, scenarioId?, dialogId?, requires? }
+	property any tRegistry = {}
+
+	-- 이번 세션에 완료한 튜토리얼 집합(id -> true). 영속 완료는 ProgressDatacompletedTutorials.
+	property any tCompleted = {}
+
+	-- 현재 진행 중인 트리거 id. 비어 있으면 유휴 상태(동시에 하나만 진행)
+	property string currentTutorialId = ""
+
+	-- 현재 진행 중인 액션 종류("dialog" | "scenario")
+	property string currentActionType = ""
+
+	-- 현재 진행 중인 다이얼로그 id(dialog 액션일 때)
+	property string currentDialogId = ""
+
+	-- 맵 진입 감지를 위한 직전 맵 이름
+	property string lastMapName = ""
+
+	-- 다이얼로그 종료 이벤트 핸들러
+	property any dialogClosedHandler = nil
+
+	-- 다이얼로그 가시성(열림/닫힘) 이벤트 핸들러. 결산 등 대화창이 닫힌 뒤 트리거를 재평가하기 위함.
+	property any dialogVisibilityHandler = nil
+
+	-- 진행 데이터 변경 이벤트 핸들러(진행 단계 트리거 평가용)
+	property any progressChangedHandler = nil
+
+	-- 맵 진입 후 트리거 평가까지의 지연 타이머. 목적지 맵이 초기화될 시간을 준다
+	property any evaluateTimerId = nil
+
+	-- 맵 진입 후 평가 지연(초).
+	property number evaluateDelay = 0.5
+
+	-- 프롤로그(암전 대화) 종료 후 페이드인 시간(초)
+	property number prologueFadeInDuration = 1
+
+	-- 현재 진행 중 트리거가 암전 프롤로그인지 여부
+	property boolean currentBlackout = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 레지스트리를 구성하고 진행 변경 이벤트를 구독한다. 맵 진입은 OnUpdate 폴링으로 감지한다.
+		self:BuildRegistry()
+		self.lastMapName = ""
+
+		if _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+		-- 결산 등 대화창이 열려 있는 동안 튜토리얼을 띄우지 않고, 닫힌 뒤 재평가하기 위해 구독한다.
+		if _DialogUILogic ~= nil then
+			self.dialogVisibilityHandler = _DialogUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnDialogVisibilityChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 구독과 대기 타이머를 정리한다.
+		self:DisconnectDialogClosed()
+
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+		end
+		self.progressChangedHandler = nil
+
+		if self.dialogVisibilityHandler ~= nil and _DialogUILogic ~= nil then
+			_DialogUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.dialogVisibilityHandler)
+		end
+		self.dialogVisibilityHandler = nil
+
+		if self.evaluateTimerId ~= nil and _TimerService ~= nil then
+			_TimerService:ClearTimer(self.evaluateTimerId)
+		end
+		self.evaluateTimerId = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 로컬 플레이어의 현재 맵 변화를 감지해 맵 진입 트리거를 평가한다(@Logic은 OnMapEnter 미수신).
+		local player = _UserService ~= nil and _UserService.LocalPlayer or nil
+		if isvalid(player) == false then
+			return
+		end
+
+		local currentMap = player.CurrentMap
+		if isvalid(currentMap) == false then
+			return
+		end
+
+		local mapName = currentMap.Name
+		if mapName == self.lastMapName then
+			return
+		end
+
+		self.lastMapName = mapName
+		self:ScheduleEvaluate()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BuildRegistry()
+		-- 튜토리얼 트리거 정의를 순서대로 구성한다. 위에서부터 먼저 평가되므로 프롤로그 → 스튜디오 순서를 유지한다.
+		local trainingCompletedStep = 2
+		if _EProgressStep ~= nil then
+			trainingCompletedStep = _EProgressStep.Step_TrainingCompleted
+		end
+
+		self.tRegistry = {
+			-- 스튜디오 최초 진입: 프롤로그 대화 → 종료 시 재평가로 studio_intro 튜토리얼로 자연 연결
+			{
+				id = "prologue",
+				triggerType = "mapEnter",
+				mapName = "Map_Studio",
+				actionType = "dialog",
+				dialogId = "prologue",
+				requires = "",
+				-- 검정 화면 유지 + 대화창 암전(dim 불투명 검정)으로 재생, 종료 후 페이드인
+				blackout = true,
+			},
+			-- 스튜디오 최초 진입: 연습실 튜토리얼(프롤로그 완료 후 재평가에서 선택됨)
+			{
+				id = "studio_intro",
+				triggerType = "mapEnter",
+				mapName = "Map_Studio",
+				actionType = "scenario",
+				scenarioId = "studio_intro",
+				requires = "",
+			},
+			-- 1주차 평일 활동 완료(훈련 완료 단계) 시 스튜디오에서 외출 안내 시작. 반드시 스튜디오에서만(타이틀 등에서 오발동 방지).
+			{
+				id = "weekend_intro",
+				triggerType = "progressStep",
+				mapName = "Map_Studio",
+				step = trainingCompletedStep,
+				month = 1,
+				week = 1,
+				actionType = "scenario",
+				scenarioId = "weekend_intro",
+				requires = "",
+			},
+			-- 도시(외출) 최초 도착 시 안내. 스튜디오 외출 안내(weekend_intro)를 본 뒤에만 발동
+			{
+				id = "weekend_intro_downtown",
+				triggerType = "mapEnter",
+				mapName = "Map_Downtown",
+				actionType = "scenario",
+				scenarioId = "weekend_intro_downtown",
+				requires = "weekend_intro",
+			},
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ScheduleEvaluate()
+		-- 맵 진입 직후 목적지 맵 초기화를 기다렸다가 트리거를 평가한다. 이미 예약돼 있으면 중복 예약하지 않는다.
+		if self.evaluateTimerId ~= nil then
+			return
+		end
+		if _TimerService == nil then
+			self:EvaluateTriggers()
+			return
+		end
+
+		self.evaluateTimerId = _TimerService:SetTimerOnce(function()
+			self.evaluateTimerId = nil
+			self:EvaluateTriggers()
+		end, self.evaluateDelay)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EvaluateTriggers()
+		-- 현재 상태(맵/진행)에서 발동 가능한 첫 트리거를 찾아 시작한다. 동시에 하나만 진행한다.
+		if self.currentTutorialId ~= "" then
+			return
+		end
+
+		-- 결산 등 대화창이 열려 있는 동안에는 튜토리얼을 띄우지 않는다. 대화창이 닫히면 OnDialogVisibilityChanged가 재평가한다.
+		if _DialogUILogic ~= nil and _DialogUILogic:IsDialogOpen() == true then
+			return
+		end
+
+		-- 프롤로그가 이미 완료됐는데 검정 유지가 남아 있으면(예: 타이틀 시점 진행 데이터 미동기화) 해제하고 페이드인해 화면이 검정으로 멈추지 않게 한다
+		if _ScreenEffectUILogic ~= nil and _ScreenEffectUILogic:IsBlackHeld() == true and self:IsCompleted("prologue") == true then
+			_ScreenEffectUILogic:ReleaseBlack()
+			_ScreenEffectUILogic:FadeIn(self.prologueFadeInDuration, nil)
+		end
+
+		local currentMapName = ""
+		local player = _UserService ~= nil and _UserService.LocalPlayer or nil
+		if isvalid(player) and isvalid(player.CurrentMap) then
+			currentMapName = player.CurrentMap.Name
+		end
+
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+
+		for i = 1, #self.tRegistry do
+			local entry = self.tRegistry[i]
+			if self:IsCompleted(entry.id) == false then
+				local requiresMet = entry.requires == nil or entry.requires == "" or self:IsCompleted(entry.requires) == true
+				if requiresMet == true and self:MeetsCondition(entry, progress, currentMapName) == true then
+					self:StartTrigger(entry)
+					return
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean MeetsCondition(any entry, any progress, string currentMapName)
+		-- 트리거의 발동 조건 충족 여부를 판정한다.
+		if entry.triggerType == "mapEnter" then
+			return currentMapName ~= "" and currentMapName == entry.mapName
+		end
+
+		if entry.triggerType == "progressStep" then
+			-- 특정 맵에서만 발동해야 하는 진행 트리거는 현재 맵을 확인한다(예: 외출 안내는 스튜디오에서만).
+			if entry.mapName ~= nil and entry.mapName ~= "" and currentMapName ~= entry.mapName then
+				return false
+			end
+			if progress == nil or progress.eCurrentStep == nil then
+				return false
+			end
+			if progress.eCurrentStep ~= entry.step then
+				return false
+			end
+			if entry.month ~= nil and progress.currentMonth ~= entry.month then
+				return false
+			end
+			if entry.week ~= nil and progress.currentWeek ~= entry.week then
+				return false
+			end
+			return true
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartTrigger(any entry)
+		-- 트리거의 액션(대화/시나리오)을 시작한다. 실패하면 현재 상태를 비워 다음 평가를 막지 않는다.
+		self.currentTutorialId = entry.id
+		self.currentActionType = entry.actionType
+		self.currentDialogId = ""
+
+		if entry.actionType == "dialog" then
+			if _DialogUILogic == nil then
+				-- 대화 UI가 없으면 검정 유지도 풀어 화면이 멈추지 않게 한다
+				if entry.blackout == true and _ScreenEffectUILogic ~= nil then
+					_ScreenEffectUILogic:ReleaseBlack()
+					_ScreenEffectUILogic:FadeIn(self.prologueFadeInDuration, nil)
+				end
+				self:ClearCurrent()
+				return
+			end
+			self:DisconnectDialogClosed()
+			self.currentDialogId = entry.dialogId
+			self.currentBlackout = entry.blackout == true
+			self.dialogClosedHandler = _DialogUILogic:ConnectEvent(DialogClosedEvent, self.OnDialogClosed)
+			-- 일반 대화와 암전 대화를 같은 Open API의 옵션으로 구분합니다.
+			local options = DialogOpenOptions()
+			options.dialogId = entry.dialogId or ""
+			options.blackout = self.currentBlackout
+			if self.currentBlackout == true then
+				-- 암전 프롤로그: 대화를 먼저 열어(불투명 검정 dim) 스튜디오를 가린 뒤, 위에 덮인 ScreenEffect 검정을 걷어낸다(순서 보장으로 스튜디오 노출 깜빡임 방지)
+				_DialogUILogic:Open(options)
+				if _ScreenEffectUILogic ~= nil then
+					_ScreenEffectUILogic:ReleaseBlack()
+					_ScreenEffectUILogic:SetAlpha(0)
+				end
+			else
+				_DialogUILogic:Open(options)
+			end
+			log("[TutorialManager] 트리거 시작(dialog) id=" .. tostring(entry.id))
+			return
+		end
+
+		if entry.actionType == "scenario" then
+			if _TutorialUILogic == nil then
+				self:ClearCurrent()
+				return
+			end
+			local started = _TutorialUILogic:StartTutorial(entry.scenarioId)
+			if started == false then
+				self:ClearCurrent()
+				return
+			end
+			log("[TutorialManager] 트리거 시작(scenario) id=" .. tostring(entry.id))
+			return
+		end
+
+		self:ClearCurrent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDialogClosed(any dialogClosedEvent)
+		-- 진행 중이던 프롤로그 등 대화가 닫히면 완료 처리하고 다음 트리거를 재평가한다.
+		if dialogClosedEvent == nil or self.currentActionType ~= "dialog" then
+			return
+		end
+		if dialogClosedEvent.dialogId ~= self.currentDialogId then
+			return
+		end
+		self:DisconnectDialogClosed()
+		self:CompleteCurrent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnScenarioFinished(string scenarioId)
+		-- TutorialUILogic이 시나리오 종료를 알리면 완료 처리하고 다음 트리거를 재평가한다.
+		if self.currentActionType ~= "scenario" then
+			return
+		end
+		if scenarioId ~= nil and scenarioId ~= "" and scenarioId ~= self.currentTutorialId then
+			return
+		end
+		self:CompleteCurrent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteCurrent()
+		-- 현재 트리거를 완료로 표시(세션+영속)하고 다음 트리거를 재평가한다(프롤로그→튜토리얼 체이닝).
+		local id = self.currentTutorialId
+		local wasBlackout = self.currentBlackout
+		if id ~= "" then
+			self.tCompleted[id] = true
+			if _ProgressManager ~= nil then
+				_ProgressManager:RequestCompleteTutorial(id)
+			end
+			log("[TutorialManager] 완료 id=" .. tostring(id))
+		end
+		self:CloseScheduleOnStudioIntroDone(id)
+		self:ClearCurrent()
+
+		if wasBlackout == true and _ScreenEffectUILogic ~= nil then
+			-- 프롤로그 종료: 대화가 닫히며 드러난 스튜디오를 즉시 검정으로 덮은 뒤 페이드인하고, 페이드인 완료 후 다음 트리거(튜토리얼)를 평가한다
+			_ScreenEffectUILogic:ReleaseBlack()
+			_ScreenEffectUILogic:SetAlpha(1)
+			_ScreenEffectUILogic:FadeIn(self.prologueFadeInDuration, function()
+				self:EvaluateTriggers()
+			end)
+			return
+		end
+
+		self:EvaluateTriggers()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseScheduleOnStudioIntroDone(string id)
+		-- 연습실 튜토리얼(studio_intro) 종료 시, 안내를 따라 선택한 스케줄 항목을 비우고 스케줄 UI를 자동으로 닫는다
+		if id ~= "studio_intro" then
+			return
+		end
+
+		if _ScheduleUILogic == nil then
+			return
+		end
+
+		-- Close는 선택 초기화(ResetSelections) + 슬롯 갱신 + 숨김(Hide)을 함께 수행
+		_ScheduleUILogic:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCurrent()
+		-- 진행 상태를 유휴로 되돌린다.
+		self.currentTutorialId = ""
+		self.currentActionType = ""
+		self.currentDialogId = ""
+		self.currentBlackout = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsProloguePending()
+		-- 첫 진입 프롤로그가 아직 진행되지 않았는지 반환한다. 주말(도시) 진입 시엔 프롤로그가 발동하지 않으므로 false
+		if self:IsCompleted("prologue") == true then
+			return false
+		end
+		if _ProgressManager ~= nil and _EProgressStep ~= nil then
+			local progress = _ProgressManager:ClientGetProgress()
+			if progress ~= nil and progress.eCurrentStep == _EProgressStep.Step_Weekend then
+				return false
+			end
+		end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCompleted(string id)
+		-- 세션 완료 집합 또는 영속 진행 데이터의 완료 집합에 있으면 완료로 간주한다.
+		if id == nil or id == "" then
+			return false
+		end
+		if self.tCompleted[id] == true then
+			return true
+		end
+
+		if _ProgressManager ~= nil then
+			local progress = _ProgressManager:ClientGetProgress()
+			if progress ~= nil and type(progress.completedTutorials) == "table" and progress.completedTutorials[id] == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 진행 데이터가 갱신되면 진행 단계 트리거(예: 훈련 완료)를 평가한다.
+		self:EvaluateTriggers()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDialogVisibilityChanged(any uiVisibilityChangedEvent)
+		-- 대화창(결산 등)이 닫히면 보류했던 트리거를 재평가한다. 열림 이벤트는 무시(EvaluateTriggers 내부에서 IsDialogOpen로 보류).
+		if uiVisibilityChangedEvent == nil then
+			return
+		end
+		if uiVisibilityChangedEvent.isOpen == true then
+			return
+		end
+		self:EvaluateTriggers()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectDialogClosed()
+		-- 대화 종료 이벤트 구독을 해제한다.
+		if self.dialogClosedHandler ~= nil and _DialogUILogic ~= nil then
+			_DialogUILogic:DisconnectEvent(DialogClosedEvent, self.dialogClosedHandler)
+		end
+		self.dialogClosedHandler = nil
+	end
+
+end

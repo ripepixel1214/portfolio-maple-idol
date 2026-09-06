@@ -1,0 +1,2958 @@
+@Logic
+script DialogUILogic extends Logic
+
+	property Entity root = "117099c9-31e2-4130-891d-e9a87deefe44"
+
+	property Entity buttons = "dc23dba1-9d4d-459c-befe-2e6dcfd58ab0"
+
+	property CanvasGroupComponent canvas = "117099c9-31e2-4130-891d-e9a87deefe44"
+
+	property Entity dim = "66da43f5-0c90-434a-bb67-6c75dada70fe"
+
+	property Entity panel = "c55acb9e-5147-438a-8ddd-cf010d103792"
+
+	property TextGUIRendererComponent panelNameText = "9d970fb9-99d6-4c19-9ad3-e67cd57c391c"
+
+	property TextGUIRendererComponent panelMessageText = "1d7a6a52-d974-4e1a-8a9c-224890004b81"
+
+	property Entity panelPolygon = "0d637430-ceb9-43c7-ae86-990df030b50f"
+
+	property SpriteGUIRendererComponent leftCharacter = "bace8655-8757-40cf-a1dc-f3bd55389bef"
+
+	property SpriteGUIRendererComponent middleCharacter = "1aa673d2-5627-49ef-8710-d7a76479c229"
+
+	property SpriteGUIRendererComponent rightCharacter = "7caf86b9-fc92-48f9-a6e4-5e0d3defffe5"
+
+	property SpriteGUIRendererComponent leftPixelCharacter = "7368b81f-faf8-4a81-9ae7-6e345df7e83c"
+
+	property SpriteGUIRendererComponent middlePixelCharacter = "f8ee5783-f41d-429b-9a79-2ea7a50a71df"
+
+	property SpriteGUIRendererComponent rightPixelCharacter = "edb487c5-f1c0-430d-9e3b-3126ee46704e"
+
+	property Color activeCharacterColor = Color(1, 1, 1, 1)
+
+	property Color inactiveCharacterColor = Color(0.45, 0.45, 0.45, 1)
+
+	property ButtonComponent panelButton = "a72673fa-0349-4ef8-8e6f-e420a86f9545"
+
+	property any panelButtonClickHandler = nil
+
+	property any advanceKeyDownHandler = nil
+
+	property ButtonComponent skipButton = "d4abeaf6-9353-47fe-9768-76bffb159b50"
+
+	property any skipButtonClickHandler = nil
+
+	property ButtonComponent autoButton = "88c95a23-4215-4f62-8a21-703339c0c2d9"
+
+	property any autoButtonClickHandler = nil
+
+	property ButtonComponent speedButton = "e94c9f5b-6149-493f-85b9-0728a3fe7624"
+
+	property TextGUIRendererComponent speedButtonText = "e94c9f5b-6149-493f-85b9-0728a3fe7624"
+
+	property any speedButtonClickHandler = nil
+
+	property integer textSpeedMultiplier = 1
+
+	property boolean isAutoEnabled = false
+
+	property number autoAdvanceDelay = 1.5
+
+	property integer autoAdvanceTimerId = 0
+
+	property any eventExecutionCompletedHandler = nil
+
+	property any eventExecutionFailedHandler = nil
+
+	property any settlementVisibilityChangedHandler = nil
+
+	property any tLines = {}
+
+	property integer lineIdx = 0
+
+	property string currentLeftKey = ""
+
+	property string currentMiddleKey = ""
+
+	property string currentRightKey = ""
+
+	property string currentLeftVisualKey = ""
+
+	property string currentMiddleVisualKey = ""
+
+	property string currentRightVisualKey = ""
+
+	property string currentLeftVisualType = "portraitFullBody"
+
+	property string currentMiddleVisualType = "portraitFullBody"
+
+	property string currentRightVisualType = "portraitFullBody"
+
+	property Vector2 leftCharacterBasePosition = Vector2(0, 0)
+
+	property Vector2 middleCharacterBasePosition = Vector2(0, 0)
+
+	property Vector2 rightCharacterBasePosition = Vector2(0, 0)
+
+	property Vector2 leftCharacterBaseSize = Vector2(0, 0)
+
+	property Vector2 middleCharacterBaseSize = Vector2(0, 0)
+
+	property Vector2 rightCharacterBaseSize = Vector2(0, 0)
+
+	property Vector2 leftPixelCharacterBasePosition = Vector2(0, 0)
+
+	property Vector2 middlePixelCharacterBasePosition = Vector2(0, 0)
+
+	property Vector2 rightPixelCharacterBasePosition = Vector2(0, 0)
+
+	property Vector2 leftPixelCharacterBaseSize = Vector2(0, 0)
+
+	property Vector2 middlePixelCharacterBaseSize = Vector2(0, 0)
+
+	property Vector2 rightPixelCharacterBaseSize = Vector2(0, 0)
+
+	property Vector2 leftPixelCharacterBottomCenter = Vector2(0, 0)
+
+	property Vector2 middlePixelCharacterBottomCenter = Vector2(0, 0)
+
+	property Vector2 rightPixelCharacterBottomCenter = Vector2(0, 0)
+
+	property Vector2 hiddenCharacterPosition = Vector2(100000, 100000)
+
+	property number pixelCharacterScale = 7
+
+	property boolean responsiveCharacterLayoutEnabled = true
+
+	property Vector2 responsiveCharacterReferenceResolution = Vector2(1920, 1080)
+
+	property number responsiveLeftCharacterXRatio = 0.2439686
+
+	property number responsiveMiddleCharacterXRatio = 0.5104164
+
+	property number responsiveRightCharacterXRatio = 0.7952863
+
+	property number responsivePortraitBottomOverflowRatio = -0.1626
+
+	property number responsivePixelBottomRatio = 0.249461
+
+	@HideFromInspector
+	property boolean responsiveCharacterLayoutCaptured = false
+
+	@HideFromInspector
+	property any responsiveCharacterLayoutReference = nil
+
+	@HideFromInspector
+	property number responsiveCharacterHeightScale = 1
+
+	@HideFromInspector
+	property number lastResponsiveScreenWidth = -1
+
+	@HideFromInspector
+	property number lastResponsiveScreenHeight = -1
+
+	@HideFromInspector
+	property Vector2 lastResponsivePortraitParentSize = Vector2(-1, -1)
+
+	@HideFromInspector
+	property Vector2 lastResponsivePixelParentSize = Vector2(-1, -1)
+
+	property number characterFadeDuration = 0.18
+
+	property number characterColorFadeDuration = 0.18
+
+	property number characterBobAmplitude = 4
+
+	property number characterBobPeriod = 3.4
+
+	property number characterBobBlendDuration = 0.3
+
+	property number characterMoveDuration = 0.22
+
+	property Vector2 panelPolygonBasePosition = Vector2(0, 0)
+
+	property number panelPolygonBobElapsed = 0
+
+	property number panelPolygonBobAmplitude = 4
+
+	property number panelPolygonBobPeriod = 1.1
+
+	property any characterFadeStates = {}
+
+	property any eCharacterSide = {
+		Left = "Left",
+		Middle = "Middle",
+		Right = "Right"
+	}
+
+	property string currentDialogId = ""
+
+	property string currentBackgroundId = ""
+
+	property string currentDialogBgmRuid = ""
+
+	property number currentDialogBgmVolume = 1
+
+	property string defaultDimImageRuid = ""
+
+	property Color defaultDimColor = Color(1, 1, 1, 1)
+
+	property any actorBindings = nil
+
+	property any optionPortraitOverrides = nil
+
+	-- 암전 연출 여부. true면 dim을 불투명 검정으로 채워 뒤 배경을 완전히 가린다(프롤로그 등)
+	property boolean forceBlackout = false
+
+	property boolean currentOpenWithFade = false
+
+	property number currentOpenFadeOutDuration = 0.5
+
+	property number currentOpenFadeInDuration = 0.5
+
+	property boolean isOpeningWithFade = false
+
+	property boolean currentCloseWithFade = false
+
+	property number currentFadeOutDuration = 0.5
+
+	property number currentFadeInDuration = 0.5
+
+	property boolean isClosingWithFade = false
+
+	property boolean isWaitingChoiceEventResult = false
+
+	property string waitingChoiceEventId = ""
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 다이얼로그 화면을 초기화하고 패널 클릭을 연결합니다.
+		self.leftCharacterBasePosition = self:GetCharacterPosition(self.eCharacterSide.Left)
+		self.middleCharacterBasePosition = self:GetCharacterPosition(self.eCharacterSide.Middle)
+		self.rightCharacterBasePosition = self:GetCharacterPosition(self.eCharacterSide.Right)
+		self.leftCharacterBaseSize = self:GetCharacterSize(self.eCharacterSide.Left)
+		self.middleCharacterBaseSize = self:GetCharacterSize(self.eCharacterSide.Middle)
+		self.rightCharacterBaseSize = self:GetCharacterSize(self.eCharacterSide.Right)
+		self.leftPixelCharacterBasePosition = self:GetPixelCharacterPosition(self.eCharacterSide.Left)
+		self.middlePixelCharacterBasePosition = self:GetPixelCharacterPosition(self.eCharacterSide.Middle)
+		self.rightPixelCharacterBasePosition = self:GetPixelCharacterPosition(self.eCharacterSide.Right)
+		self.leftPixelCharacterBaseSize = self:GetPixelCharacterSize(self.eCharacterSide.Left)
+		self.middlePixelCharacterBaseSize = self:GetPixelCharacterSize(self.eCharacterSide.Middle)
+		self.rightPixelCharacterBaseSize = self:GetPixelCharacterSize(self.eCharacterSide.Right)
+		self.leftPixelCharacterBottomCenter = self:GetRendererBottomCenter(self.leftPixelCharacter)
+		self.middlePixelCharacterBottomCenter = self:GetRendererBottomCenter(self.middlePixelCharacter)
+		self.rightPixelCharacterBottomCenter = self:GetRendererBottomCenter(self.rightPixelCharacter)
+		self:CaptureResponsiveCharacterLayout()
+		self:ApplyResponsiveCharacterLayout()
+		self.panelPolygonBasePosition = self:GetPanelPolygonPosition()
+		self:CaptureDefaultDimImage()
+		if self.panelButton ~= nil and self.panelButton.Entity ~= nil then
+			self.panelButtonClickHandler = self.panelButton.Entity:ConnectEvent(ButtonClickEvent, self.OnPanelButtonClicked)
+		end
+		self:ConnectAdvanceKeys()
+
+		if self.skipButton ~= nil and self.skipButton.Entity ~= nil then
+			self.skipButtonClickHandler = self.skipButton.Entity:ConnectEvent(ButtonClickEvent, self.OnSkipButtonClicked)
+		end
+
+		if self.autoButton ~= nil and self.autoButton.Entity ~= nil then
+			self.autoButtonClickHandler = self.autoButton.Entity:ConnectEvent(ButtonClickEvent, self.OnAutoButtonClicked)
+		end
+
+		if self.speedButton ~= nil and self.speedButton.Entity ~= nil then
+			self.speedButtonClickHandler = self.speedButton.Entity:ConnectEvent(ButtonClickEvent, self.OnSpeedButtonClicked)
+		end
+
+		self:SetTextSpeedMultiplier(self.textSpeedMultiplier)
+
+		if _EventExecutor ~= nil then
+			self.eventExecutionCompletedHandler = _EventExecutor:ConnectEvent(EventExecutionCompletedEvent, self.OnEventExecutionCompleted)
+			self.eventExecutionFailedHandler = _EventExecutor:ConnectEvent(EventExecutionFailedEvent, self.OnEventExecutionFailed)
+		end
+
+		if _SettlementCardUILogic ~= nil then
+			self.settlementVisibilityChangedHandler = _SettlementCardUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnSettlementCardVisibilityChanged)
+		end
+
+		self:SetDialogButtonsEnabled(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 패널 클릭 연결을 해제합니다.
+		if _UIBlockerLogic ~= nil then
+			_UIBlockerLogic:SetVisible("dialog", true)
+		end
+
+		if self.panelButtonClickHandler ~= nil and self.panelButton ~= nil and self.panelButton.Entity ~= nil then
+			self.panelButton.Entity:DisconnectEvent(ButtonClickEvent, self.panelButtonClickHandler)
+			self.panelButtonClickHandler = nil
+		end
+		self:DisconnectAdvanceKeys()
+
+		if self.skipButtonClickHandler ~= nil and self.skipButton ~= nil and self.skipButton.Entity ~= nil then
+			self.skipButton.Entity:DisconnectEvent(ButtonClickEvent, self.skipButtonClickHandler)
+			self.skipButtonClickHandler = nil
+		end
+
+		if self.autoButtonClickHandler ~= nil and self.autoButton ~= nil and self.autoButton.Entity ~= nil then
+			self.autoButton.Entity:DisconnectEvent(ButtonClickEvent, self.autoButtonClickHandler)
+			self.autoButtonClickHandler = nil
+		end
+
+		if self.speedButtonClickHandler ~= nil and self.speedButton ~= nil and self.speedButton.Entity ~= nil then
+			self.speedButton.Entity:DisconnectEvent(ButtonClickEvent, self.speedButtonClickHandler)
+			self.speedButtonClickHandler = nil
+		end
+
+		if self.eventExecutionCompletedHandler ~= nil and _EventExecutor ~= nil then
+			_EventExecutor:DisconnectEvent(EventExecutionCompletedEvent, self.eventExecutionCompletedHandler)
+			self.eventExecutionCompletedHandler = nil
+		end
+
+		if self.eventExecutionFailedHandler ~= nil and _EventExecutor ~= nil then
+			_EventExecutor:DisconnectEvent(EventExecutionFailedEvent, self.eventExecutionFailedHandler)
+			self.eventExecutionFailedHandler = nil
+		end
+
+		if self.settlementVisibilityChangedHandler ~= nil and _SettlementCardUILogic ~= nil then
+			_SettlementCardUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.settlementVisibilityChangedHandler)
+			self.settlementVisibilityChangedHandler = nil
+		end
+
+		self:CancelAutoAdvanceTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectAdvanceKeys()
+		-- Space와 E 키를 다이얼로그 진행 입력으로 연결합니다.
+		if self.advanceKeyDownHandler ~= nil then
+			return
+		end
+
+		self.advanceKeyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnAdvanceKeyDown)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectAdvanceKeys()
+		-- 다이얼로그 진행 키 입력 연결을 해제합니다.
+		if self.advanceKeyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.advanceKeyDownHandler)
+		end
+
+		self.advanceKeyDownHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAdvanceKeyDown(KeyDownEvent event)
+		-- 다이얼로그가 열린 동안 Space 또는 E 입력을 패널 클릭과 동일하게 처리합니다.
+		if event == nil then
+			return
+		end
+		if event.key ~= KeyboardKey.Space then
+			return
+		end
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+		if self.buttons ~= nil and self.buttons.Enable == false then
+			return
+		end
+
+		self:OnPanelButtonClicked()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSettlementCardVisibilityChanged(UIVisibilityChangedEvent event)
+		-- 결산 카드 표시 상태에 따라 다이얼로그 버튼 그룹을 반대로 활성화합니다.
+		if event == nil or event.uiId ~= "settlement" then
+			return
+		end
+
+		self:SetDialogButtonsEnabled(event.isOpen ~= true)
+		log("[DialogUILogic] settlementVisible=" .. tostring(event.isOpen == true)
+			.. " buttonsEnabled=" .. tostring(event.isOpen ~= true))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetDialogButtonsEnabled(boolean isEnabled)
+		-- Buttons 루트의 Enable을 바꿔 하위 버튼 입력까지 함께 켜거나 끕니다.
+		if self.buttons == nil then
+			return
+		end
+
+		self.buttons.Enable = isEnabled
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 캐릭터 초상화의 등장/퇴장 알파 전환을 갱신합니다.
+		self:RefreshResponsiveCharacterLayout()
+		self:UpdateCharacterFade(self.eCharacterSide.Left, delta)
+		self:UpdateCharacterFade(self.eCharacterSide.Middle, delta)
+		self:UpdateCharacterFade(self.eCharacterSide.Right, delta)
+		self:UpdateCharacterColorFade(self.eCharacterSide.Left, delta)
+		self:UpdateCharacterColorFade(self.eCharacterSide.Middle, delta)
+		self:UpdateCharacterColorFade(self.eCharacterSide.Right, delta)
+		self:UpdateCharacterBob(self.eCharacterSide.Left, delta)
+		self:UpdateCharacterBob(self.eCharacterSide.Middle, delta)
+		self:UpdateCharacterBob(self.eCharacterSide.Right, delta)
+		self:UpdatePanelPolygonBob(delta)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureResponsiveCharacterLayout()
+		-- FHD에서 고정한 위치 비율과 현재 렌더러 크기를 반응형 기준값으로 구성합니다.
+		if self.responsiveCharacterLayoutCaptured == true then
+			return
+		end
+		if self.responsiveCharacterLayoutEnabled ~= true or _UIScreenUtil == nil then
+			return
+		end
+
+		local reference = {
+			portrait = {},
+			pixel = {}
+		}
+		reference.portrait[self.eCharacterSide.Left] = self:CaptureResponsivePortraitReference(self.eCharacterSide.Left, self.leftCharacter)
+		reference.portrait[self.eCharacterSide.Middle] = self:CaptureResponsivePortraitReference(self.eCharacterSide.Middle, self.middleCharacter)
+		reference.portrait[self.eCharacterSide.Right] = self:CaptureResponsivePortraitReference(self.eCharacterSide.Right, self.rightCharacter)
+		reference.pixel[self.eCharacterSide.Left] = self:CaptureResponsivePixelReference(self.eCharacterSide.Left, self.leftPixelCharacter)
+		reference.pixel[self.eCharacterSide.Middle] = self:CaptureResponsivePixelReference(self.eCharacterSide.Middle, self.middlePixelCharacter)
+		reference.pixel[self.eCharacterSide.Right] = self:CaptureResponsivePixelReference(self.eCharacterSide.Right, self.rightPixelCharacter)
+
+		if reference.portrait[self.eCharacterSide.Left] == nil
+			or reference.portrait[self.eCharacterSide.Middle] == nil
+			or reference.portrait[self.eCharacterSide.Right] == nil
+			or reference.pixel[self.eCharacterSide.Left] == nil
+			or reference.pixel[self.eCharacterSide.Middle] == nil
+			or reference.pixel[self.eCharacterSide.Right] == nil then
+			return
+		end
+
+		self.responsiveCharacterLayoutReference = reference
+		self.responsiveCharacterLayoutCaptured = true
+		self:UpdateResponsiveCharacterLayoutSnapshot()
+	end
+
+	@ExecSpace("ClientOnly")
+	method any CaptureResponsivePortraitReference(string side, SpriteGUIRendererComponent renderer)
+		-- FHD에서 측정한 가로 위치와 하단 돌출 비율에 현재 전신 일러스트 크기를 결합합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return nil
+		end
+		local transform = renderer.Entity.UITransformComponent
+		local size = transform.RectSize
+		if size.x <= 0 or size.y <= 0 then
+			return nil
+		end
+
+		return {
+			xRatio = self:GetResponsiveCharacterXRatio(side),
+			bottomOverflowRatio = self.responsivePortraitBottomOverflowRatio,
+			baseSize = Vector2(size.x, size.y),
+			referenceScreenHeight = self.responsiveCharacterReferenceResolution.y
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method any CaptureResponsivePixelReference(string side, SpriteGUIRendererComponent renderer)
+		-- FHD에서 측정한 가로 위치와 발 기준선 비율에 현재 픽셀 슬롯 크기를 결합합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return nil
+		end
+
+		local transform = renderer.Entity.UITransformComponent
+		local size = transform.RectSize
+		return {
+			xRatio = self:GetResponsiveCharacterXRatio(side),
+			bottomRatio = self.responsivePixelBottomRatio,
+			baseSize = Vector2(size.x, size.y),
+			referenceScreenHeight = self.responsiveCharacterReferenceResolution.y
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetResponsiveCharacterXRatio(string side)
+		-- FHD 기준으로 측정한 좌·중·우 캐릭터의 화면 가로 비율을 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.responsiveLeftCharacterXRatio
+		end
+		if side == self.eCharacterSide.Middle then
+			return self.responsiveMiddleCharacterXRatio
+		end
+		return self.responsiveRightCharacterXRatio
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetResponsiveRendererContext(SpriteGUIRendererComponent renderer)
+		-- 렌더러 부모 좌표에서 실제 화면과 기준 종횡비 화면 경계를 함께 반환합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.Parent == nil then
+			return nil
+		end
+		local parentTransform = renderer.Entity.Parent.UITransformComponent
+		if parentTransform == nil then
+			return nil
+		end
+
+		local screenBounds = _UIScreenUtil:GetScreenBoundsInLocal(parentTransform)
+		if screenBounds == nil then
+			return nil
+		end
+		return {
+			parentTransform = parentTransform,
+			screenBounds = screenBounds
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshResponsiveCharacterLayout()
+		-- 해상도나 캐릭터 부모 영역이 바뀐 프레임에만 반응형 위치를 다시 적용합니다.
+		if self.responsiveCharacterLayoutEnabled ~= true then
+			return
+		end
+		if self.responsiveCharacterLayoutCaptured == false then
+			self:CaptureResponsiveCharacterLayout()
+			if self.responsiveCharacterLayoutCaptured == true then
+				self:ApplyResponsiveCharacterLayout()
+			end
+			return
+		end
+		if self:HasResponsiveCharacterLayoutChanged() == true then
+			self:ApplyResponsiveCharacterLayout()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasResponsiveCharacterLayoutChanged()
+		-- 실제 화면 크기와 포토·픽셀 부모 영역이 마지막 적용값과 다른지 확인합니다.
+		if _UILogic == nil then
+			return false
+		end
+
+		local portraitParentSize = self:GetRendererParentSize(self.leftCharacter)
+		local pixelParentSize = self:GetRendererParentSize(self.leftPixelCharacter)
+		return self.lastResponsiveScreenWidth ~= _UILogic.ScreenWidth
+			or self.lastResponsiveScreenHeight ~= _UILogic.ScreenHeight
+			or self.lastResponsivePortraitParentSize.x ~= portraitParentSize.x
+			or self.lastResponsivePortraitParentSize.y ~= portraitParentSize.y
+			or self.lastResponsivePixelParentSize.x ~= pixelParentSize.x
+			or self.lastResponsivePixelParentSize.y ~= pixelParentSize.y
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyResponsiveCharacterLayout()
+		-- 현재 실제 화면 경계에 기준 배치의 위치·하단 노출 비율을 적용합니다.
+		if self.responsiveCharacterLayoutCaptured == false or self.responsiveCharacterLayoutReference == nil then
+			return
+		end
+
+		local previousHeightScale = self.responsiveCharacterHeightScale
+		local leftReference = self.responsiveCharacterLayoutReference.portrait[self.eCharacterSide.Left]
+		local leftContext = self:GetResponsiveRendererContext(self.leftCharacter)
+		if leftReference == nil or leftContext == nil then
+			return
+		end
+
+		local currentHeight = leftContext.screenBounds.top - leftContext.screenBounds.bottom
+		self.responsiveCharacterHeightScale = currentHeight / leftReference.referenceScreenHeight
+		self:ApplyResponsivePortraitSlot(self.eCharacterSide.Left, self.leftCharacter)
+		self:ApplyResponsivePortraitSlot(self.eCharacterSide.Middle, self.middleCharacter)
+		self:ApplyResponsivePortraitSlot(self.eCharacterSide.Right, self.rightCharacter)
+		self:ApplyResponsivePixelSlot(self.eCharacterSide.Left, self.leftPixelCharacter, previousHeightScale)
+		self:ApplyResponsivePixelSlot(self.eCharacterSide.Middle, self.middlePixelCharacter, previousHeightScale)
+		self:ApplyResponsivePixelSlot(self.eCharacterSide.Right, self.rightPixelCharacter, previousHeightScale)
+		self:UpdateResponsiveCharacterLayoutSnapshot()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyResponsivePortraitSlot(string side, SpriteGUIRendererComponent renderer)
+		-- 포토 슬롯의 크기와 중앙 하단 위치를 현재 화면에 맞춰 갱신합니다.
+		local reference = self.responsiveCharacterLayoutReference.portrait[side]
+		local context = self:GetResponsiveRendererContext(renderer)
+		if reference == nil or context == nil then
+			return
+		end
+
+		local bounds = context.screenBounds
+		local width = bounds.right - bounds.left
+		local height = bounds.top - bounds.bottom
+		local scale = height / reference.referenceScreenHeight
+		local size = Vector2(reference.baseSize.x * scale, reference.baseSize.y * scale)
+		local bottomCenter = Vector2(
+			bounds.left + width * reference.xRatio,
+			bounds.bottom + size.y * reference.bottomOverflowRatio
+		)
+		local position = self:GetAnchoredPositionForBottomCenter(renderer, bottomCenter, size)
+		if position == nil then
+			return
+		end
+
+		renderer.Entity.UITransformComponent.RectSize = size
+		self:SetPortraitCharacterBasePosition(side, position)
+		self:SetPortraitCharacterBaseSize(side, size)
+		self:ApplyResponsiveVisibleSlotPosition(side, renderer, position, "portrait")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyResponsivePixelSlot(string side, SpriteGUIRendererComponent renderer, number previousHeightScale)
+		-- 픽셀 슬롯의 발 기준선을 유지하며 현재 화면 높이에 맞춰 크기와 위치를 갱신합니다.
+		local reference = self.responsiveCharacterLayoutReference.pixel[side]
+		local context = self:GetResponsiveRendererContext(renderer)
+		if reference == nil or context == nil then
+			return
+		end
+
+		local bounds = context.screenBounds
+		local width = bounds.right - bounds.left
+		local height = bounds.top - bounds.bottom
+		local scale = height / reference.referenceScreenHeight
+		local size = Vector2(reference.baseSize.x * scale, reference.baseSize.y * scale)
+		if self:GetCurrentCharacterVisualType(side) == "pixel" and self:GetCurrentCharacterKey(side) ~= "" then
+			local currentSize = renderer.Entity.UITransformComponent.RectSize
+			local scaleRatio = scale
+			if previousHeightScale ~= nil and previousHeightScale > 0 then
+				scaleRatio = scale / previousHeightScale
+			end
+			size = Vector2(currentSize.x * scaleRatio, currentSize.y * scaleRatio)
+		end
+
+		local bottomCenter = Vector2(
+			bounds.left + width * reference.xRatio,
+			bounds.bottom + height * reference.bottomRatio
+		)
+		local position = self:GetAnchoredPositionForBottomCenter(renderer, bottomCenter, size)
+		if position == nil then
+			return
+		end
+
+		renderer.Entity.UITransformComponent.RectSize = size
+		self:SetPixelCharacterBottomCenter(side, self:GetBottomCenterFromAnchoredPosition(renderer, position, size))
+		self:SetPixelCharacterBasePosition(side, position)
+		self:SetPixelCharacterBaseSize(side, size)
+		self:ApplyResponsiveVisibleSlotPosition(side, renderer, position, "pixel")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyResponsiveVisibleSlotPosition(string side, SpriteGUIRendererComponent renderer, Vector2 position, string targetType)
+		-- 현재 사용 중인 렌더러만 새 기준 위치로 옮기고 이동 중이면 목표점만 갱신합니다.
+		local isPixel = self:GetCurrentCharacterVisualType(side) == "pixel"
+		if (targetType == "pixel") ~= isPixel or self:GetCurrentCharacterKey(side) == "" then
+			return
+		end
+
+		local state = self:GetCharacterFadeState(side)
+		if state.isMoving == true then
+			state.moveTargetPosition = position
+			return
+		end
+		renderer.Entity.UITransformComponent.anchoredPosition = position
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateResponsiveCharacterLayoutSnapshot()
+		-- 다음 프레임의 변경 감지에 사용할 화면과 부모 크기를 저장합니다.
+		if _UILogic == nil then
+			return
+		end
+		self.lastResponsiveScreenWidth = _UILogic.ScreenWidth
+		self.lastResponsiveScreenHeight = _UILogic.ScreenHeight
+		self.lastResponsivePortraitParentSize = self:GetRendererParentSize(self.leftCharacter)
+		self.lastResponsivePixelParentSize = self:GetRendererParentSize(self.leftPixelCharacter)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetRendererParentSize(SpriteGUIRendererComponent renderer)
+		-- 렌더러 부모 UI의 현재 크기를 반환합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.Parent == nil then
+			return Vector2(0, 0)
+		end
+		local parentTransform = renderer.Entity.Parent.UITransformComponent
+		if parentTransform == nil then
+			return Vector2(0, 0)
+		end
+		return parentTransform.RectSize
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open(DialogOpenOptions options)
+		-- 하나의 옵션 구조로 배경, 암전, 액터 바인딩, 종료 전환을 설정하고 다이얼로그를 엽니다.
+		if options == nil then
+			log_warning("[DialogUILogic] Open failed: options is nil")
+			return
+		end
+
+		if options.dialogId == nil or options.dialogId == "" then
+			log_warning("[DialogUILogic] Open failed: dialogId is empty")
+			return
+		end
+
+		if self.isClosingWithFade == true or self.isOpeningWithFade == true then
+			log_warning("[DialogUILogic] Open ignored while fade transition is running")
+			return
+		end
+
+		self:ApplyOpenOptions(options)
+		self:ApplyDialogBGM()
+		if self.currentOpenWithFade == true then
+			self:OpenWithFade(options.dialogId, self.currentOpenFadeOutDuration, self.currentOpenFadeInDuration)
+			return
+		end
+
+		self:OpenByCurrentState(options.dialogId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyOpenOptions(DialogOpenOptions options)
+		-- 전달된 옵션을 현재 다이얼로그 세션의 표시 설정과 페이드 종료 설정으로 복사합니다.
+		self.actorBindings = nil
+		if options.useActorBinding == true then
+			self.actorBindings = {
+				speaker = options.speakerActorId or "",
+				left = options.leftActorId or "",
+				middle = options.middleActorId or "",
+				right = options.rightActorId or ""
+			}
+		end
+
+		self.optionPortraitOverrides = {
+			left = options.leftOverrideResourceId or "",
+			middle = options.middleOverrideResourceId or "",
+			right = options.rightOverrideResourceId or ""
+		}
+
+		self.currentBackgroundId = ""
+		self.currentDialogBgmRuid = ""
+		self.currentDialogBgmVolume = 1
+		self.forceBlackout = false
+		self.currentOpenWithFade = false
+		self.currentOpenFadeOutDuration = 0.5
+		self.currentOpenFadeInDuration = 0.5
+		self.currentCloseWithFade = false
+		self.currentFadeOutDuration = 0.5
+		self.currentFadeInDuration = 0.5
+
+		local tableOption = nil
+		if options.overrideTableOption ~= true and _DialogOptionMaster ~= nil then
+			tableOption = _DialogOptionMaster:GetDialogOption(options.dialogId)
+		end
+
+		if tableOption ~= nil then
+			self.currentBackgroundId = tableOption.backgroundId or ""
+			self.currentDialogBgmRuid = tableOption.dialogBgmRuid or ""
+			self.currentDialogBgmVolume = math.max(tableOption.dialogBgmVolume or 1, 0)
+			self.forceBlackout = tableOption.blackout == true
+			if self.forceBlackout == true then
+				self.currentBackgroundId = ""
+			end
+
+			if tableOption:HasOpenFade() == true then
+				self.currentOpenWithFade = true
+				self.currentOpenFadeOutDuration = math.max(tableOption.openFadeOutDuration or 0, 0)
+				self.currentOpenFadeInDuration = math.max(tableOption.openFadeInDuration or 0, 0)
+			end
+
+			if tableOption:HasCloseFade() == true then
+				self.currentCloseWithFade = true
+				self.currentFadeOutDuration = math.max(tableOption.closeFadeOutDuration or 0, 0)
+				self.currentFadeInDuration = math.max(tableOption.closeFadeInDuration or 0, 0)
+			end
+		end
+
+		-- 동적으로 명시된 연출 옵션은 테이블 기본값보다 우선합니다.
+		if options.overrideTableOption == true then
+			self.currentBackgroundId = options.backgroundId or ""
+			self.currentDialogBgmRuid = options.dialogBgmRuid or ""
+			self.currentDialogBgmVolume = math.max(options.dialogBgmVolume or 1, 0)
+			self.forceBlackout = options.blackout == true
+			self.currentOpenWithFade = options.openWithFade == true
+			self.currentOpenFadeOutDuration = math.max(options.openFadeOutDuration or 0.5, 0)
+			self.currentOpenFadeInDuration = math.max(options.openFadeInDuration or 0.5, 0)
+			self.currentCloseWithFade = options.closeWithFade == true
+			self.currentFadeOutDuration = math.max(options.fadeOutDuration or 0.5, 0)
+			self.currentFadeInDuration = math.max(options.fadeInDuration or 0.5, 0)
+		else
+			if options.dialogBgmRuid ~= nil and options.dialogBgmRuid ~= "" then
+				self.currentDialogBgmRuid = options.dialogBgmRuid
+				self.currentDialogBgmVolume = math.max(options.dialogBgmVolume or 1, 0)
+			end
+
+			if options.backgroundId ~= nil and options.backgroundId ~= "" then
+				self.currentBackgroundId = options.backgroundId
+				self.forceBlackout = false
+			end
+
+			if options.blackout == true then
+				self.forceBlackout = true
+			end
+
+			if options.openWithFade == true then
+				self.currentOpenWithFade = true
+				self.currentOpenFadeOutDuration = math.max(options.openFadeOutDuration or 0.5, 0)
+				self.currentOpenFadeInDuration = math.max(options.openFadeInDuration or 0.5, 0)
+			end
+
+			if options.closeWithFade == true then
+				self.currentCloseWithFade = true
+				self.currentFadeOutDuration = math.max(options.fadeOutDuration or 0.5, 0)
+				self.currentFadeInDuration = math.max(options.fadeInDuration or 0.5, 0)
+			end
+		end
+
+		if self.forceBlackout == true then
+			self.currentBackgroundId = ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDialogBGM()
+		-- 현재 대화 옵션의 BGM을 SoundManager에 적용하고 비어 있으면 기존 대화 BGM 세션을 종료합니다.
+		if _SoundManager == nil then
+			return
+		end
+
+		if self.currentDialogBgmRuid == nil or self.currentDialogBgmRuid == "" then
+			_SoundManager:EndDialogBGM()
+			return
+		end
+
+		_SoundManager:BeginDialogBGM(self.currentDialogBgmRuid, self.currentDialogBgmVolume)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenByCurrentState(string dialogId)
+		-- 이미 열려 있으면 이어서 표시하고, 닫혀 있으면 새 다이얼로그를 엽니다.
+		if self:IsDialogOpen() == true then
+			self:Continue(dialogId)
+			return
+		end
+
+		self:OpenInternal(dialogId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenWithFade(string dialogId, number fadeOutDuration, number fadeInDuration)
+		-- 화면을 가린 뒤 다이얼로그를 열고 다시 밝힙니다.
+		if _ScreenEffectUILogic == nil then
+			self:OpenByCurrentState(dialogId)
+			return
+		end
+
+		self.isOpeningWithFade = true
+		local safeFadeOutDuration = math.max(fadeOutDuration or 0, 0)
+		local safeFadeInDuration = math.max(fadeInDuration or 0, 0)
+		_ScreenEffectUILogic:FadeOut(safeFadeOutDuration, function()
+			self:OpenByCurrentState(dialogId)
+			if _ScreenEffectUILogic == nil then
+				self.isOpeningWithFade = false
+				return
+			end
+
+			_ScreenEffectUILogic:FadeIn(safeFadeInDuration, function()
+				self.isOpeningWithFade = false
+			end)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean Continue(string dialogId)
+		-- 현재 다이얼로그 UI 상태를 유지한 채 다른 dialogId의 첫 줄로 이어갑니다.
+		if self:IsDialogOpen() == false then
+			return false
+		end
+
+		if dialogId == nil or dialogId == "" then
+			log_warning("[DialogUILogic] Continue failed: dialogId is empty")
+			return false
+		end
+
+		if _DialogMaster == nil then
+			log_warning("[DialogUILogic] Continue failed: DialogMaster not found")
+			return false
+		end
+
+		local tNextLines = _DialogMaster:GetDialogLines(dialogId)
+		if tNextLines == nil or #tNextLines <= 0 then
+			log_warning("[DialogUILogic] Continue failed: dialog not found dialogId=" .. tostring(dialogId))
+			return false
+		end
+
+		self:ClearChoiceWait()
+		if _DialogPlayer ~= nil then
+			_DialogPlayer:Clear()
+		end
+
+		self.currentDialogId = dialogId
+		self.tLines = tNextLines
+		self.lineIdx = 1
+
+		self:ApplyBackground(self.currentBackgroundId)
+		self:ShowLine(self.tLines[self.lineIdx])
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsDialogOpen()
+		-- 현재 다이얼로그 UI 루트가 켜져 있는지 반환합니다.
+		return self.root ~= nil and self.root.Enable == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 다이얼로그 화면을 닫습니다.
+		local closedDialogId = self.currentDialogId
+		if _SoundManager ~= nil then
+			_SoundManager:EndDialogBGM()
+		end
+		self:SetAutoEnabled(false)
+		self:ResetCharacterSlot(self.eCharacterSide.Left)
+		self:ResetCharacterSlot(self.eCharacterSide.Middle)
+		self:ResetCharacterSlot(self.eCharacterSide.Right)
+		self.root.Enable = false
+		self.actorBindings = nil
+		self.currentDialogId = ""
+		self.currentBackgroundId = ""
+		self.currentDialogBgmRuid = ""
+		self.currentDialogBgmVolume = 1
+		-- 암전 상태를 해제한 뒤 dim을 기본값으로 복원한다(다음 일반 대화에 암전이 남지 않도록)
+		self.forceBlackout = false
+		self:ClearBackground()
+		self:ClearChoiceWait()
+		self:ResetCloseOptions()
+
+		if _UIBlockerLogic ~= nil then
+			_UIBlockerLogic:SetVisible("dialog", true)
+		end
+
+		_UIVisibilityNotifierLogic:SendFrom(self, "dialog", false)
+		self:SendDialogClosedEvent(closedDialogId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseByPolicy()
+		-- 현재 다이얼로그 세션의 종료 정책에 따라 즉시 닫기 또는 화면 페이드 닫기를 실행합니다.
+		if self.isClosingWithFade == true or self.isOpeningWithFade == true then
+			return
+		end
+
+		if self.currentCloseWithFade == true then
+			self:CloseWithFade(self.currentFadeOutDuration, self.currentFadeInDuration)
+			return
+		end
+
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseWithFade(number fadeOutDuration, number fadeInDuration)
+		-- 화면을 완전히 덮은 뒤 다이얼로그를 닫고 다시 화면을 밝힙니다.
+		if self.isClosingWithFade == true then
+			return
+		end
+
+		if _ScreenEffectUILogic == nil then
+			self:Close()
+			return
+		end
+
+		self.isClosingWithFade = true
+		self:CancelAutoAdvanceTimer()
+		local safeFadeOutDuration = math.max(fadeOutDuration or 0, 0)
+		local safeFadeInDuration = math.max(fadeInDuration or 0, 0)
+		log("[DialogUILogic] fade close started dialogId=" .. tostring(self.currentDialogId)
+			.. " fadeOut=" .. tostring(safeFadeOutDuration)
+			.. " fadeIn=" .. tostring(safeFadeInDuration))
+
+		_ScreenEffectUILogic:FadeOut(safeFadeOutDuration, function()
+			self:Close()
+			self.isClosingWithFade = false
+			log("[DialogUILogic] fade close midpoint completed")
+
+			if _ScreenEffectUILogic ~= nil then
+				_ScreenEffectUILogic:FadeIn(safeFadeInDuration, function()
+					log("[DialogUILogic] fade close completed")
+				end)
+			end
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetCloseOptions()
+		-- 다음 다이얼로그에 종료 연출이 남지 않도록 기본 즉시 닫기 정책으로 되돌립니다.
+		self.currentCloseWithFade = false
+		self.currentFadeOutDuration = 0.5
+		self.currentFadeInDuration = 0.5
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenInternal(string dialogId)
+		-- 캐시된 다이얼로그 데이터로 화면 표시를 시작합니다.
+		self.currentDialogId = dialogId or ""
+		self:Initialize()
+		self.tLines = _DialogMaster:GetDialogLines(dialogId)
+
+		if #self.tLines <= 0 then
+			log_warning("[DialogUILogic] Dialog not found: " .. dialogId)
+			self:Close()
+			return
+		end
+
+		self:BeginPresentation()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Initialize()
+		-- 다이얼로그 화면 요소들을 초기 상태로 되돌립니다.
+		self.root.Enable = true
+
+		self.tLines = {}
+		self.lineIdx = 0
+		self:SetAutoEnabled(false)
+		self.currentLeftKey = ""
+		self.currentMiddleKey = ""
+		self.currentRightKey = ""
+		self.currentLeftVisualKey = ""
+		self.currentMiddleVisualKey = ""
+		self.currentRightVisualKey = ""
+		self:ClearChoiceWait()
+		self.panelNameText.Text = ""
+		self:ApplyBackground(self.currentBackgroundId)
+		_DialogPlayer:Clear()
+		self:ResetCharacterSlot(self.eCharacterSide.Left)
+		self:ResetCharacterSlot(self.eCharacterSide.Middle)
+		self:ResetCharacterSlot(self.eCharacterSide.Right)
+		self:ResetPanelPolygonBob()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyBackground(string backgroundId)
+		-- 지정한 배경 리소스 ID를 실제 ImageRUID로 변환해 dim 스프라이트에 적용합니다.
+		if backgroundId == nil or backgroundId == "" then
+			self:ClearBackground()
+			return
+		end
+
+		local dimRenderer = self:GetDimRenderer()
+		if dimRenderer == nil then
+			return
+		end
+
+		local backgroundRuid = backgroundId
+		if _ResourceMaster ~= nil then
+			backgroundRuid = _ResourceMaster:ResolveResourceId(backgroundId)
+		end
+
+		if backgroundRuid == nil or backgroundRuid == "" then
+			self:ClearBackground()
+			return
+		end
+
+		dimRenderer.ImageRUID = DataRef(backgroundRuid)
+		dimRenderer.Color = Color(1, 1, 1, 1)
+		dimRenderer.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearBackground()
+		-- 배경 지정이 없을 때 dim 스프라이트를 에디터 기본값으로 되돌립니다.
+		local dimRenderer = self:GetDimRenderer()
+		if dimRenderer == nil then
+			return
+		end
+
+		if self.forceBlackout == true then
+			-- 암전 연출: dim을 불투명 검정으로 채워 뒤 배경(스튜디오 등)을 완전히 가린다
+			dimRenderer.ImageRUID = DataRef("")
+			dimRenderer.Color = Color(0, 0, 0, 1)
+			dimRenderer.Enable = true
+			return
+		end
+
+		dimRenderer.ImageRUID = DataRef(self.defaultDimImageRuid or "")
+		dimRenderer.Color = self.defaultDimColor
+		dimRenderer.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureDefaultDimImage()
+		-- 에디터에서 dim에 입력해 둔 기본 스프라이트 값을 보관합니다.
+		local dimRenderer = self:GetDimRenderer()
+		if dimRenderer == nil or dimRenderer.ImageRUID == nil then
+			self.defaultDimImageRuid = ""
+			return
+		end
+
+		self.defaultDimImageRuid = dimRenderer.ImageRUID.DataId or ""
+		self.defaultDimColor = dimRenderer.Color
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetDimRenderer()
+		-- dim 엔티티에 붙어 있는 SpriteGUIRendererComponent를 반환합니다.
+		if self.dim == nil then
+			return nil
+		end
+
+		return self.dim.SpriteGUIRendererComponent
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginPresentation()
+		-- 현재 설정된 DialogTable 라인으로 대화창 표시를 시작합니다.
+		if _UIBlockerLogic ~= nil then
+			_UIBlockerLogic:SetVisible("dialog", false)
+		end
+
+		_UIVisibilityNotifierLogic:SendFrom(self, "dialog", true)
+		self:ShowNextLine()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPanelButtonClicked()
+		-- 다이얼로그가 열려 있으면 다음 대사로 넘깁니다.
+		if self.isClosingWithFade == true then
+			return
+		end
+
+		if self.isWaitingChoiceEventResult == true then
+			return
+		end
+
+		self:CancelAutoAdvanceTimer()
+
+		if _DialogPlayer:IsTyping() == true then
+			_DialogPlayer:CompleteImmediately()
+			return
+		end
+
+		self:ShowNextLine()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSkipButtonClicked()
+		-- 다음 이벤트 라인까지 대화를 건너뛰고, 남은 이벤트가 없으면 대화를 닫습니다.
+		if self.isClosingWithFade == true then
+			return
+		end
+
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		if self.isWaitingChoiceEventResult == true then
+			return
+		end
+
+		self:CancelAutoAdvanceTimer()
+
+		local searchStartIndex = self.lineIdx + 1
+		if _DialogPlayer:IsTyping() == true and self:LineHasEvent(self.lineIdx) == true then
+			searchStartIndex = self.lineIdx
+		end
+
+		local nextEventLineIndex = self:FindNextEventLineIndex(searchStartIndex)
+		if nextEventLineIndex <= 0 then
+			self:CloseByPolicy()
+			return
+		end
+
+		self:ShowLineAt(nextEventLineIndex)
+		if _DialogPlayer:IsTyping() == true then
+			_DialogPlayer:CompleteImmediately()
+			return
+		end
+
+		self:ExecuteLineEvent(self.tLines[self.lineIdx])
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAutoButtonClicked()
+		-- AUTO 버튼 클릭으로 현재 대화의 자동 넘김을 켜거나 끕니다.
+		if self.isClosingWithFade == true then
+			return
+		end
+
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		self:SetAutoEnabled(self.isAutoEnabled == false)
+		if self.isAutoEnabled == true and _DialogPlayer ~= nil and _DialogPlayer:IsTyping() == false then
+			self:StartAutoAdvanceTimer()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSpeedButtonClicked()
+		-- Speed 버튼 클릭으로 텍스트 진행 배속을 x1, x2, x4 순서로 전환합니다.
+		if self.isClosingWithFade == true then
+			return
+		end
+
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		if self.textSpeedMultiplier == 1 then
+			self:SetTextSpeedMultiplier(2)
+		elseif self.textSpeedMultiplier == 2 then
+			self:SetTextSpeedMultiplier(4)
+		else
+			self:SetTextSpeedMultiplier(1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTextSpeedMultiplier(integer multiplier)
+		-- 텍스트 진행 배속을 저장하고 타이핑 플레이어와 버튼 표시를 갱신합니다.
+		if multiplier ~= 2 and multiplier ~= 4 then
+			multiplier = 1
+		end
+
+		self.textSpeedMultiplier = multiplier
+
+		if _DialogTimedPlayer ~= nil then
+			_DialogTimedPlayer:SetSpeedMultiplier(multiplier)
+		end
+
+		self:ApplySpeedButtonVisual()
+
+		if self.isAutoEnabled == true and _DialogPlayer ~= nil and _DialogPlayer:IsTyping() == false then
+			self:StartAutoAdvanceTimer()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplySpeedButtonVisual()
+		-- Speed 버튼 라벨을 현재 배속 텍스트로 갱신합니다.
+		if self.speedButtonText ~= nil then
+			self.speedButtonText.Text = "x" .. tostring(self.textSpeedMultiplier)
+			return
+		end
+
+		if self.speedButton ~= nil and self.speedButton.Entity ~= nil and self.speedButton.Entity.TextGUIRendererComponent ~= nil then
+			self.speedButton.Entity.TextGUIRendererComponent.Text = "x" .. tostring(self.textSpeedMultiplier)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAutoEnabled(boolean isEnabled)
+		-- AUTO 활성 상태를 저장하고 버튼 표시와 예약 타이머를 갱신합니다.
+		self.isAutoEnabled = isEnabled == true
+		if self.isAutoEnabled == false then
+			self:CancelAutoAdvanceTimer()
+		end
+
+		self:ApplyAutoButtonVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyAutoButtonVisual()
+		-- AUTO 버튼 배경 색으로 현재 on/off 상태를 간단히 표시합니다.
+		if self.autoButton == nil or self.autoButton.Entity == nil or self.autoButton.Entity.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		if self.isAutoEnabled == true then
+			self.autoButton.Entity.SpriteGUIRendererComponent.Color = Color(0.65, 1, 0.65, 1)
+			return
+		end
+
+		self.autoButton.Entity.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartAutoAdvanceTimer()
+		-- AUTO가 켜져 있고 입력 대기 상태가 아니면 지정된 지연 후 다음 라인으로 넘깁니다.
+		self:CancelAutoAdvanceTimer()
+
+		if self.isAutoEnabled == false then
+			return
+		end
+
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		if self.isWaitingChoiceEventResult == true then
+			return
+		end
+
+		if _DialogPlayer:IsTyping() == true then
+			return
+		end
+
+		self.autoAdvanceTimerId = _TimerService:SetTimerOnce(function() self:OnAutoAdvanceTimer() end, self:GetAutoAdvanceDelay())
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetDialogModifier()
+		-- Dialog UI root에 붙은 modifier 컴포넌트를 반환합니다.
+		local modifier = nil
+		if self.root ~= nil then
+			modifier = self.root:GetComponent("script.UIDialogModifier")
+		end
+
+		return modifier
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetAutoAdvanceDelay()
+		-- 텍스트 배속과 분리된 AUTO 줄 넘김 대기 시간을 반환합니다.
+		local modifier = self:GetDialogModifier()
+		if modifier ~= nil then
+			return modifier:GetAutoAdvanceDelay()
+		end
+
+		if self.autoAdvanceDelay < 0 then
+			return 0
+		end
+
+		return self.autoAdvanceDelay
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetDefaultTextDelay()
+		-- UIDialogModifier 설정을 반영한 텍스트 기본 딜레이를 반환합니다.
+		local modifier = self:GetDialogModifier()
+		if modifier ~= nil then
+			return modifier:GetDefaultTextDelay()
+		end
+
+		return 0.03
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDialogModifierToTimedPlayer()
+		-- UIDialogModifier 값을 시간차 텍스트 플레이어에 반영합니다.
+		if _DialogTimedPlayer == nil then
+			return
+		end
+
+		_DialogTimedPlayer:SetDefaultDelay(self:GetDefaultTextDelay())
+		_DialogTimedPlayer:SetSpeedMultiplier(self.textSpeedMultiplier)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CancelAutoAdvanceTimer()
+		-- AUTO 켜짐 설정은 유지하고, 예약된 다음 라인 이동 타이머만 취소합니다.
+		if self.autoAdvanceTimerId == nil or self.autoAdvanceTimerId == 0 then
+			self.autoAdvanceTimerId = 0
+			return
+		end
+
+		_TimerService:ClearTimer(self.autoAdvanceTimerId)
+		self.autoAdvanceTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAutoAdvanceTimer()
+		-- AUTO 지연 시간이 끝나면 현재 상태를 다시 확인한 뒤 다음 라인으로 진행합니다.
+		self.autoAdvanceTimerId = 0
+
+		if self.isAutoEnabled == false then
+			return
+		end
+
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		if self.isWaitingChoiceEventResult == true then
+			return
+		end
+
+		if _DialogPlayer:IsTyping() == true then
+			return
+		end
+
+		self:ShowNextLine()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDialogLineTypingFinished()
+		-- 현재 라인의 시간차 출력이 끝나면 연결된 이벤트를 실행합니다.
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		local tLine = self.tLines[self.lineIdx]
+		self:ExecuteLineEvent(tLine)
+		self:StartAutoAdvanceTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowNextLine()
+		-- 다음 대사 행을 적용하고 끝까지 읽었으면 닫습니다.
+		if self.isClosingWithFade == true then
+			return
+		end
+
+		self.lineIdx = self.lineIdx + 1
+
+		if self.lineIdx > #self.tLines then
+			self:CloseByPolicy()
+			return
+		end
+
+		self:ShowLine(self.tLines[self.lineIdx])
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowLineAt(integer lineIndex)
+		-- 지정한 인덱스의 대사 라인을 현재 라인으로 설정하고 표시합니다.
+		if lineIndex <= 0 or lineIndex > #self.tLines then
+			self:Close()
+			return
+		end
+
+		self.lineIdx = lineIndex
+		self:ShowLine(self.tLines[self.lineIdx])
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowLine(any tLine)
+		-- 대사 라인 데이터를 화면 표시 상태와 타이핑 재생에 반영합니다.
+		if tLine == nil then
+			self:Close()
+			return
+		end
+
+		self:CancelAutoAdvanceTimer()
+
+		local speakerActorId = self:BindActorId(tLine.speakerActorId, "speaker")
+		local leftActorId = self:BindActorId(tLine.leftActorId, "left")
+		local middleActorId = self:BindActorId(tLine.middleActorId, "middle")
+		local rightActorId = self:BindActorId(tLine.rightActorId, "right")
+		local leftPortraitOverride = self:ResolveOpenPortraitOverride("left", tLine.leftPortraitOverride)
+		local middlePortraitOverride = self:ResolveOpenPortraitOverride("middle", tLine.middlePortraitOverride)
+		local rightPortraitOverride = self:ResolveOpenPortraitOverride("right", tLine.rightPortraitOverride)
+		local previousSlots = self:CaptureCharacterSlotSnapshot()
+		local nextSlots = self:BuildCharacterSlotTargets(leftActorId, leftPortraitOverride, middleActorId, middlePortraitOverride, rightActorId, rightPortraitOverride)
+
+		if self.panelNameText ~= nil then
+			self.panelNameText.Text = self:GetSpeakerName(speakerActorId, tLine.speakerNameOverride)
+		end
+
+		self:UpdateCharacterSlot(self.eCharacterSide.Left, leftActorId, leftPortraitOverride, previousSlots, nextSlots)
+		self:UpdateCharacterSlot(self.eCharacterSide.Middle, middleActorId, middlePortraitOverride, previousSlots, nextSlots)
+		self:UpdateCharacterSlot(self.eCharacterSide.Right, rightActorId, rightPortraitOverride, previousSlots, nextSlots)
+		self:ApplyCharacterActiveState(speakerActorId, leftActorId, middleActorId, rightActorId)
+
+		self:ApplyDialogModifierToTimedPlayer()
+		_DialogPlayer:PlayTokens(tLine.tokens)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer FindNextEventLineIndex(integer startIndex)
+		-- startIndex부터 남은 대사 중 이벤트가 연결된 첫 라인 인덱스를 찾습니다.
+		if startIndex < 1 then
+			startIndex = 1
+		end
+
+		for index = startIndex, #self.tLines do
+			if self:LineHasEvent(index) == true then
+				return index
+			end
+		end
+
+		return 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean LineHasEvent(integer lineIndex)
+		-- 지정한 대사 라인에 실행할 eventId가 있는지 확인합니다.
+		if lineIndex <= 0 or lineIndex > #self.tLines then
+			return false
+		end
+
+		local tLine = self.tLines[lineIndex]
+		return tLine ~= nil and tLine.eventId ~= nil and tLine.eventId ~= ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ExecuteLineEvent(any tLine)
+		-- 현재 다이얼로그 라인에 연결된 이벤트가 있으면 EventExecutor에 실행을 요청합니다.
+		if tLine == nil or tLine.eventId == nil or tLine.eventId == "" then
+			return
+		end
+
+		if self:IsChoiceEventWithChoices(tLine.eventId) == true then
+			self:BlockPanelClickUntilChoiceResult(tLine.eventId)
+		end
+
+		_EventExecutor:RequestExecuteEvent(tLine.eventId, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEventExecutionCompleted(EventExecutionCompletedEvent event)
+		-- 선택지 결과 이벤트가 도착하면 패널 입력 대기 상태를 해제하고 다음 대사로 넘깁니다.
+		if self.isWaitingChoiceEventResult == false then
+			return
+		end
+
+		if event == nil or _EventMaster == nil then
+			self:ClearChoiceWait()
+			return
+		end
+
+		if _EventMaster:IsEventCompletionFor(self.waitingChoiceEventId, event.eventId) == true then
+			self:ClearChoiceWait()
+			if self.root ~= nil and self.root.Enable == true then
+				self:ShowNextLine()
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEventExecutionFailed(EventExecutionFailedEvent event)
+		-- 선택지 결과 적용에 실패해도 입력 대기 상태에 갇히지 않도록 잠금을 해제합니다.
+		if self.isWaitingChoiceEventResult == false then
+			return
+		end
+
+		if event == nil or _EventMaster == nil then
+			self:ClearChoiceWait()
+			return
+		end
+
+		if _EventMaster:IsEventCompletionFor(self.waitingChoiceEventId, event.eventId) == true then
+			self:ClearChoiceWait()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BlockPanelClickUntilChoiceResult(string eventId)
+		-- 선택지가 처리될 때까지 다이얼로그 패널 클릭 입력을 막습니다.
+		self.isWaitingChoiceEventResult = true
+		self.waitingChoiceEventId = eventId or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearChoiceWait()
+		-- 선택지 결과 대기 상태를 초기화합니다.
+		self.isWaitingChoiceEventResult = false
+		self.waitingChoiceEventId = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsChoiceEventWithChoices(string eventId)
+		-- 선택지 이벤트이면서 실제로 표시할 선택지가 있는지 확인합니다.
+		if eventId == nil or eventId == "" or _EventMaster == nil then
+			return false
+		end
+
+		local tEvent = _EventMaster:GetEvent(eventId)
+		if tEvent == nil or tEvent.eventType ~= _EEventType.Choice then
+			return false
+		end
+
+		local tChoiceEventIds = _EventMaster:GetChoiceEventIds(eventId)
+		if tChoiceEventIds == nil then
+			return false
+		end
+
+		for index = 1, 5 do
+			local choiceEventId = tChoiceEventIds[index]
+			if choiceEventId ~= nil and choiceEventId ~= "" then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BindActorId(string actorId, string bindingKey)
+		-- 액터 ID가 바인딩 토큰이면 현재 호출 컨텍스트의 액터 ID로 치환합니다.
+		if actorId ~= "{bind}" then
+			return actorId or ""
+		end
+
+		if self.actorBindings == nil then
+			log_warning("[DialogUILogic] actor binding not found key=" .. tostring(bindingKey))
+			return ""
+		end
+
+		local boundActorId = self.actorBindings[bindingKey]
+		if boundActorId == nil then
+			log_warning("[DialogUILogic] actor binding key not found key=" .. tostring(bindingKey))
+			return ""
+		end
+
+		return boundActorId
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSpeakerName(string actorId, string speakerNameOverride)
+		-- 이름 덮어쓰기 값을 우선 사용하고, 없으면 액터 매니저의 표시 이름을 반환합니다.
+		if speakerNameOverride ~= nil and speakerNameOverride ~= "" then
+			if self:IsBlankSpeakerNameToken(speakerNameOverride) == true then
+				return ""
+			end
+
+			if self:IsPlayerNameToken(speakerNameOverride) == true then
+				return self:GetLocalPlayerDisplayName()
+			end
+
+			return speakerNameOverride
+		end
+
+		if actorId == "" then
+			return ""
+		end
+
+		if self:IsPlayerNameToken(actorId) == true then
+			return self:GetLocalPlayerDisplayName()
+		end
+
+		return _RuntimeActorManager:ClientGetActorName(actorId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsPlayerNameToken(string value)
+		-- 다이얼로그 이름 칸에서 현재 플레이어 이름으로 치환할 토큰인지 확인합니다.
+		return value == "{player}"
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsBlankSpeakerNameToken(string value)
+		-- speakerNameOverride에서 스피커는 유지하고 이름 표시만 비울 때 쓰는 토큰인지 확인합니다.
+		return value == "{}"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalPlayerDisplayName()
+		-- 현재 클라이언트의 로컬 플레이어 닉네임을 반환합니다.
+		if _UserService == nil or _UserService.LocalPlayer == nil then
+			return ""
+		end
+
+		local localPlayer = _UserService.LocalPlayer
+		if localPlayer.PlayerComponent ~= nil and localPlayer.PlayerComponent.Nickname ~= nil and localPlayer.PlayerComponent.Nickname ~= "" then
+			return localPlayer.PlayerComponent.Nickname
+		end
+
+		return localPlayer.Name or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method any CaptureCharacterSlotSnapshot()
+		-- 현재 라인 표시 직전의 캐릭터 슬롯 키, 위치, 트윈 상태를 보관합니다.
+		local snapshot = { bySide = {}, byKey = {} }
+		self:CaptureCharacterSlot(snapshot, self.eCharacterSide.Left)
+		self:CaptureCharacterSlot(snapshot, self.eCharacterSide.Middle)
+		self:CaptureCharacterSlot(snapshot, self.eCharacterSide.Right)
+		return snapshot
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureCharacterSlot(any snapshot, string side)
+		-- 한 슬롯의 현재 캐릭터 상태를 스냅샷에 저장합니다.
+		local key = self:GetCurrentCharacterKey(side)
+		if key == nil or key == "" then
+			return
+		end
+
+		local renderer = self:GetCharacterRenderer(side)
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		local state = self:GetCharacterFadeState(side)
+		local entry = {
+			side = side,
+			key = key,
+			position = renderer.Entity.UITransformComponent.anchoredPosition,
+			alpha = state.alpha,
+			tintColor = state.tintColor,
+			startTintColor = state.startTintColor,
+			targetTintColor = state.targetTintColor,
+			targetTintKey = state.targetTintKey,
+			isColorFading = state.isColorFading,
+			colorElapsed = state.colorElapsed,
+			isActive = state.isActive,
+			bobElapsed = state.bobElapsed,
+			bobWeight = state.bobWeight,
+			bobStartWeight = state.bobStartWeight,
+			bobTargetWeight = state.bobTargetWeight,
+			bobBlendElapsed = state.bobBlendElapsed,
+			isBobWeightTweening = state.isBobWeightTweening
+		}
+
+		snapshot.bySide[side] = entry
+		snapshot.byKey[key] = entry
+	end
+
+	@ExecSpace("ClientOnly")
+	method any BuildCharacterSlotTargets(string leftActorId, string leftPortraitOverride, string middleActorId, string middlePortraitOverride, string rightActorId, string rightPortraitOverride)
+		-- 이번 라인이 요구하는 슬롯별 캐릭터 키와 키별 목표 슬롯을 구성합니다.
+		local targets = { bySide = {}, byKey = {} }
+		self:AddCharacterSlotTarget(targets, self.eCharacterSide.Left, leftActorId, leftPortraitOverride)
+		self:AddCharacterSlotTarget(targets, self.eCharacterSide.Middle, middleActorId, middlePortraitOverride)
+		self:AddCharacterSlotTarget(targets, self.eCharacterSide.Right, rightActorId, rightPortraitOverride)
+		return targets
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveOpenPortraitOverride(string side, string linePortraitOverride)
+		-- Open 옵션의 슬롯 오버라이드를 우선 사용하고, 비어 있으면 DialogTable의 줄별 오버라이드를 유지합니다.
+		if self.optionPortraitOverrides ~= nil then
+			local optionOverride = self.optionPortraitOverrides[side] or ""
+			if optionOverride ~= "" then
+				return optionOverride
+			end
+		end
+
+		return linePortraitOverride or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddCharacterSlotTarget(any targets, string side, string actorId, string portraitOverride)
+		-- 한 슬롯의 목표 캐릭터 키를 저장합니다.
+		local key = self:BuildCharacterKey(actorId, portraitOverride)
+		targets.bySide[side] = key
+		if key ~= "" then
+			targets.byKey[key] = side
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildCharacterKey(string actorId, string portraitOverride)
+		-- 동일 인물 판정은 actorId를 우선하고, actorId가 없는 오버라이드 전용 항목만 리소스 키로 구분합니다.
+		if actorId == nil then
+			actorId = ""
+		end
+
+		if portraitOverride == nil then
+			portraitOverride = ""
+		end
+
+		if actorId ~= "" then
+			return actorId
+		end
+
+		if portraitOverride ~= "" then
+			return "override|" .. portraitOverride
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildCharacterVisualKey(string actorId, string portraitOverride)
+		-- 실제 표시 이미지가 바뀌었는지 확인하도록 actorId와 portraitOverride를 함께 묶습니다.
+		if actorId == nil then
+			actorId = ""
+		end
+
+		if portraitOverride == nil then
+			portraitOverride = ""
+		end
+
+		if actorId == "" and portraitOverride == "" then
+			return ""
+		end
+
+		return actorId .. "|" .. portraitOverride
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharacterSlot(string side, string actorId, string portraitOverride, any previousSlots, any nextSlots)
+		-- 이전 줄의 키와 비교해 캐릭터 이미지를 갱신하고, 슬롯 위치를 유지한 채 표시 상태만 맞춥니다.
+		local renderer = self:GetCharacterRenderer(side)
+
+		if renderer == nil then
+			return
+		end
+
+		if actorId == nil then
+			actorId = ""
+		end
+
+		if portraitOverride == nil then
+			portraitOverride = ""
+		end
+
+		local previousKey = self:GetCurrentCharacterKey(side)
+		local nextKey = self:BuildCharacterKey(actorId, portraitOverride)
+		local previousVisualKey = self:GetCurrentCharacterVisualKey(side)
+		local nextVisualKey = self:BuildCharacterVisualKey(actorId, portraitOverride)
+
+		if actorId == "" and portraitOverride == "" then
+			if previousKey ~= nil and previousKey ~= "" and nextSlots ~= nil and nextSlots.byKey ~= nil and nextSlots.byKey[previousKey] ~= nil and nextSlots.byKey[previousKey] ~= side then
+				self:SetCurrentCharacterKey(side, "")
+				self:SetCurrentCharacterVisualKey(side, "")
+				self:HideCharacterSlot(side)
+				return
+			end
+
+			if nextKey ~= previousKey then
+				self:SetCurrentCharacterKey(side, "")
+				self:SetCurrentCharacterVisualKey(side, "")
+				self:StartCharacterFade(side, 0, true)
+			else
+				self:HideCharacterSlot(side)
+			end
+			return
+		end
+
+		local shouldFadeIn = previousKey == ""
+		local movedEntry = nil
+		if previousSlots ~= nil and previousSlots.byKey ~= nil then
+			movedEntry = previousSlots.byKey[nextKey]
+			if movedEntry ~= nil and movedEntry.side == side then
+				movedEntry = nil
+			end
+		end
+
+		if nextKey ~= previousKey then
+			self:HideCharacterSlot(side)
+			if self:SetKeyWithSprite(side, actorId, portraitOverride) == false then
+				self:SetCurrentCharacterKey(side, "")
+				self:SetCurrentCharacterVisualKey(side, "")
+				self:HideCharacterSlot(side)
+				return
+			end
+			if movedEntry ~= nil then
+				self:ApplyMovedCharacterState(side, movedEntry)
+			elseif shouldFadeIn == true then
+				self:SetCharacterAlpha(side, 0)
+			else
+				self:SetCharacterAlpha(side, 1)
+			end
+		elseif nextVisualKey ~= previousVisualKey then
+			local previousVisualType = self:GetCurrentCharacterVisualType(side)
+			local state = self:GetCharacterFadeState(side)
+			local previousAlpha = state.alpha
+			local previousTintColor = state.tintColor
+			local previousTintKey = state.targetTintKey
+
+			if self:SetKeyWithSprite(side, actorId, portraitOverride) == false then
+				log_warning("[DialogUILogic] portrait override swap failed actorId=" .. actorId
+					.. " portraitOverride=" .. portraitOverride)
+				return
+			end
+
+			if previousVisualType ~= self:GetCurrentCharacterVisualType(side) then
+				self:ShowCharacterSlot(side)
+			end
+
+			self:SetCharacterAlpha(side, previousAlpha)
+			self:SetCharacterTint(side, previousTintColor, previousTintKey)
+			log("[DialogUILogic] portrait swapped actorId=" .. actorId
+				.. " side=" .. side
+				.. " portraitOverride=" .. portraitOverride)
+			return
+		else
+			return
+		end
+
+		self:ShowCharacterSlot(side)
+		if movedEntry ~= nil then
+			self:StartCharacterMove(side, movedEntry.position, self:GetCharacterBasePosition(side))
+		elseif shouldFadeIn == true then
+			self:StartCharacterFade(side, 1, false)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyMovedCharacterState(string side, any movedEntry)
+		-- 다른 슬롯에서 이동해온 같은 캐릭터의 표시/트윈 상태를 이어받습니다.
+		if movedEntry == nil then
+			return
+		end
+
+		local state = self:GetCharacterFadeState(side)
+		state.alpha = movedEntry.alpha or 1
+		state.startAlpha = state.alpha
+		state.targetAlpha = state.alpha
+		state.elapsed = 0
+		state.isFading = false
+		state.hideOnComplete = false
+		state.tintColor = movedEntry.tintColor or self.activeCharacterColor
+		state.startTintColor = movedEntry.startTintColor or state.tintColor
+		state.targetTintColor = movedEntry.targetTintColor or state.tintColor
+		state.targetTintKey = movedEntry.targetTintKey or "active"
+		state.colorElapsed = movedEntry.colorElapsed or 0
+		state.isColorFading = movedEntry.isColorFading == true
+		state.isActive = movedEntry.isActive == true
+		state.bobElapsed = movedEntry.bobElapsed or 0
+		state.bobWeight = movedEntry.bobWeight or 0
+		state.bobStartWeight = movedEntry.bobStartWeight or state.bobWeight
+		state.bobTargetWeight = movedEntry.bobTargetWeight or state.bobWeight
+		state.bobBlendElapsed = movedEntry.bobBlendElapsed or 0
+		state.isBobWeightTweening = movedEntry.isBobWeightTweening == true
+		self:ApplyCharacterRenderColor(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartCharacterMove(string side, Vector2 startPosition, Vector2 targetPosition)
+		-- 캐릭터가 슬롯을 바꿨을 때 이전 위치에서 새 슬롯 위치까지 이동시킵니다.
+		local state = self:GetCharacterFadeState(side)
+		if startPosition == nil then
+			startPosition = self:GetCharacterBasePosition(side)
+		end
+
+		if targetPosition == nil then
+			targetPosition = self:GetCharacterBasePosition(side)
+		end
+
+		state.moveStartPosition = startPosition
+		state.moveTargetPosition = targetPosition
+		state.moveElapsed = 0
+		state.isMoving = true
+
+		local renderer = self:GetCharacterRenderer(side)
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		renderer.Entity.UITransformComponent.anchoredPosition = startPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetCharacterSlot(string side)
+		-- 캐릭터 슬롯을 화면 밖으로 치우고 기준 크기로 되돌립니다.
+		self:StopCharacterFade(side)
+		self:StopCharacterMove(side)
+		self:SetCurrentCharacterKey(side, "")
+		self:SetCurrentCharacterVisualKey(side, "")
+		self:HideAllCharacterRenderers(side)
+
+		local renderer = self:GetCharacterRenderer(side)
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		renderer.Entity.UITransformComponent.anchoredPosition = self.hiddenCharacterPosition
+		renderer.Entity:SetVisible(false)
+		renderer.Entity.UITransformComponent.RectSize = self:GetCharacterBaseSize(side)
+		renderer.ImageRUID = DataRef("")
+		self:SetCharacterTint(side, self.activeCharacterColor, "active")
+		self:SetCharacterAlpha(side, 1)
+		self:ResetCharacterBob(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCharacterSlot(string side)
+		-- 캐릭터 슬롯을 기준 위치에 표시합니다.
+		local renderer = self:GetCharacterRenderer(side)
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		local basePosition = self:GetCharacterBasePosition(side)
+		local characterEntity = renderer.Entity
+		local uiTransform = renderer.Entity.UITransformComponent
+
+		uiTransform.anchoredPosition = basePosition
+		characterEntity:SetVisible(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideCharacterSlot(string side)
+		-- 캐릭터 슬롯을 화면 밖으로 치우고 숨깁니다.
+		self:StopCharacterFade(side)
+		self:StopCharacterMove(side)
+		self:HideAllCharacterRenderers(side)
+		self:SetCharacterAlpha(side, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetKeyWithSprite(string side, string actorId, string portraitOverride)
+		-- 한쪽 슬롯에 새 이미지를 적용하고 성공한 경우에만 인물 키와 이미지 키를 저장합니다.
+		local currentKey = self:BuildCharacterKey(actorId, portraitOverride)
+		local currentVisualKey = self:BuildCharacterVisualKey(actorId, portraitOverride)
+		local resolvedRuid = self:GetDialogVisualRuid(actorId, portraitOverride)
+		if resolvedRuid == nil or resolvedRuid == "" then
+			return false
+		end
+
+		local previousVisualType = self:GetCurrentCharacterVisualType(side)
+		local visualType = self:GetActorDialogVisualType(actorId, portraitOverride)
+		self:SetCurrentCharacterVisualType(side, visualType)
+		self:HideInactiveCharacterRenderers(side)
+
+		if self:SetCharacterSprite(self:GetCharacterRenderer(side), actorId, portraitOverride, visualType, side) == false then
+			self:SetCurrentCharacterVisualType(side, previousVisualType)
+			self:HideInactiveCharacterRenderers(side)
+			return false
+		end
+
+		self:SetCurrentCharacterKey(side, currentKey)
+		self:SetCurrentCharacterVisualKey(side, currentVisualKey)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCurrentCharacterKey(string side, string currentKey)
+		-- 방향에 맞는 현재 캐릭터 키를 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.currentLeftKey = currentKey
+		elseif side == self.eCharacterSide.Middle then
+			self.currentMiddleKey = currentKey
+		else
+			self.currentRightKey = currentKey
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCurrentCharacterVisualKey(string side, string currentVisualKey)
+		-- 방향에 맞는 현재 이미지 키를 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.currentLeftVisualKey = currentVisualKey
+		elseif side == self.eCharacterSide.Middle then
+			self.currentMiddleVisualKey = currentVisualKey
+		else
+			self.currentRightVisualKey = currentVisualKey
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCharacterActiveState(string speakerActorId, string leftActorId, string middleActorId, string rightActorId)
+		-- 현재 화자와 각 슬롯의 액터 아이디를 비교해 active 색상을 적용합니다.
+		if speakerActorId == nil then
+			speakerActorId = ""
+		end
+
+		self:ApplyCharacterColor(self.eCharacterSide.Left, leftActorId ~= nil and leftActorId ~= "" and leftActorId == speakerActorId)
+		self:ApplyCharacterColor(self.eCharacterSide.Middle, middleActorId ~= nil and middleActorId ~= "" and middleActorId == speakerActorId)
+		self:ApplyCharacterColor(self.eCharacterSide.Right, rightActorId ~= nil and rightActorId ~= "" and rightActorId == speakerActorId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCharacterColor(string side, boolean isActive)
+		-- active 여부에 따라 캐릭터 이미지 tint 색상을 부드럽게 전환합니다.
+		self:SetCharacterActive(side, isActive)
+
+		if isActive == true then
+			self:StartCharacterColorFade(side, self.activeCharacterColor, "active")
+			return
+		end
+
+		self:StartCharacterColorFade(side, self.inactiveCharacterColor, "inactive")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartCharacterFade(string side, number targetAlpha, boolean hideOnComplete)
+		-- 캐릭터 슬롯의 현재 알파에서 목표 알파까지 전환을 시작합니다.
+		local state = self:GetCharacterFadeState(side)
+		state.startAlpha = self:GetCharacterAlpha(side)
+		state.targetAlpha = targetAlpha
+		state.elapsed = 0
+		state.isFading = true
+		state.hideOnComplete = hideOnComplete
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopCharacterFade(string side)
+		-- 캐릭터 슬롯의 진행 중인 알파 전환을 중지합니다.
+		local state = self:GetCharacterFadeState(side)
+		state.isFading = false
+		state.hideOnComplete = false
+		state.elapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopCharacterMove(string side)
+		-- 진행 중인 슬롯 이동 보간을 중단합니다.
+		local state = self:GetCharacterFadeState(side)
+		state.isMoving = false
+		state.moveElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharacterFade(string side, number delta)
+		-- 캐릭터 슬롯의 알파 전환을 한 프레임 진행합니다.
+		local state = self:GetCharacterFadeState(side)
+		if state.isFading ~= true then
+			return
+		end
+
+		state.elapsed = state.elapsed + delta
+		local duration = self.characterFadeDuration
+		if duration <= 0 then
+			self:SetCharacterAlpha(side, state.targetAlpha)
+			state.isFading = false
+		else
+			local tweenTime = math.min(state.elapsed, duration)
+			local alpha = _TweenLogic:Ease(state.startAlpha, state.targetAlpha, duration, EaseType.SineEaseOut, tweenTime)
+			self:SetCharacterAlpha(side, alpha)
+
+			if state.elapsed >= duration then
+				self:SetCharacterAlpha(side, state.targetAlpha)
+				state.isFading = false
+			end
+		end
+
+		if state.isFading == false and state.hideOnComplete == true then
+			state.hideOnComplete = false
+			self:HideCharacterSlot(side)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCharacterActive(string side, boolean isActive)
+		-- active 여부에 맞춰 캐릭터 슬롯의 bob 강도 전환을 준비합니다.
+		local state = self:GetCharacterFadeState(side)
+		state.isActive = isActive
+
+		if self:GetCurrentCharacterVisualType(side) == "pixel" then
+			-- 픽셀 캐릭터는 실제 리소스 픽셀 크기 기준 위치를 유지해야 하므로 active bob을 적용하지 않습니다.
+			state.bobWeight = 0
+			state.bobStartWeight = 0
+			state.bobTargetWeight = 0
+			state.bobBlendElapsed = 0
+			state.isBobWeightTweening = false
+			return
+		end
+
+		local targetWeight = 0
+		if isActive == true then
+			targetWeight = 1
+		end
+
+		if state.bobTargetWeight == targetWeight then
+			return
+		end
+
+		state.bobStartWeight = state.bobWeight
+		state.bobTargetWeight = targetWeight
+		state.bobBlendElapsed = 0
+		state.isBobWeightTweening = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharacterBob(string side, number delta)
+		-- active 캐릭터 슬롯에만 아주 느린 위아래 움직임을 적용합니다.
+		local state = self:GetCharacterFadeState(side)
+		local renderer = self:GetCharacterRenderer(side)
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		if self:GetCurrentCharacterKey(side) == "" and state.isFading ~= true then
+			return
+		end
+
+		self:UpdateCharacterBobWeight(state, delta)
+		state.bobElapsed = state.bobElapsed + delta
+
+		if self:UpdateCharacterMove(side, state, renderer, delta) == true then
+			return
+		end
+
+		if self:GetCurrentCharacterVisualType(side) == "pixel" then
+			local pixelBasePosition = self:GetCharacterBasePosition(side)
+			renderer.Entity.UITransformComponent.anchoredPosition = pixelBasePosition
+			return
+		end
+
+		local bobOffset = 0
+		if self.characterBobPeriod > 0 then
+			local cycle = state.bobElapsed / self.characterBobPeriod
+			bobOffset = math.sin(cycle * 6.283185307179586) * self.characterBobAmplitude * state.bobWeight
+		end
+
+		local basePosition = self:GetCharacterBasePosition(side)
+		renderer.Entity.UITransformComponent.anchoredPosition = Vector2(basePosition.x, basePosition.y + bobOffset)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean UpdateCharacterMove(string side, any state, SpriteGUIRendererComponent renderer, number delta)
+		-- 슬롯 이동 보간이 진행 중이면 현재 프레임 위치를 갱신합니다.
+		if state.isMoving ~= true then
+			return false
+		end
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			state.isMoving = false
+			return false
+		end
+
+		state.moveElapsed = state.moveElapsed + delta
+		local duration = self.characterMoveDuration
+		if duration <= 0 then
+			renderer.Entity.UITransformComponent.anchoredPosition = state.moveTargetPosition
+			state.isMoving = false
+			return true
+		end
+
+		local tweenTime = math.min(state.moveElapsed, duration)
+		local x = _TweenLogic:Ease(state.moveStartPosition.x, state.moveTargetPosition.x, duration, EaseType.SineEaseOut, tweenTime)
+		local y = _TweenLogic:Ease(state.moveStartPosition.y, state.moveTargetPosition.y, duration, EaseType.SineEaseOut, tweenTime)
+		renderer.Entity.UITransformComponent.anchoredPosition = Vector2(x, y)
+
+		if state.moveElapsed >= duration then
+			renderer.Entity.UITransformComponent.anchoredPosition = state.moveTargetPosition
+			state.isMoving = false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharacterBobWeight(any state, number delta)
+		-- bob 강도를 목표값까지 부드럽게 전환합니다.
+		if state.isBobWeightTweening ~= true then
+			return
+		end
+
+		state.bobBlendElapsed = state.bobBlendElapsed + delta
+		local duration = self.characterBobBlendDuration
+		if duration <= 0 then
+			state.bobWeight = state.bobTargetWeight
+			state.isBobWeightTweening = false
+			return
+		end
+
+		local tweenTime = math.min(state.bobBlendElapsed, duration)
+		state.bobWeight = _TweenLogic:Ease(state.bobStartWeight, state.bobTargetWeight, duration, EaseType.SineEaseOut, tweenTime)
+
+		if state.bobBlendElapsed >= duration then
+			state.bobWeight = state.bobTargetWeight
+			state.isBobWeightTweening = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdatePanelPolygonBob(number delta)
+		-- 패널 Polygon 표시를 캐릭터보다 빠른 주기로 위아래 이동시킵니다.
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+
+		if self.panelPolygon == nil or self.panelPolygon.UITransformComponent == nil then
+			return
+		end
+
+		self.panelPolygonBobElapsed = self.panelPolygonBobElapsed + delta
+
+		local bobOffset = 0
+		if self.panelPolygonBobPeriod > 0 then
+			local cycle = self.panelPolygonBobElapsed / self.panelPolygonBobPeriod
+			bobOffset = math.sin(cycle * 6.283185307179586) * self.panelPolygonBobAmplitude
+		end
+
+		self.panelPolygon.UITransformComponent.anchoredPosition = Vector2(self.panelPolygonBasePosition.x, self.panelPolygonBasePosition.y + bobOffset)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPanelPolygonPosition()
+		-- 패널 Polygon의 기준 위치를 반환합니다.
+		if self.panelPolygon == nil or self.panelPolygon.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+
+		return self.panelPolygon.UITransformComponent.anchoredPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetPanelPolygonBob()
+		-- 패널 Polygon의 bob 상태와 위치를 기준값으로 되돌립니다.
+		self.panelPolygonBobElapsed = 0
+
+		if self.panelPolygon == nil or self.panelPolygon.UITransformComponent == nil then
+			return
+		end
+
+		self.panelPolygon.UITransformComponent.anchoredPosition = self.panelPolygonBasePosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetCharacterBob(string side)
+		-- 캐릭터 슬롯의 bob 상태와 위치를 기준값으로 되돌립니다.
+		local state = self:GetCharacterFadeState(side)
+		state.isActive = false
+		state.bobElapsed = 0
+		state.bobWeight = 0
+		state.bobStartWeight = 0
+		state.bobTargetWeight = 0
+		state.bobBlendElapsed = 0
+		state.isBobWeightTweening = false
+		state.isMoving = false
+		state.moveElapsed = 0
+		state.moveStartPosition = self:GetCharacterBasePosition(side)
+		state.moveTargetPosition = self:GetCharacterBasePosition(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartCharacterColorFade(string side, Color targetColor, string targetKey)
+		-- 캐릭터 슬롯의 현재 tint에서 목표 tint까지 전환을 시작합니다.
+		local state = self:GetCharacterFadeState(side)
+		if state.targetTintKey == targetKey then
+			self:ApplyCharacterRenderColor(side)
+			return
+		end
+
+		state.startTintColor = state.tintColor
+		state.targetTintColor = targetColor
+		state.colorElapsed = 0
+		state.isColorFading = true
+		state.targetTintKey = targetKey
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharacterColorFade(string side, number delta)
+		-- 캐릭터 슬롯의 tint 전환을 한 프레임 진행합니다.
+		local state = self:GetCharacterFadeState(side)
+		if state.isColorFading ~= true then
+			return
+		end
+
+		state.colorElapsed = state.colorElapsed + delta
+		local duration = self.characterColorFadeDuration
+		if duration <= 0 then
+			self:SetCharacterTint(side, state.targetTintColor, state.targetTintKey)
+			state.isColorFading = false
+			return
+		end
+
+		local tweenTime = math.min(state.colorElapsed, duration)
+		local t = _TweenLogic:Ease(0, 1, duration, EaseType.SineEaseOut, tweenTime)
+		state.tintColor = Color.Lerp(state.startTintColor, state.targetTintColor, t)
+		self:ApplyCharacterRenderColor(side)
+
+		if state.colorElapsed >= duration then
+			self:SetCharacterTint(side, state.targetTintColor, state.targetTintKey)
+			state.isColorFading = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCharacterTint(string side, Color tintColor, string tintKey)
+		-- 캐릭터 슬롯의 현재 tint 값을 저장하고 렌더러에 적용합니다.
+		local state = self:GetCharacterFadeState(side)
+		state.tintColor = tintColor
+		state.startTintColor = tintColor
+		state.targetTintColor = tintColor
+		state.targetTintKey = tintKey
+		state.isColorFading = false
+		state.colorElapsed = 0
+		self:ApplyCharacterRenderColor(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCharacterRenderColor(string side)
+		-- 저장된 tint와 alpha를 렌더러에 함께 적용합니다.
+		local renderer = self:GetCharacterRenderer(side)
+		if renderer == nil then
+			return
+		end
+
+		local state = self:GetCharacterFadeState(side)
+		renderer.Color = state.tintColor
+		renderer:SetAlpha(self:GetCharacterAlpha(side))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCharacterAlpha(string side, number alpha)
+		-- 캐릭터 슬롯의 현재 알파 값을 저장하고 렌더러에 적용합니다.
+		local state = self:GetCharacterFadeState(side)
+		state.alpha = math.max(0, math.min(alpha, 1))
+
+		self:ApplyCharacterRenderColor(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCharacterAlpha(string side)
+		-- 캐릭터 슬롯에 저장된 현재 알파 값을 반환합니다.
+		local state = self:GetCharacterFadeState(side)
+		if state.alpha == nil then
+			return 1
+		end
+
+		return state.alpha
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCharacterFadeState(string side)
+		-- 캐릭터 슬롯별 알파 전환 상태를 반환하고 없으면 생성합니다.
+		if self.characterFadeStates == nil then
+			self.characterFadeStates = {}
+		end
+
+		if self.characterFadeStates[side] == nil then
+			self.characterFadeStates[side] = {
+				alpha = 1,
+				startAlpha = 1,
+				targetAlpha = 1,
+				elapsed = 0,
+				isFading = false,
+				hideOnComplete = false,
+				tintColor = self.activeCharacterColor,
+				startTintColor = self.activeCharacterColor,
+				targetTintColor = self.activeCharacterColor,
+				targetTintKey = "active",
+				colorElapsed = 0,
+				isColorFading = false,
+				isActive = false,
+				bobElapsed = 0,
+				bobWeight = 0,
+				bobStartWeight = 0,
+				bobTargetWeight = 0,
+				bobBlendElapsed = 0,
+				isBobWeightTweening = false,
+				isMoving = false,
+				moveElapsed = 0,
+				moveStartPosition = self:GetCharacterBasePosition(side),
+				moveTargetPosition = self:GetCharacterBasePosition(side)
+			}
+		end
+
+		return self.characterFadeStates[side]
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetCharacterSprite(SpriteGUIRendererComponent renderer, string actorId, string portraitOverride, string visualType, string side)
+		-- 액터 매니저로 액터 아이디나 초상화 덮어쓰기 값을 실제 이미지 값으로 변환해 적용합니다.
+		if renderer == nil then
+			return false
+		end
+
+		local ruid = self:GetDialogVisualRuid(actorId, portraitOverride)
+		if ruid == nil or ruid == "" then
+			renderer.ImageRUID = DataRef("")
+			return false
+		end
+
+		renderer.ImageRUID = DataRef(ruid)
+		if visualType == "pixel" then
+			local resourceSize = self:GetDialogVisualResourceSize(actorId, portraitOverride)
+			self:ApplyPixelCharacterNativeScale(renderer, side, resourceSize)
+		else
+			self:ApplyPortraitCharacterBaseSize(renderer, side)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetCharacterRenderer(string side)
+		-- 방향과 현재 표시 타입에 맞는 캐릭터 이미지 렌더러를 반환합니다.
+		if self:GetCurrentCharacterVisualType(side) == "pixel" then
+			return self:GetPixelCharacterRenderer(side)
+		end
+
+		return self:GetPortraitCharacterRenderer(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetPortraitCharacterRenderer(string side)
+		-- 방향에 맞는 전신 일러스트 렌더러를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftCharacter
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middleCharacter
+		end
+
+		return self.rightCharacter
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetPixelCharacterRenderer(string side)
+		-- 방향에 맞는 픽셀 캐릭터 렌더러를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftPixelCharacter
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middlePixelCharacter
+		end
+
+		return self.rightPixelCharacter
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetActorDialogVisualType(string actorId, string portraitOverride)
+		-- 초상화 덮어쓰기가 있으면 일반 일러스트 슬롯을 우선 사용하고, 없으면 액터 테이블의 표시 타입을 따릅니다.
+		if portraitOverride ~= nil and portraitOverride ~= "" then
+			return "portraitFullBody"
+		end
+
+		if actorId == nil or actorId == "" or _ActorMaster == nil then
+			return "portraitFullBody"
+		end
+
+		local visualType = _ActorMaster:GetActorDialogVisualType(actorId)
+		if visualType == nil or visualType == "" then
+			return "portraitFullBody"
+		end
+
+		return visualType
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetDialogVisualResourceId(string actorId, string portraitOverride)
+		-- 대화 UI 문맥에서 actorId와 표시 타입에 맞는 리소스 ID를 선택합니다.
+		if portraitOverride ~= nil and portraitOverride ~= "" then
+			return portraitOverride
+		end
+
+		if actorId == nil or actorId == "" then
+			return ""
+		end
+
+		local visualType = self:GetActorDialogVisualType(actorId, "")
+		if visualType == "pixel" then
+			if _ActorMaster == nil then
+				return ""
+			end
+
+			return _ActorMaster:GetActorPixel(actorId)
+		end
+
+		if _RuntimeActorManager ~= nil then
+			if visualType == "portraitFullBody" then
+				return _RuntimeActorManager:ClientGetActorPortraitFullBodyResourceId(actorId)
+			end
+
+			if visualType == "portraitHorizontal" then
+				return _RuntimeActorManager:ClientGetActorPortraitHorizontalResourceId(actorId)
+			end
+
+			if visualType == "portrait" then
+				return _RuntimeActorManager:ClientGetActorPortraitResourceId(actorId)
+			end
+		end
+
+		if _ActorMaster == nil then
+			return ""
+		end
+
+		return _ActorMaster:GetActorDialogVisualResourceId(actorId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetDialogVisualRuid(string actorId, string portraitOverride)
+		-- 대화 UI에서 선택한 리소스 ID를 실제 RUID로 변환합니다.
+		if _ResourceMaster == nil then
+			return ""
+		end
+
+		local resourceId = self:GetDialogVisualResourceId(actorId, portraitOverride)
+		local ruid = _ResourceMaster:ResolveResourceId(resourceId)
+		if ruid ~= nil and ruid ~= "" then
+			return ruid
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetDialogVisualResourceSize(string actorId, string portraitOverride)
+		-- 대화 UI가 표시할 이미지 리소스의 실제 픽셀 크기를 이미지 리소스 메타 마스터에서 가져옵니다.
+		if _ImageResourceMetaMaster == nil then
+			return Vector2(0, 0)
+		end
+
+		local resourceId = self:GetDialogVisualResourceId(actorId, portraitOverride)
+		return _ImageResourceMetaMaster:GetImagePixelSize(resourceId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCurrentCharacterVisualType(string side, string visualType)
+		-- 방향에 맞는 현재 표시 타입을 저장합니다.
+		if visualType == nil or visualType == "" then
+			visualType = "portraitFullBody"
+		end
+
+		if side == self.eCharacterSide.Left then
+			self.currentLeftVisualType = visualType
+		elseif side == self.eCharacterSide.Middle then
+			self.currentMiddleVisualType = visualType
+		else
+			self.currentRightVisualType = visualType
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentCharacterVisualType(string side)
+		-- 방향에 맞는 현재 표시 타입을 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.currentLeftVisualType
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.currentMiddleVisualType
+		end
+
+		return self.currentRightVisualType
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideInactiveCharacterRenderers(string side)
+		-- 한 슬롯에 전신 일러스트와 픽셀 렌더러가 동시에 보이지 않도록 비활성 렌더러를 숨깁니다.
+		local activeRenderer = self:GetCharacterRenderer(side)
+		local portraitRenderer = self:GetPortraitCharacterRenderer(side)
+		local pixelRenderer = self:GetPixelCharacterRenderer(side)
+
+		if portraitRenderer ~= activeRenderer then
+			self:HideCharacterRenderer(portraitRenderer)
+		end
+
+		if pixelRenderer ~= activeRenderer then
+			self:HideCharacterRenderer(pixelRenderer)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideAllCharacterRenderers(string side)
+		-- 한 슬롯에 연결된 모든 캐릭터 렌더러를 숨깁니다.
+		self:HideCharacterRenderer(self:GetPortraitCharacterRenderer(side))
+		self:HideCharacterRenderer(self:GetPixelCharacterRenderer(side))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideCharacterRenderer(SpriteGUIRendererComponent renderer)
+		-- 렌더러 하나를 화면 밖으로 이동시키고 이미지를 비웁니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		renderer.Entity.UITransformComponent.anchoredPosition = self.hiddenCharacterPosition
+		renderer.Entity:SetVisible(false)
+		renderer.ImageRUID = DataRef("")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyPortraitCharacterBaseSize(SpriteGUIRendererComponent renderer, string side)
+		-- 전신 일러스트는 UI에 저장된 기본 박스 크기를 그대로 사용합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		renderer.Entity.UITransformComponent.RectSize = self:GetPortraitCharacterBaseSize(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyPixelCharacterNativeScale(SpriteGUIRendererComponent renderer, string side, Vector2 resourceSize)
+		-- ImageResourceMetaTable에 기록된 실제 리소스 픽셀 크기에 설정 배율을 곱하고, 중앙 하단 기준점을 유지합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return
+		end
+
+		local uiTransform = renderer.Entity.UITransformComponent
+		local nativeSize = resourceSize
+		if nativeSize == nil or nativeSize.x <= 0 or nativeSize.y <= 0 then
+			log_warning("[DialogUILogic] 픽셀 리소스 크기 메타가 없어 슬롯 기본 크기를 사용합니다. ImageResourceMetaTable의 width,height를 채워주세요.")
+			nativeSize = self:GetPixelCharacterBaseSize(side)
+		end
+
+		local scale = self.pixelCharacterScale * self.responsiveCharacterHeightScale
+		if scale == nil or scale <= 0 then
+			scale = 3
+		end
+
+		local scaledSize = Vector2(nativeSize.x * scale, nativeSize.y * scale)
+		uiTransform.RectSize = scaledSize
+		local bottomCenter = self:GetPixelCharacterBottomCenter(side)
+		local pivot = uiTransform.Pivot
+		uiTransform.anchoredPosition = Vector2(
+			bottomCenter.x - (0.5 - pivot.x) * scaledSize.x,
+			bottomCenter.y + pivot.y * scaledSize.y
+		)
+		self:SetPixelCharacterBasePosition(side, uiTransform.anchoredPosition)
+		self:SetPixelCharacterBaseSize(side, scaledSize)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentCharacterKey(string side)
+		-- 방향에 맞는 현재 캐릭터 키를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.currentLeftKey
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.currentMiddleKey
+		end
+
+		return self.currentRightKey
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentCharacterVisualKey(string side)
+		-- 방향에 맞는 현재 이미지 키를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.currentLeftVisualKey
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.currentMiddleVisualKey
+		end
+
+		return self.currentRightVisualKey
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetCharacterPosition(string side)
+		-- 방향에 맞는 캐릭터 화면 위치를 반환합니다.
+		local renderer = self:GetCharacterRenderer(side)
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+
+		return renderer.Entity.UITransformComponent.anchoredPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetCharacterSize(string side)
+		-- 방향에 맞는 캐릭터 박스 크기를 반환합니다.
+		local renderer = self:GetCharacterRenderer(side)
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+
+		return renderer.Entity.UITransformComponent.RectSize
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetCharacterBasePosition(string side)
+		if self:GetCurrentCharacterVisualType(side) == "pixel" then
+			return self:GetPixelCharacterBasePosition(side)
+		end
+
+		return self:GetPortraitCharacterBasePosition(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPortraitCharacterBasePosition(string side)
+		-- 방향에 맞는 캐릭터 기준 위치를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftCharacterBasePosition
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middleCharacterBasePosition
+		end
+
+		return self.rightCharacterBasePosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPortraitCharacterBasePosition(string side, Vector2 basePosition)
+		-- 반응형 계산이 끝난 전신 일러스트 기준 위치를 방향별로 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.leftCharacterBasePosition = basePosition
+		elseif side == self.eCharacterSide.Middle then
+			self.middleCharacterBasePosition = basePosition
+		else
+			self.rightCharacterBasePosition = basePosition
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetCharacterBaseSize(string side)
+		if self:GetCurrentCharacterVisualType(side) == "pixel" then
+			return self:GetPixelCharacterBaseSize(side)
+		end
+
+		return self:GetPortraitCharacterBaseSize(side)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPortraitCharacterBaseSize(string side)
+		-- 방향에 맞는 캐릭터 기준 박스 크기를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftCharacterBaseSize
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middleCharacterBaseSize
+		end
+
+		return self.rightCharacterBaseSize
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPortraitCharacterBaseSize(string side, Vector2 baseSize)
+		-- 반응형 계산이 끝난 전신 일러스트 기준 크기를 방향별로 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.leftCharacterBaseSize = baseSize
+		elseif side == self.eCharacterSide.Middle then
+			self.middleCharacterBaseSize = baseSize
+		else
+			self.rightCharacterBaseSize = baseSize
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPixelCharacterPosition(string side)
+		-- 방향에 맞는 픽셀 캐릭터 화면 위치를 반환합니다.
+		local renderer = self:GetPixelCharacterRenderer(side)
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+
+		return renderer.Entity.UITransformComponent.anchoredPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPixelCharacterSize(string side)
+		-- 방향에 맞는 픽셀 캐릭터 박스 크기를 반환합니다.
+		local renderer = self:GetPixelCharacterRenderer(side)
+
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+
+		return renderer.Entity.UITransformComponent.RectSize
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPixelCharacterBasePosition(string side)
+		-- 방향에 맞는 픽셀 캐릭터 기본 위치를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftPixelCharacterBasePosition
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middlePixelCharacterBasePosition
+		end
+
+		return self.rightPixelCharacterBasePosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPixelCharacterBasePosition(string side, Vector2 basePosition)
+		-- 픽셀 이미지 크기가 바뀐 뒤 새 중앙 위치를 기본 위치로 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.leftPixelCharacterBasePosition = basePosition
+		elseif side == self.eCharacterSide.Middle then
+			self.middlePixelCharacterBasePosition = basePosition
+		else
+			self.rightPixelCharacterBasePosition = basePosition
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPixelCharacterBaseSize(string side)
+		-- 방향에 맞는 픽셀 캐릭터 기본 박스 크기를 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftPixelCharacterBaseSize
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middlePixelCharacterBaseSize
+		end
+
+		return self.rightPixelCharacterBaseSize
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPixelCharacterBaseSize(string side, Vector2 baseSize)
+		-- 픽셀 이미지 크기가 바뀐 뒤 새 박스 크기를 기본 크기로 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.leftPixelCharacterBaseSize = baseSize
+		elseif side == self.eCharacterSide.Middle then
+			self.middlePixelCharacterBaseSize = baseSize
+		else
+			self.rightPixelCharacterBaseSize = baseSize
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetPixelCharacterBottomCenter(string side)
+		-- 방향에 맞는 픽셀 슬롯의 중앙 하단 기준점을 반환합니다.
+		if side == self.eCharacterSide.Left then
+			return self.leftPixelCharacterBottomCenter
+		end
+
+		if side == self.eCharacterSide.Middle then
+			return self.middlePixelCharacterBottomCenter
+		end
+
+		return self.rightPixelCharacterBottomCenter
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPixelCharacterBottomCenter(string side, Vector2 bottomCenter)
+		-- 반응형 계산이 끝난 픽셀 캐릭터 중앙 하단 기준점을 방향별로 저장합니다.
+		if side == self.eCharacterSide.Left then
+			self.leftPixelCharacterBottomCenter = bottomCenter
+		elseif side == self.eCharacterSide.Middle then
+			self.middlePixelCharacterBottomCenter = bottomCenter
+		else
+			self.rightPixelCharacterBottomCenter = bottomCenter
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetAnchoredPositionForBottomCenter(SpriteGUIRendererComponent renderer, Vector2 bottomCenterInParent, Vector2 size)
+		-- 부모 UI 좌표의 중앙 하단 목표점을 현재 앵커 기준 anchoredPosition으로 변환합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.Parent == nil then
+			return nil
+		end
+		local transform = renderer.Entity.UITransformComponent
+		local parentTransform = renderer.Entity.Parent.UITransformComponent
+		if transform == nil or parentTransform == nil then
+			return nil
+		end
+
+		local pivot = transform.Pivot
+		local pivotPosition = Vector2(
+			bottomCenterInParent.x - (0.5 - pivot.x) * size.x,
+			bottomCenterInParent.y + pivot.y * size.y
+		)
+		local parentSize = parentTransform.RectSize
+		local parentLeft = -parentTransform.Pivot.x * parentSize.x
+		local parentBottom = -parentTransform.Pivot.y * parentSize.y
+		local anchorRatioX = transform.AnchorsMin.x + (transform.AnchorsMax.x - transform.AnchorsMin.x) * transform.Pivot.x
+		local anchorRatioY = transform.AnchorsMin.y + (transform.AnchorsMax.y - transform.AnchorsMin.y) * transform.Pivot.y
+		local anchorX = parentLeft + anchorRatioX * parentSize.x
+		local anchorY = parentBottom + anchorRatioY * parentSize.y
+		return Vector2(pivotPosition.x - anchorX, pivotPosition.y - anchorY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetBottomCenterFromAnchoredPosition(SpriteGUIRendererComponent renderer, Vector2 anchoredPosition, Vector2 size)
+		-- anchoredPosition과 크기에서 기존 픽셀 배치 코드가 사용하는 중앙 하단 좌표를 반환합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+		local pivot = renderer.Entity.UITransformComponent.Pivot
+		return Vector2(
+			anchoredPosition.x + (0.5 - pivot.x) * size.x,
+			anchoredPosition.y - pivot.y * size.y
+		)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetRendererBottomCenter(SpriteGUIRendererComponent renderer)
+		-- 렌더러의 현재 박스에서 중앙 하단 지점을 계산합니다.
+		if renderer == nil or renderer.Entity == nil or renderer.Entity.UITransformComponent == nil then
+			return Vector2(0, 0)
+		end
+
+		local uiTransform = renderer.Entity.UITransformComponent
+		local position = uiTransform.anchoredPosition
+		local size = uiTransform.RectSize
+		local pivot = uiTransform.Pivot
+		return Vector2(
+			position.x + (0.5 - pivot.x) * size.x,
+			position.y - pivot.y * size.y
+		)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendDialogClosedEvent(string dialogId)
+		-- 닫힌 다이얼로그 ID를 담아 다이얼로그 닫힘 이벤트를 발송합니다.
+		if dialogId == nil or dialogId == "" then
+			return
+		end
+
+		local dialogClosedEvent = DialogClosedEvent()
+		dialogClosedEvent.dialogId = dialogId
+		self:SendEvent(dialogClosedEvent)
+	end
+
+end

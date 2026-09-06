@@ -1,0 +1,53 @@
+@Struct
+script CharacterData
+
+	property string id = ""
+
+	property string name = ""
+
+	property string typeId = ""
+
+	property string typeName = ""
+
+	property number vocal = 0
+
+	property number dance = 0
+
+	property number visual = 0
+
+	property number fatigue = 0
+
+	property number intimacy = 0
+
+	property number maxIntimacyReached = 0
+
+	property boolean isDiscovered = false
+
+	property boolean hasPlayed = false
+
+	method any ToPlainTable()
+		-- RPC 전달과 클라이언트 캐시 저장에 사용할 plain table 복사본을 반환합니다.
+		local tData = {}
+		tData.id = self.id
+		tData.name = self.name
+		tData.typeId = self.typeId
+		tData.typeName = self.typeName
+		tData.vocal = self.vocal
+		tData.dance = self.dance
+		tData.visual = self.visual
+		tData.fatigue = self.fatigue
+		tData.intimacy = self.intimacy
+		tData.maxIntimacyReached = self.maxIntimacyReached
+		tData.isDiscovered = self.isDiscovered
+		tData.hasPlayed = self.hasPlayed
+
+		return tData
+	end
+
+	method any CreateEmptyPlainTable()
+		-- 유효하지 않은 빈 CharacterData plain table을 반환합니다.
+		local tData = CharacterData()
+		return tData:ToPlainTable()
+	end
+
+end

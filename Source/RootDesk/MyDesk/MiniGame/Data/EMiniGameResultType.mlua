@@ -1,0 +1,34 @@
+@Logic
+script EMiniGameResultType extends Logic
+
+	-- 미니게임 세션의 최종 결과 타입 enum 상수.
+	property integer None = -1
+	property integer Success = 0
+	property integer Failure = 1
+	property integer Timeout = 2
+	property integer Canceled = 3
+
+	method boolean IsValid(integer resultType)
+		-- 알려진 결과 타입인지 반환한다.
+		return resultType == self.Success
+			or resultType == self.Failure
+			or resultType == self.Timeout
+			or resultType == self.Canceled
+	end
+
+	method string ToName(integer resultType)
+		-- 디버그 출력용 결과 타입 이름을 반환한다.
+		if resultType == self.Success then
+			return "Success"
+		elseif resultType == self.Failure then
+			return "Failure"
+		elseif resultType == self.Timeout then
+			return "Timeout"
+		elseif resultType == self.Canceled then
+			return "Canceled"
+		end
+
+		return "None"
+	end
+
+end

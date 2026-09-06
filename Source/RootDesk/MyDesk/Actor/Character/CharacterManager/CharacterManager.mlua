@@ -1,0 +1,753 @@
+@Logic
+script CharacterManager extends Logic
+
+	property boolean isCharacterArchiveLoaded = false
+
+	-- tCharacters: { CharacterData, CharacterData, ... }
+	property any tCharacters = {}
+
+	-- tCharacterById: { [characterId:string] = CharacterData }
+	property any tCharacterById = {}
+
+	-- activeCharacterIds: { characterId:string, characterId:string, characterId:string }
+	property any activeCharacterIds = {}
+
+	property string selectedCharacterId = ""
+
+	-- save/load
+	property string currentUserId = ""
+
+	property any userEnterHandler = nil
+
+	-- 캐릭터 데이터가 저장될 때 함께 확정할 신규 친밀도 에피소드 목록입니다.
+	property any pendingNewIntimacyEpisodeSet = {}
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 서버 권위 캐릭터 아카이브를 로드하고 클라이언트에 동기화합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 서버 종료 시점에 유저 입장 이벤트 핸들러를 정리합니다.
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	method void SendCharacterChangedEvent(string characterId)
+		-- 캐릭터 데이터가 변경되었음을 현재 실행 공간의 구독자에게 알립니다.
+		local characterChangedEvent = CharacterChangedEvent()
+		characterChangedEvent.characterId = characterId
+
+		self:SendEvent(characterChangedEvent)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetCharacters()
+		-- 클라이언트 로컬 캐시에 저장된 전체 캐릭터 아카이브 복사 목록을 반환합니다.
+		local tCopiedCharacters = {}
+		for _, tCharacter in ipairs(self.tCharacters) do
+			table.insert(tCopiedCharacters, tCharacter)
+		end
+
+		return tCopiedCharacters
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetActiveCharacters()
+		-- 클라이언트 로컬 캐시에 저장된 현재 편성 캐릭터 목록을 반환합니다.
+		local tActiveCharacters = {}
+		for _, characterId in ipairs(self.activeCharacterIds) do
+			local tCharacter = self.tCharacterById[characterId]
+			if tCharacter ~= nil then
+				table.insert(tActiveCharacters, tCharacter)
+			end
+		end
+
+		return tActiveCharacters
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetCharacterById(string characterId)
+		-- 클라이언트 로컬 캐시에 저장된 전체 아카이브에서 캐릭터 한 건을 반환합니다.
+		return self.tCharacterById[characterId]
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetActiveCharacterIds()
+		-- activeCharacterIds 복사본을 반환합니다.
+		return self:CopyStringList(self.activeCharacterIds)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetSelectedCharacterId()
+		-- 클라이언트 로컬 캐시에 저장된 현재 선택 캐릭터 id를 반환합니다.
+		return self.selectedCharacterId
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetSelectedCharacter()
+		-- 클라이언트 로컬 캐시에 저장된 선택 캐릭터 데이터를 반환합니다.
+		local selectedCharacterId = self:ClientGetSelectedCharacterId()
+		return self:ClientGetCharacterById(selectedCharacterId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestSaveCharactersToStorage()
+		-- 클라이언트가 명시적으로 현재 서버 권위 캐릭터 데이터를 저장 요청합니다.
+		if self:CanUseCharacters(senderUserId) == false then
+			return
+		end
+
+		self:SaveCharactersToStorage()
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSelectCharacter(string characterId)
+		-- 클라이언트가 현재 편성 안에서 선택 캐릭터 변경을 서버에 요청합니다.
+		if self:CanUseCharacters(senderUserId) == false then
+			return false
+		end
+
+		local isSelected = self:SelectCharacter(characterId)
+		if isSelected then
+			self:PushSelectedCharacterToClient(senderUserId)
+		end
+
+		return isSelected
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetActiveCharacters(table tActiveCharacterIds)
+		-- 클라이언트가 현재 편성 캐릭터 id 목록 변경을 서버에 요청합니다.
+		-- tActiveCharacterIds: { characterId:string, characterId:string, characterId:string }
+		if self:CanUseCharacters(senderUserId) == false then
+			return false
+		end
+
+		local isSet = self:SetActiveCharacters(tActiveCharacterIds)
+		if isSet then
+			self:PushCharactersToClient(senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestUnlockCharacter(string characterId)
+		-- 클라이언트 요청으로 지정한 캐릭터를 해금하고 최신 아카이브를 동기화합니다.
+		if self:CanUseCharacters(senderUserId) == false then
+			return false
+		end
+
+		return self:UnlockCharacterWithCommit(characterId, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	-- tDelta: CharacterStatDelta:ToPlainTable()
+	method boolean RequestApplyCharacterStat(table tDelta)
+		-- 클라이언트가 캐릭터 스탯 변경량 한 건 적용을 서버에 요청합니다.
+		if self:CanUseCharacters(senderUserId) == false then
+			return false
+		end
+
+		local isApplied = self:ApplyCharacterStat(tDelta)
+		if isApplied then
+			self:PushCharactersToClient(senderUserId)
+		end
+
+		return isApplied
+	end
+
+	@ExecSpace("Server")
+	-- tDelta: CharacterStatDelta:ToPlainTable()
+	method boolean RequestApplyCharacterStatWithCommit(table tDelta)
+		-- 캐릭터 스탯 변경량을 적용하고 Storage 저장과 요청자 동기화까지 함께 요청합니다.
+		if self:CanUseCharacters(senderUserId) == false then
+			return false
+		end
+
+		return self:ApplyCharacterStatWithCommit(tDelta, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 단일 플레이어가 서버에 입장하면 캐릭터 아카이브를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][CharacterManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadCharacters()
+
+		if self:IsCharactersLoaded() then
+			self:PushCharactersToClient(event.UserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadCharacters()
+		-- Storage에서 캐릭터 plain table을 읽고 Factory로 서버 권위 CharacterData를 복원합니다.
+		self.pendingNewIntimacyEpisodeSet = {}
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[CharacterManager] currentUserId is required")
+			self.isCharacterArchiveLoaded = false
+			return
+		end
+
+		local tCharactersPlainTable = _CharacterStorage:LoadCharacters(self.currentUserId)
+		local tCharacters = nil
+		local tActiveCharacterIds = {}
+		local selectedCharacterId = ""
+		if tCharactersPlainTable == nil and _CharacterStorage.isNeedDefaultLoad then
+			tCharacters = _CharacterFactory:CreateDefaultCharacters()
+			for _, tCharacter in ipairs(tCharacters) do
+				table.insert(tActiveCharacterIds, tCharacter.id)
+			end
+		elseif tCharactersPlainTable ~= nil then
+			tCharacters = _CharacterFactory:CreateCharactersFromPlainTable(tCharactersPlainTable.characters)
+			tActiveCharacterIds = tCharactersPlainTable.activeCharacterIds or {}
+			selectedCharacterId = tCharactersPlainTable.selectedCharacterId or ""
+		else
+			log_warning("[CharacterManager] character plain table is nil")
+			self.isCharacterArchiveLoaded = false
+			return
+		end
+
+		local syncedCharacterCount = 0
+		tCharacters, syncedCharacterCount = self:SyncCharacterArchiveWithMaster(tCharacters)
+
+		if tCharacters == nil or #tCharacters <= 0 then
+			log_warning("[CharacterManager] character archive restore failed")
+			self.isCharacterArchiveLoaded = false
+			return
+		end
+
+		self:RegisterCharacters(tCharacters)
+		self:SetActiveCharactersInternal(tActiveCharacterIds)
+		self.selectedCharacterId = selectedCharacterId
+		self:EnsureSelectedCharacter()
+		self.isCharacterArchiveLoaded = true
+		if syncedCharacterCount > 0 then
+			self:SaveCharactersToStorage()
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method any SyncCharacterArchiveWithMaster(any tCharacters)
+		-- 마스터에는 있지만 현재 아카이브에 없는 캐릭터만 미해금 상태로 추가합니다.
+		if tCharacters == nil then
+			tCharacters = {}
+		end
+
+		local characterIdSet = {}
+		for _, tCharacter in ipairs(tCharacters) do
+			if tCharacter ~= nil and tCharacter.id ~= nil and tCharacter.id ~= "" then
+				characterIdSet[tCharacter.id] = true
+			end
+		end
+
+		local syncedCharacterCount = 0
+		local tBaseStatRows = _CharacterBaseStatMaster:GetCharacterBaseStats()
+		for _, tBaseStatRow in ipairs(tBaseStatRows) do
+			local characterId = tBaseStatRow ~= nil and tBaseStatRow.id or ""
+			if characterId ~= nil and characterId ~= "" and characterIdSet[characterId] == nil then
+				local tMasterCharacter = _CharacterFactory:CreateCharacter(tBaseStatRow)
+				if tMasterCharacter ~= nil then
+					tMasterCharacter.isDiscovered = false
+					tMasterCharacter.hasPlayed = false
+					table.insert(tCharacters, tMasterCharacter)
+					characterIdSet[characterId] = true
+					syncedCharacterCount = syncedCharacterCount + 1
+				end
+			end
+		end
+
+		return tCharacters, syncedCharacterCount
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsCharactersLoaded()
+		-- 서버 캐릭터 아카이브 로드 여부를 반환합니다.
+		return self.isCharacterArchiveLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseCharacters(string userId)
+		-- Request 입구에서 현재 유저와 캐릭터 로드 완료 여부를 검증합니다.
+		if self:IsCharactersLoaded() == false then
+			log_warning("[CharacterManager] request rejected because characters are not loaded")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[CharacterManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[CharacterManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetCharacterById(string characterId)
+		-- 서버 권위 전체 아카이브에서 캐릭터 한 건의 복사본을 반환합니다.
+		if self:IsCharactersLoaded() == false then
+			return nil
+		end
+
+		local tCharacter = self.tCharacterById[characterId]
+		if tCharacter == nil then
+			return nil
+		end
+
+		return self:CopyCharacterData(tCharacter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string ServerGetSelectedCharacterId()
+		-- 서버 권위 선택 캐릭터 id를 반환합니다.
+		if self:IsCharactersLoaded() == false then
+			return ""
+		end
+
+		return self.selectedCharacterId
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SelectCharacter(string characterId)
+		-- 서버 권위 선택 캐릭터를 현재 편성 안에서 변경합니다.
+		if self:IsCharactersLoaded() == false then
+			return false
+		end
+
+		if self:IsActiveCharacter(characterId) == false then
+			log_warning("[CharacterManager] selected character is not active characterId=" .. tostring(characterId))
+			return false
+		end
+
+		if self.selectedCharacterId == characterId then
+			return true
+		end
+
+		self.selectedCharacterId = characterId
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean UnlockCharacter(string characterId)
+		-- 현재 아카이브에 있는 캐릭터를 해금 상태로 전환하고 저장합니다.
+		if self:IsCharactersLoaded() == false then
+			return false
+		end
+
+		if characterId == nil or characterId == "" then
+			log_warning("[CharacterManager] unlock characterId is empty")
+			return false
+		end
+
+		local tCharacter = self.tCharacterById[characterId]
+		if tCharacter == nil then
+			log_warning("[CharacterManager] unlock character not found characterId=" .. tostring(characterId))
+			return false
+		end
+
+		if tCharacter.isDiscovered then
+			return true
+		end
+
+		tCharacter.isDiscovered = true
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean UnlockCharacterWithCommit(string characterId, string forUserId)
+		-- 캐릭터 해금을 런타임 캐시에 반영한 뒤 저장하고 대상 클라이언트에 동기화합니다.
+		local tCharacter = self.tCharacterById[characterId]
+		local wasDiscovered = tCharacter ~= nil and tCharacter.isDiscovered == true
+		local isUnlocked = self:UnlockCharacter(characterId)
+		if isUnlocked == false then
+			return false
+		end
+
+		self:SaveCharactersToStorage()
+		if forUserId ~= nil and forUserId ~= "" then
+			self:PushCharactersToClient(forUserId)
+		end
+
+		if wasDiscovered == false and _NewContentManager ~= nil then
+			_NewContentManager:MarkNewContentEntries({
+				{
+					domain = "character",
+					category = "idol",
+					contentId = characterId
+				}
+			}, forUserId)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetActiveCharacters(table tActiveCharacterIds)
+		-- 서버 권위 현재 편성 캐릭터 id 목록을 교체합니다.
+		-- tActiveCharacterIds: { characterId:string, characterId:string, characterId:string }
+		if self:IsCharactersLoaded() == false then
+			return false
+		end
+
+		return self:SetActiveCharactersInternal(tActiveCharacterIds)
+	end
+
+	@ExecSpace("ServerOnly")
+	-- tDelta: CharacterStatDelta:ToPlainTable()
+	method boolean ApplyCharacterStat(table tDelta)
+		-- 캐릭터 스탯 변경량 한 건을 서버 권위 데이터에 적용합니다.
+		if self:IsCharactersLoaded() == false then
+			return false
+		end
+
+		local characterId = tDelta ~= nil and tDelta.characterId or ""
+		if characterId == nil or characterId == "" then
+			log_warning("[CharacterManager] stat delta characterId is empty")
+			return false
+		end
+
+		if self.tCharacterById[characterId] == nil then
+			log_warning("[CharacterManager] character not found for stat delta characterId=" .. tostring(characterId))
+			return false
+		end
+
+		return self:ApplyCharacterStatDeltaValues(
+			characterId,
+			tDelta.vocal or 0,
+			tDelta.dance or 0,
+			tDelta.visual or 0,
+			tDelta.fatigue or 0,
+			tDelta.intimacy or 0
+		)
+	end
+
+	@ExecSpace("ServerOnly")
+	-- tDelta: CharacterStatDelta:ToPlainTable()
+	method boolean ApplyCharacterStatWithCommit(table tDelta, string forUserId)
+		-- 캐릭터 스탯 변경량을 서버 권위 캐시에 적용한 뒤 저장하고 대상 클라이언트에 동기화합니다.
+		local isApplied = self:ApplyCharacterStat(tDelta)
+		if isApplied == false then
+			return false
+		end
+
+		self:SaveCharactersToStorage()
+		if forUserId ~= nil and forUserId ~= "" then
+			self:PushCharactersToClient(forUserId)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyCharacterStatDeltaValues(string characterId, number vocalDelta, number danceDelta, number visualDelta, number fatigueDelta, number intimacyDelta)
+		-- 캐릭터 스탯 변경량 값을 서버 권위 데이터에 적용합니다.
+		if self:IsCharactersLoaded() == false then
+			return false
+		end
+
+		local tCharacter = self.tCharacterById[characterId]
+		if tCharacter == nil then
+			log_warning("[CharacterManager] character not found for stat delta characterId=" .. tostring(characterId))
+			return false
+		end
+
+		local previousMaxIntimacy = tCharacter.maxIntimacyReached or tCharacter.intimacy or 0
+
+		tCharacter.vocal = _MathUtil:ClampMin(tCharacter.vocal + (vocalDelta or 0), 0)
+		tCharacter.dance = _MathUtil:ClampMin(tCharacter.dance + (danceDelta or 0), 0)
+		tCharacter.visual = _MathUtil:ClampMin(tCharacter.visual + (visualDelta or 0), 0)
+		tCharacter.fatigue = _MathUtil:Clamp((tCharacter.fatigue or 0) + (fatigueDelta or 0), 0, 100)
+		tCharacter.intimacy = _MathUtil:ClampMin((tCharacter.intimacy or 0) + (intimacyDelta or 0), 0)
+		tCharacter.maxIntimacyReached = math.max(tCharacter.maxIntimacyReached or 0, tCharacter.intimacy or 0)
+		self:QueueNewIntimacyEpisodes(characterId, previousMaxIntimacy, tCharacter.maxIntimacyReached)
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void QueueNewIntimacyEpisodes(string characterId, number previousMaxIntimacy, number currentMaxIntimacy)
+		-- 최고 친밀도가 새 story 해금 구간을 넘었을 때 저장 대기 목록에 추가합니다.
+		if characterId == nil or characterId == "" or currentMaxIntimacy <= previousMaxIntimacy then
+			return
+		end
+
+		if _IntimacyLevelMaster == nil then
+			return
+		end
+
+		local previousLevel = _IntimacyLevelMaster:GetCurrentLevel(previousMaxIntimacy)
+		local currentLevel = _IntimacyLevelMaster:GetCurrentLevel(currentMaxIntimacy)
+		for storyIndex = 1, 5 do
+			local wasUnlocked = _IntimacyLevelMaster:IsUnlockIndexUnlocked(previousLevel, "story", storyIndex)
+			local isUnlocked = _IntimacyLevelMaster:IsUnlockIndexUnlocked(currentLevel, "story", storyIndex)
+			if wasUnlocked == false and isUnlocked == true then
+				local contentId = tostring(storyIndex)
+				local pendingKey = characterId .. "|" .. contentId
+				self.pendingNewIntimacyEpisodeSet[pendingKey] = {
+					domain = "intimacyEpisode",
+					category = characterId,
+					contentId = contentId
+				}
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void FlushPendingNewIntimacyEpisodes()
+		-- 캐릭터 저장과 같은 시점에 대기 중인 에피소드 해금을 신규 콘텐츠로 저장합니다.
+		if _NewContentManager == nil or _NewContentManager:CanUseNewContent(self.currentUserId) == false then
+			return
+		end
+
+		local entries = {}
+		for _, entry in pairs(self.pendingNewIntimacyEpisodeSet) do
+			table.insert(entries, entry)
+		end
+
+		if #entries <= 0 then
+			return
+		end
+
+		self.pendingNewIntimacyEpisodeSet = {}
+		_NewContentManager:MarkNewContentEntries(entries, self.currentUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCharactersToStorage()
+		-- 서버 권위 캐릭터 아카이브와 현재 편성 id를 Storage에 저장합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[CharacterManager] currentUserId is required")
+			return
+		end
+
+		if self:IsCharactersLoaded() == false then
+			log_warning("[CharacterManager] characters are not loaded")
+			return
+		end
+
+		_CharacterStorage:SaveCharacterArchiveAsync(self.currentUserId, self.tCharacters, self.activeCharacterIds, self.selectedCharacterId)
+		self:FlushPendingNewIntimacyEpisodes()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterCharacters(table tCharacters)
+		-- 복원된 CharacterData 목록을 서버 권위 아카이브 캐시에 등록합니다.
+		-- tCharacters: { CharacterData, CharacterData, ... }
+		self.tCharacters = {}
+		self.tCharacterById = {}
+
+		for _, tCharacter in ipairs(tCharacters) do
+			if tCharacter ~= nil and tCharacter.id ~= nil and tCharacter.id ~= "" then
+				table.insert(self.tCharacters, tCharacter)
+				self.tCharacterById[tCharacter.id] = tCharacter
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetActiveCharactersInternal(any tActiveCharacterIds)
+		-- 현재 편성 id 목록을 유효한 캐릭터 id만 남겨 최대 3개로 정규화합니다.
+		-- tActiveCharacterIds: { characterId:string, characterId:string, characterId:string }
+		local nextActiveCharacterIds = {}
+		local selectedById = {}
+
+		if tActiveCharacterIds ~= nil and type(tActiveCharacterIds) == "table" then
+			for _, characterId in ipairs(tActiveCharacterIds) do
+				if #nextActiveCharacterIds >= 3 then
+					break
+				end
+
+				if characterId ~= nil and characterId ~= "" and selectedById[characterId] == nil and self.tCharacterById[characterId] ~= nil then
+					table.insert(nextActiveCharacterIds, characterId)
+					selectedById[characterId] = true
+				end
+			end
+		end
+
+		if #nextActiveCharacterIds <= 0 then
+			for _, tCharacter in ipairs(self.tCharacters) do
+				if #nextActiveCharacterIds >= 3 then
+					break
+				end
+
+				if tCharacter.isDiscovered then
+					table.insert(nextActiveCharacterIds, tCharacter.id)
+				end
+			end
+		end
+
+		if #nextActiveCharacterIds <= 0 then
+			for _, tCharacter in ipairs(self.tCharacters) do
+				if #nextActiveCharacterIds >= 3 then
+					break
+				end
+
+				table.insert(nextActiveCharacterIds, tCharacter.id)
+			end
+		end
+
+		if #nextActiveCharacterIds <= 0 then
+			return false
+		end
+
+		self.activeCharacterIds = nextActiveCharacterIds
+		self:EnsureSelectedCharacter()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsActiveCharacter(string characterId)
+		-- 현재 편성 id 목록에 포함된 캐릭터인지 확인합니다.
+		if characterId == nil or characterId == "" then
+			return false
+		end
+
+		for _, activeCharacterId in ipairs(self.activeCharacterIds) do
+			if activeCharacterId == characterId then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method void EnsureSelectedCharacter()
+		-- 선택 캐릭터가 비어있거나 현재 편성 밖이면 첫 번째 편성 캐릭터로 보정합니다.
+		if self.selectedCharacterId ~= "" and self:IsActiveCharacter(self.selectedCharacterId) then
+			return
+		end
+
+		if #self.activeCharacterIds <= 0 then
+			self.selectedCharacterId = ""
+			return
+		end
+
+		self.selectedCharacterId = self.activeCharacterIds[1]
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushCharactersToClient(string forUserId)
+		-- 서버 권위 아카이브 캐시 전체와 현재 편성 id를 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		local tCharacters = {}
+		for _, tCharacter in ipairs(self.tCharacters) do
+			table.insert(tCharacters, self:CopyCharacterData(tCharacter))
+		end
+
+		self:SyncCharacters(tCharacters, self:CopyStringList(self.activeCharacterIds), self.selectedCharacterId, forUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushSelectedCharacterToClient(string forUserId)
+		-- 서버 선택 캐릭터 id를 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		self:SyncSelectedCharacter(self.selectedCharacterId, forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncCharacters(table tCharacters, table tActiveCharacterIds, string selectedCharacterId)
+		-- 서버에서 받은 캐릭터 아카이브 캐시 전체와 현재 편성 id를 클라이언트 로컬 캐시에 저장합니다.
+		-- tCharacters: { CharacterData:ToPlainTable(), ... }
+		-- tActiveCharacterIds: { characterId:string, characterId:string, characterId:string }
+		self.tCharacters = {}
+		self.tCharacterById = {}
+
+		for _, tCharacter in ipairs(tCharacters) do
+			if tCharacter ~= nil and tCharacter.id ~= nil and tCharacter.id ~= "" then
+				table.insert(self.tCharacters, tCharacter)
+				self.tCharacterById[tCharacter.id] = tCharacter
+			end
+		end
+
+		self.activeCharacterIds = self:CopyStringList(tActiveCharacterIds)
+		self.selectedCharacterId = selectedCharacterId
+		self:SendCharacterChangedEvent("")
+	end
+
+	@ExecSpace("Client")
+	method void SyncCharacter(table tCharacter)
+		-- 서버에서 받은 캐릭터 한 건을 클라이언트 로컬 아카이브 캐시에 반영합니다.
+		-- tCharacter: CharacterData:ToPlainTable()
+		if tCharacter == nil or tCharacter.id == nil or tCharacter.id == "" then
+			return
+		end
+
+		if self.tCharacterById[tCharacter.id] == nil then
+			table.insert(self.tCharacters, tCharacter)
+		else
+			for index, cachedCharacter in ipairs(self.tCharacters) do
+				if cachedCharacter.id == tCharacter.id then
+					self.tCharacters[index] = tCharacter
+					break
+				end
+			end
+		end
+
+		self.tCharacterById[tCharacter.id] = tCharacter
+		self:SendCharacterChangedEvent(tCharacter.id)
+	end
+
+	@ExecSpace("Client")
+	method void SyncSelectedCharacter(string selectedCharacterId)
+		-- 서버에서 받은 선택 캐릭터 id를 클라이언트 로컬 캐시에 저장합니다.
+		self.selectedCharacterId = selectedCharacterId
+		self:SendCharacterChangedEvent(selectedCharacterId)
+	end
+
+	method any CopyStringList(any tSourceList)
+		-- tSourceList: { string, string, ... }
+		local tCopiedList = {}
+		if tSourceList == nil or type(tSourceList) ~= "table" then
+			return tCopiedList
+		end
+
+		for _, value in ipairs(tSourceList) do
+			if value ~= nil and value ~= "" then
+				table.insert(tCopiedList, tostring(value))
+			end
+		end
+
+		return tCopiedList
+	end
+
+	method any CopyCharacterData(any tCharacter)
+		-- CharacterData 구조체를 RPC와 클라이언트 캐시에서 사용할 plain table로 변환합니다.
+		if tCharacter == nil then
+			return CharacterData():CreateEmptyPlainTable()
+		end
+
+		if tCharacter.ToPlainTable ~= nil then
+			return tCharacter:ToPlainTable()
+		end
+
+		log_warning("[CharacterManager] CopyCharacterData expects CharacterData")
+		return CharacterData():CreateEmptyPlainTable()
+	end
+
+end

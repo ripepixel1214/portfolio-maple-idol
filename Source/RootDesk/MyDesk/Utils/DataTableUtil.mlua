@@ -1,0 +1,64 @@
+-- DataSet row 값을 안전하게 읽기 위한 공용 유틸입니다.
+@Logic
+script DataTableUtil extends Logic
+
+	method string SafeGetString(any dataSet, integer rowIndex, string columnName, string defaultValue)
+		-- 데이터셋 값을 문자열로 읽고 값이나 컬럼이 없으면 기본값을 반환합니다.
+		-- GetCell로 직접 읽습니다. 없는 컬럼/범위는 pcall로 흡수해 기본값을 반환합니다.
+		-- (.Columns:ToTable()는 셀마다 새 테이블을 할당하고 콜드 접근 시 네이티브 에러가 있어 사용하지 않습니다.)
+		if dataSet == nil or columnName == nil or columnName == "" then
+			return defaultValue
+		end
+
+		local ok, value = pcall(function()
+			return dataSet:GetCell(rowIndex, columnName)
+		end)
+
+		if ok == false or value == nil or value == "" then
+			return defaultValue
+		end
+
+		return value
+	end
+
+	method number SafeGetNumber(any dataSet, integer rowIndex, string columnName, number defaultValue)
+		-- 데이터셋 값을 숫자로 읽고 변환할 수 없으면 기본값을 반환합니다.
+		local value = self:SafeGetString(dataSet, rowIndex, columnName, "")
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return numberValue
+	end
+
+	method integer SafeGetInteger(any dataSet, integer rowIndex, string columnName, integer defaultValue)
+		-- 데이터셋 값을 정수로 읽고 변환할 수 없으면 기본값을 반환합니다.
+		local numberValue = self:SafeGetNumber(dataSet, rowIndex, columnName, defaultValue)
+		return math.floor(numberValue)
+	end
+
+	method boolean SafeGetBoolean(any dataSet, integer rowIndex, string columnName, boolean defaultValue)
+		-- 데이터셋 값을 boolean으로 읽고 변환할 수 없으면 기본값을 반환합니다.
+		local value = string.lower(self:SafeGetString(dataSet, rowIndex, columnName, ""))
+		if value == "true" or value == "1" or value == "yes" or value == "y" then
+			return true
+		end
+
+		if value == "false" or value == "0" or value == "no" or value == "n" then
+			return false
+		end
+
+		return defaultValue
+	end
+
+	method any SafeGetOptionalNumber(any dataSet, integer rowIndex, string columnName)
+		-- 데이터셋 값이 비어 있으면 nil, 값이 있으면 숫자로 변환해 반환합니다.
+		local value = self:SafeGetString(dataSet, rowIndex, columnName, "")
+		if value == "" then
+			return nil
+		end
+
+		return tonumber(value)
+	end
+end

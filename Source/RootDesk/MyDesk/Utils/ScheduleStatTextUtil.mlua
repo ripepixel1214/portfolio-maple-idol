@@ -1,0 +1,194 @@
+@Logic
+script ScheduleStatTextUtil extends Logic
+
+	property string UI_STAT_NO_CHANGE_KEY = "ui.schedule.no_stat_change"
+
+	property string UI_STAT_VOCAL_KEY = "ui.schedule.stat.vocal"
+
+	property string UI_STAT_DANCE_KEY = "ui.schedule.stat.dance"
+
+	property string UI_STAT_VISUAL_KEY = "ui.schedule.stat.visual"
+
+	property string UI_STAT_FANDOM_KEY = "ui.schedule.stat.fandom"
+
+	property string UI_STAT_FATIGUE_KEY = "ui.schedule.stat.fatigue"
+
+	@ExecSpace("ClientOnly")
+	method string BuildStatChangeIconRichText(any changes, boolean onlyChangedStats, string separator, number spriteVOffset)
+		-- 스탯 변화 테이블을 아이콘형 스케줄 리치 텍스트 문자열로 변환합니다.
+		local parts = {}
+		if changes == nil then
+			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+		end
+
+		self:AddIconStatChangePart(parts, "vocal", changes.vocal or 0, onlyChangedStats, spriteVOffset)
+		self:AddIconStatChangePart(parts, "dance", changes.dance or 0, onlyChangedStats, spriteVOffset)
+		self:AddIconStatChangePart(parts, "visual", changes.visual or 0, onlyChangedStats, spriteVOffset)
+		self:AddIconStatChangePart(parts, "fandom", changes.fandom or 0, onlyChangedStats, spriteVOffset)
+		self:AddIconStatChangePart(parts, "fatigue", changes.fatigue or 0, onlyChangedStats, spriteVOffset)
+
+		if #parts <= 0 then
+			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+		end
+
+		return table.concat(parts, separator or "\n")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildStatChangeTextRichText(any changes, boolean onlyChangedStats, string separator)
+		-- 스탯 이름 텍스트는 유지하고 수치에만 색을 입힌 리치 텍스트 문자열로 변환합니다.
+		local parts = {}
+		if changes == nil then
+			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+		end
+
+		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("vocal", ""), "vocal", changes.vocal or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("dance", ""), "dance", changes.dance or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("visual", ""), "visual", changes.visual or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("fandom", ""), "fandom", changes.fandom or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("fatigue", ""), "fatigue", changes.fatigue or 0, onlyChangedStats)
+
+		if #parts <= 0 then
+			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+		end
+
+		return table.concat(parts, separator or "\n")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedText(string key, string fallbackText)
+		-- 현재 locale의 UI 문구를 조회합니다.
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:GetText(key, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedStatName(string statKey, string fallbackText)
+		-- 스탯 키에 대응하는 locale별 표시 이름을 조회합니다.
+		local key = ""
+		if statKey == "vocal" then
+			key = self.UI_STAT_VOCAL_KEY
+		elseif statKey == "dance" then
+			key = self.UI_STAT_DANCE_KEY
+		elseif statKey == "visual" then
+			key = self.UI_STAT_VISUAL_KEY
+		elseif statKey == "fandom" then
+			key = self.UI_STAT_FANDOM_KEY
+		elseif statKey == "fatigue" then
+			key = self.UI_STAT_FATIGUE_KEY
+		end
+
+		return self:GetLocalizedText(key, fallbackText)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddIconStatChangePart(table parts, string statKey, number value, boolean onlyChangedStats, number spriteVOffset)
+		-- 표시 조건에 맞는 스탯 변화 한 항목을 아이콘형 리치 텍스트로 추가합니다.
+		if onlyChangedStats == true and value == 0 then
+			return
+		end
+
+		table.insert(parts, self:BuildStatRichText(statKey, value, spriteVOffset))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddTextStatChangePart(table parts, string statName, string statKey, number value, boolean onlyChangedStats)
+		-- 표시 조건에 맞는 스탯 변화 한 항목을 텍스트 라벨형 리치 텍스트로 추가합니다.
+		if onlyChangedStats == true and value == 0 then
+			return
+		end
+
+		table.insert(parts, statName .. " " .. self:BuildSignedNumberRichText(statKey, value))
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildStatRichText(string statKey, number value, number spriteVOffset)
+		-- 스탯 아이콘과 변화량을 좋은/나쁜 변화 색상 규칙에 맞춰 리치 텍스트로 만듭니다.
+		local colorHex = self:GetStatChangeColorHex(statKey, value)
+		local spriteTag = self:GetStatSpriteTag(statKey)
+		if spriteVOffset ~= nil and spriteVOffset ~= 0 then
+			spriteTag = "<voffset=" .. tostring(spriteVOffset) .. ">" .. spriteTag .. "</voffset>"
+		end
+
+		return spriteTag .. "<color=" .. colorHex .. "><b>" .. self:FormatSignedNumber(value or 0) .. "</b></color>"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildSignedNumberRichText(string statKey, number value)
+		-- 스탯 변화 수치에만 좋은/나쁜 변화 색상을 입힙니다.
+		local colorHex = self:GetStatChangeColorHex(statKey, value)
+		return "<color=" .. colorHex .. "><b>" .. self:FormatSignedNumber(value or 0) .. "</b></color>"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetStatChangeColorHex(string statKey, number value)
+		-- 좋은 변화는 초록색, 나쁜 변화는 빨간색, 변화 없음은 흰색으로 표시합니다.
+		if value == nil or value == 0 then
+			return "#FFFFFF"
+		end
+
+		if self:IsGoodStatChange(statKey, value) then
+			return "#00C72B"
+		end
+
+		return "#FF4D4D"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetStatSpriteTag(string statKey)
+		-- TextSpriteSet에 등록된 스탯 아이콘 이름으로 sprite 태그를 만듭니다.
+		if statKey == "vocal" then
+			return "<sprite name=\"vocal\">"
+		elseif statKey == "dance" then
+			return "<sprite name=\"dance\">"
+		elseif statKey == "visual" then
+			return "<sprite name=\"visual\">"
+		elseif statKey == "fatigue" then
+			return "<sprite name=\"fatigue\">"
+		elseif statKey == "fandom" then
+			return "<sprite name=\"fandom\">"
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsGoodStatChange(string statKey, number value)
+		-- 피로도는 감소가 좋은 변화이고, 나머지 스탯은 증가가 좋은 변화입니다.
+		if value == nil or value == 0 then
+			return false
+		end
+
+		if statKey == "fatigue" then
+			return value < 0
+		end
+
+		return value > 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetScheduleStatTextSpriteSetId()
+		-- 스케줄 스탯 리치 텍스트에서 사용하는 TextSpriteSet ID를 반환합니다.
+		return "textspriteset://b1698bba-9694-4703-97a7-017d94555657"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatSignedNumber(number value)
+		-- 양수에는 + 기호를 붙이고 정수처럼 보이는 수는 정수로 표시합니다.
+		local safeValue = value or 0
+		local displayValue = safeValue
+		if safeValue == math.floor(safeValue) then
+			displayValue = math.floor(safeValue)
+		end
+
+		if safeValue > 0 then
+			return "+" .. tostring(displayValue)
+		end
+
+		return tostring(displayValue)
+	end
+
+end

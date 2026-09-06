@@ -1,0 +1,53 @@
+---@description "정적 오브젝트(건물 등)의 OrderInLayer를 기준점(SortPoint) Y로부터 1회 계산해, 캐릭터와 같은 SortingLayer 안에서 Y-Sort 정렬하는 컴포넌트"
+@Component
+script StaticYSortComponent extends Component
+
+	-- 정렬 기준점 엔티티(발밑선). 에디터에서 자식 마커를 드래그해 위치 지정. 비우면 자기 좌표 사용
+	property Entity SortPoint = ""
+
+	-- Y값을 OrderInLayer 정수로 환산하는 배율. DynamicYSortComponent와 반드시 동일해야 함
+	property number SortResolution = 100
+
+	-- 여러 스프라이트 파츠를 직접 자식으로 묶은 복합 엔티티인지 여부.
+	-- true면 부모 발밑선으로 계산한 단일 order를 직접 자식들의 SpriteRendererComponent에 일괄 적용한다.
+	property boolean IsCompositeEntity = false
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 정적 오브젝트이므로 시작 시 1회만 OrderInLayer를 계산·적용한다. (@Sync로 전 클라 전파)
+		local order = self:ComputeOrder(self:GetSortY())
+
+		if self.IsCompositeEntity then
+			-- 복합: 그룹을 하나의 발밑선으로 취급, 자식 전체에 같은 order를 적용한다.
+			for _, child in ipairs(self.Entity.Children:ToTable()) do
+				local r = child.SpriteRendererComponent
+				if isvalid(r) then
+					r.OrderInLayer = order
+				end
+			end
+			return
+		end
+
+		-- 단일: 자기 스프라이트에만 적용한다.
+		local renderer = self.Entity.SpriteRendererComponent
+		if not isvalid(renderer) then
+			log_warning("[StaticYSort] SpriteRendererComponent 없음: " .. self.Entity.Name)
+			return
+		end
+		renderer.OrderInLayer = order
+	end
+
+	method number GetSortY()
+		-- 정렬 기준 Y를 반환한다. SortPoint가 유효하면 그 월드 Y를, 아니면 자기 월드 Y를 사용한다.
+		if isvalid(self.SortPoint) then
+			return self.SortPoint.TransformComponent.WorldPosition.y
+		end
+		return self.Entity.TransformComponent.WorldPosition.y
+	end
+
+	method integer ComputeOrder(number y)
+		-- 기준 Y가 작을수록(화면 아래) 큰 order가 되도록 환산한다. (작은 Y = 앞에 렌더)
+		return math.floor(-y * self.SortResolution)
+	end
+
+end

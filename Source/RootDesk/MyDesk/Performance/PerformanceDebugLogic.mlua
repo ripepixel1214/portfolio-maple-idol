@@ -1,0 +1,87 @@
+---@description "테스트용 디버그 로직. F8=공연 주간 이동, F9=임시 배정으로 공연 진입+자동 시작, F10=현재 맵에서 즉시 재생, F11=중지."
+@Logic
+script PerformanceDebugLogic extends Logic
+
+	-- 테스트로 재생할 공연 id
+	property string testPerformanceId = "perf_01"
+
+	-- 키 입력 구독 핸들러
+	property any keyDownHandler = nil
+
+	method void OnBeginPlay()
+		-- 클라이언트에서 테스트용 키 입력을 구독
+		if self:IsClient() == true then
+			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+		end
+	end
+
+	method void OnEndPlay()
+		-- 키 입력 구독 해제
+		if self.keyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
+			self.keyDownHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- if true then return end
+
+		if event == nil then
+			return
+		end
+
+		if event.key == KeyboardKey.F8 then
+			-- 서버 진행도를 공연 주간으로 변경하고 스튜디오로 이동
+			if _ProgressManager ~= nil then
+				_ProgressManager:RequestDebugMoveToPerformanceWeek(self.testPerformanceId)
+			else
+				log_warning("[PerformanceDebug] ProgressManager 없음")
+			end
+		elseif event.key == KeyboardKey.F9 then
+			-- 단일 진입점: 임시 배정으로 공연 맵 진입 + 자동 시작 (실제 흐름 테스트)
+			self:StartPerformanceFlowWithTempRoster()
+		elseif event.key == KeyboardKey.F10 then
+			-- 이미 공연 맵에 있을 때 임시 배정으로 즉시 재생
+			if _PerformanceConductor ~= nil then
+				_PerformanceConductor.tRoleAssignment = self:BuildTempAssignment()
+				_PerformanceConductor:StartPerformance(self.testPerformanceId)
+			end
+		elseif event.key == KeyboardKey.F11 then
+			-- 공연 중지 (중단 — 점수 산출 없음)
+			if _PerformanceConductor ~= nil then
+				_PerformanceConductor:StopPerformance()
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartPerformanceFlowWithTempRoster()
+		-- 임시 배정 데이터로 공연 단일 진입점 호출 (실제 시작 UI가 붙기 전까지의 테스트 경로)
+		if _PerformanceConductor == nil then
+			log_warning("[PerformanceDebug] PerformanceConductor 없음")
+			return
+		end
+		_PerformanceConductor:StartPerformanceFlow(self.testPerformanceId, self:BuildTempAssignment())
+	end
+
+	@ExecSpace("ClientOnly")
+	method PerformanceRoleAssignment BuildTempAssignment()
+		-- (임시) 편성 3인(activeCharacterIds)을 센터/서브L/서브R 슬롯에 순서대로 배정한 구조체를 반환
+		local assignment = PerformanceRoleAssignment()
+		if _CharacterManager == nil then
+			log_warning("[PerformanceDebug] CharacterManager 없음")
+			return assignment
+		end
+
+		local ids = _CharacterManager:ClientGetActiveCharacterIds()
+		if ids ~= nil then
+			if ids[1] ~= nil then assignment.center = ids[1] end
+			if ids[2] ~= nil then assignment.subL = ids[2] end
+			if ids[3] ~= nil then assignment.subR = ids[3] end
+		end
+
+		return assignment
+	end
+
+end

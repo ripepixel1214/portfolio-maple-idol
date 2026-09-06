@@ -1,0 +1,8 @@
+@Struct
+script WeeklyPlanData
+	
+	property string characterId = ""
+	
+	property string activityId = ""
+
+end

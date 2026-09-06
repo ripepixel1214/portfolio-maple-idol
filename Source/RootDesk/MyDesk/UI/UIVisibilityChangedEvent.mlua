@@ -1,0 +1,8 @@
+@Event
+script UIVisibilityChangedEvent extends EventType
+
+	property string uiId = ""
+
+	property boolean isOpen = false
+
+end

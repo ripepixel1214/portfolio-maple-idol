@@ -1,0 +1,262 @@
+-- EventCompletionManager가 사용하는 서버 권위 이벤트 완료 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script EventCompletionStorage extends Logic
+
+	property string completionStorageKey = "eventCompletionData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedCompletionsString = ""
+
+	property boolean canSaveCompletions = false
+
+	property boolean isCompletionsSaveInProgress = false
+
+	property string pendingCompletionsUserId = ""
+
+	property string pendingCompletionsString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadCompletions(string userId)
+		-- UserDataStorage에서 완료 이벤트 key 목록을 읽고, 없으면 빈 목록을 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[EventCompletionStorage] userId is required")
+			self.loadedCompletionsString = ""
+			self.canSaveCompletions = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedCompletionsString = userStorage:GetAndWait(self.completionStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedCompletionsString = ""
+			self.canSaveCompletions = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedCompletionsString = ""
+			self.canSaveCompletions = false
+			return nil
+		end
+
+		if storedCompletionsString == nil or storedCompletionsString == "" then
+			self.loadedCompletionsString = ""
+			self.canSaveCompletions = true
+			return {}
+		end
+
+		local loadedCompletionKeys = self:CreateCompletionKeysFromString(storedCompletionsString)
+		if loadedCompletionKeys == nil then
+			log_warning("[EventCompletionStorage] completion load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedCompletionsString = storedCompletionsString
+			self.canSaveCompletions = false
+			return nil
+		end
+
+		self.loadedCompletionsString = storedCompletionsString
+		self.canSaveCompletions = true
+		return loadedCompletionKeys
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCompletionsAsync(string userId, any completionKeys)
+		-- 완료 이벤트 key 목록을 v1 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveCompletions == false then
+			log_warning("[EventCompletionStorage] completion save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[EventCompletionStorage] userId is required")
+			return
+		end
+
+		local completionsString = self:CreateCompletionsStringFromKeys(completionKeys)
+		if completionsString == "" then
+			log_warning("[EventCompletionStorage] completion keys are invalid")
+			return
+		end
+
+		if completionsString == self.loadedCompletionsString then
+			return
+		end
+
+		if self.isCompletionsSaveInProgress then
+			self.pendingCompletionsUserId = userId
+			self.pendingCompletionsString = completionsString
+			return
+		end
+
+		self:SaveCompletionsStringAsync(userId, completionsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCompletionsStringAsync(string userId, string completionsString)
+		-- 직렬화된 완료 이벤트 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isCompletionsSaveInProgress = true
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.completionStorageKey, completionsString, function(errorCode, key)
+			self:OnCompletionsSaveCompleted(userId, completionsString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnCompletionsSaveCompleted(string userId, string completionsString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청이 있으면 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.loadedCompletionsString = completionsString
+		end
+
+		self.isCompletionsSaveInProgress = false
+		self:CheckPendingCompletionsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingCompletionsSave()
+		-- 대기 중인 최신 완료 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.pendingCompletionsString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingCompletionsUserId
+		local pendingCompletionsString = self.pendingCompletionsString
+		self.pendingCompletionsUserId = ""
+		self.pendingCompletionsString = ""
+
+		if pendingCompletionsString == self.loadedCompletionsString then
+			return
+		end
+
+		self:SaveCompletionsStringAsync(pendingUserId, pendingCompletionsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCompletionKeysFromString(string completionsString)
+		-- 저장 문자열을 완료 이벤트 key 목록으로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(completionsString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[EventCompletionStorage] completion save string parse failed")
+			return nil
+		end
+
+		return self:CreateCompletionKeysFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateCompletionsStringFromKeys(any completionKeys)
+		-- 완료 이벤트 key 목록을 DataStorage에 넣을 v1 저장 문자열로 만듭니다.
+		if completionKeys == nil or type(completionKeys) ~= "table" then
+			return ""
+		end
+
+		local normalizedKeys = self:CreateNormalizedCompletionKeys(completionKeys)
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.completionCount = #normalizedKeys
+
+		for index, completionKey in ipairs(normalizedKeys) do
+			local suffix = tostring(index)
+			tFlatPlainTable["completionKey" .. suffix] = completionKey
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCompletionKeysFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 복원한 flat plain table의 버전을 확인하고 완료 이벤트 key 목록으로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion == 0 or saveVersion == 1 then
+			return self:CreateCompletionKeysFromFlatPlainTableV1(tFlatPlainTable)
+		end
+
+		log_warning("[EventCompletionStorage] unsupported completion saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCompletionKeysFromFlatPlainTableV1(any tFlatPlainTable)
+		-- v1 flat plain table을 완료 이벤트 key 목록으로 정규화합니다.
+		local completionCount = self:NormalizeInteger(tFlatPlainTable.completionCount, 0, 0)
+		local completionKeys = {}
+
+		for index = 1, completionCount do
+			local completionKey = self:NormalizeString(tFlatPlainTable["completionKey" .. tostring(index)], "")
+			self:AddCompletionKeyIfValid(completionKeys, completionKey)
+		end
+
+		return completionKeys
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateNormalizedCompletionKeys(any completionKeys)
+		-- 완료 이벤트 key 목록에서 빈 값과 중복을 제거한 목록을 만듭니다.
+		if completionKeys == nil or type(completionKeys) ~= "table" then
+			return nil
+		end
+
+		local normalizedKeys = {}
+
+		for _, completionKey in ipairs(completionKeys) do
+			self:AddCompletionKeyIfValid(normalizedKeys, completionKey)
+		end
+
+		return normalizedKeys
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddCompletionKeyIfValid(any completionKeys, string completionKey)
+		-- 저장 목록에 빈 값과 중복을 제외한 완료 key만 추가합니다.
+		if completionKeys == nil or type(completionKeys) ~= "table" then
+			return
+		end
+
+		local normalizedKey = self:NormalizeString(completionKey, "")
+		if normalizedKey == "" then
+			return
+		end
+
+		for _, storedKey in ipairs(completionKeys) do
+			if storedKey == normalizedKey then
+				return
+			end
+		end
+
+		table.insert(completionKeys, normalizedKey)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

@@ -1,0 +1,64 @@
+@Logic
+script EEventType extends Logic
+
+	property integer None = 0
+
+	property integer Straight = 1
+
+	property integer MiniGame = 2
+
+	property integer Choice = 3
+
+	property integer Dialog = 4
+
+	method boolean IsValid(integer eventType)
+		-- 이벤트 실행 타입으로 사용할 수 있는 값인지 확인합니다.
+		return eventType == self.Straight
+			or eventType == self.MiniGame
+			or eventType == self.Choice
+			or eventType == self.Dialog
+	end
+
+	method integer FromKey(string eventTypeKey)
+		-- 문자열 이벤트 타입 키를 이벤트 타입 enum으로 변환합니다.
+		if eventTypeKey == nil or eventTypeKey == "" or eventTypeKey == "straight" then
+			return self.Straight
+		end
+
+		if eventTypeKey == "minigame" then
+			return self.MiniGame
+		end
+
+		if eventTypeKey == "choice" then
+			return self.Choice
+		end
+
+		if eventTypeKey == "dialog" then
+			return self.Dialog
+		end
+
+		return self.None
+	end
+
+	method string ToKey(integer eventType)
+		-- 이벤트 타입 enum을 데이터 테이블에서 사용하는 문자열 키로 변환합니다.
+		if eventType == self.Straight then
+			return "straight"
+		end
+
+		if eventType == self.MiniGame then
+			return "minigame"
+		end
+
+		if eventType == self.Choice then
+			return "choice"
+		end
+
+		if eventType == self.Dialog then
+			return "dialog"
+		end
+
+		return ""
+	end
+
+end

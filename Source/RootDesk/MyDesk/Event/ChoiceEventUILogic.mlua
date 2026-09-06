@@ -1,0 +1,394 @@
+-- choice 이벤트 후보를 버튼 목록으로 표시하고 선택 결과를 EventExecutor로 전달합니다.
+@Logic
+script ChoiceEventUILogic extends Logic
+
+	property Entity rootEntity = "86adb207-380d-4061-ae07-0a6f0b83f990"
+
+	property Entity panelEntity = "77e8edf7-9518-41b3-82a8-68fa799c65a6"
+
+	property ButtonComponent choiceButton1Component = "1aba7d68-135b-468e-8e46-0452daa94488"
+
+	property ButtonComponent choiceButton2Component = "437ba95b-1235-49e9-812f-22408c479902"
+
+	property ButtonComponent choiceButton3Component = "86c66728-445e-4863-b085-626593207956"
+
+	property ButtonComponent choiceButton4Component = "2c5db9ba-8086-488d-a706-2f206827293a"
+
+	property ButtonComponent choiceButton5Component = "25e87759-a132-4230-8116-72f1ba6fb3f4"
+
+	property TextGUIRendererComponent choiceText1Component = "6af7d4a1-dc05-4bb0-acfa-afb1e5fe2776"
+
+	property TextGUIRendererComponent choiceText2Component = "68b42595-78c5-4b7b-af3c-b595537b0e95"
+
+	property TextGUIRendererComponent choiceText3Component = "cb46bf3a-d8ae-4ce7-a1c4-552c4d39370a"
+
+	property TextGUIRendererComponent choiceText4Component = "2985f111-f2b3-4e2b-9976-76cf73af7ab9"
+
+	property TextGUIRendererComponent choiceText5Component = "3ab46a91-f362-45d9-a505-0dcf74e31a14"
+
+	property any tChoiceButtonClickHandlers = {}
+
+	property any tChoiceEventIds = {}
+
+	property string choiceCharacterId = ""
+
+	property number openDuration = 0.25
+
+	property number choiceStaggerDelay = 0.05
+
+	property number slideOffsetX = 40
+
+	property integer tweenTimerId = 0
+
+	property boolean isTweenPlaying = false
+
+	property any tChoiceBasePositions = {}
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- choice 이벤트 UI를 초기화하고 버튼 클릭 이벤트를 연결합니다.
+		self:StopTween()
+		self:SetRootAlpha(0)
+		self:ConnectChoiceButtons()
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- choice 이벤트 UI 버튼 클릭 이벤트 연결을 정리합니다.
+		self:StopTween()
+		self:DisconnectChoiceButtons()
+	end
+
+	@ExecSpace("Client")
+	method void Open(table tChoiceEventIds, string characterId)
+		-- 전달받은 choice 이벤트 ID 목록을 순서대로 버튼에 표시합니다.
+		self.tChoiceEventIds = tChoiceEventIds or {}
+		self.choiceCharacterId = characterId or ""
+		self:SetAllChoices()
+
+		local hasChoiceEventId = false
+		for index = 1, 5 do
+			local choiceEventId = self.tChoiceEventIds[index]
+			if choiceEventId ~= nil and choiceEventId ~= "" then
+				hasChoiceEventId = true
+				break
+			end
+		end
+
+		if hasChoiceEventId == true then
+			self:EnsureChoiceBasePositions()
+			self:SetRootAlpha(0)
+			self:SetVisible(true)
+			self:PlayOpenTween()
+			return
+		end
+
+		self:SetVisible(false)
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- choice 이벤트 UI를 비우고 숨깁니다.
+		self:StopTween()
+		self:ResetChoiceVisuals()
+		self:SetRootAlpha(0)
+		self.tChoiceEventIds = {}
+		self.choiceCharacterId = ""
+		self:SetAllChoices()
+		self:SetVisible(false)
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAllChoices()
+		-- 현재 저장된 choice 이벤트 ID 목록을 버튼 표시 상태에 반영합니다.
+		for index = 1, 5 do
+			self:SetChoice(index, self.tChoiceEventIds[index])
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetChoice(integer index, string eventId)
+		-- choice 버튼 하나에 이벤트 설명 텍스트와 표시 여부를 적용합니다.
+		local buttonComponent = self:GetChoiceButtonComponent(index)
+		local textComponent = self:GetChoiceTextComponent(index)
+
+		if eventId == nil or eventId == "" then
+			if buttonComponent ~= nil and buttonComponent.Entity ~= nil then
+				buttonComponent.Entity.Enable = false
+			end
+
+			if textComponent ~= nil then
+				textComponent.Text = ""
+			end
+
+			return
+		end
+
+		if buttonComponent ~= nil and buttonComponent.Entity ~= nil then
+			buttonComponent.Entity.Enable = true
+		end
+
+		if textComponent ~= nil then
+			textComponent.Text = self:GetEventDescription(eventId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetEventDescription(string eventId)
+		-- 이벤트 ID에 해당하는 description을 가져오고 없으면 빈 문자열을 반환합니다.
+		local tEvent = _EventMaster:GetEvent(eventId)
+		if tEvent == nil then
+			return ""
+		end
+
+		return tEvent.description
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectChoiceButtons()
+		-- choice 버튼 1번부터 5번까지 클릭 이벤트를 연결합니다.
+		self:DisconnectChoiceButtons()
+		self.tChoiceButtonClickHandlers = {}
+
+		for index = 1, 5 do
+			local buttonComponent = self:GetChoiceButtonComponent(index)
+			if buttonComponent ~= nil and buttonComponent.Entity ~= nil then
+				local choiceIndex = index
+				self.tChoiceButtonClickHandlers[choiceIndex] = buttonComponent.Entity:ConnectEvent(ButtonClickEvent, function()
+					self:OnChoiceButtonClicked(choiceIndex)
+				end)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectChoiceButtons()
+		-- 연결된 choice 버튼 클릭 이벤트 핸들러들을 해제합니다.
+		for index = 1, 5 do
+			local buttonComponent = self:GetChoiceButtonComponent(index)
+			local eventHandler = self.tChoiceButtonClickHandlers[index]
+			if eventHandler ~= nil and buttonComponent ~= nil and buttonComponent.Entity ~= nil then
+				buttonComponent.Entity:DisconnectEvent(ButtonClickEvent, eventHandler)
+			end
+		end
+
+		self.tChoiceButtonClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnChoiceButtonClicked(integer index)
+		-- 선택된 번호의 choice 이벤트 실행을 EventExecutor에 요청하고 UI를 닫습니다.
+		if self.isTweenPlaying == true then
+			return
+		end
+
+		local eventId = self.tChoiceEventIds[index]
+		if eventId == nil or eventId == "" then
+			return
+		end
+
+		_EventExecutor:RequestExecuteEvent(eventId, self.choiceCharacterId)
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method ButtonComponent GetChoiceButtonComponent(integer index)
+		-- 인덱스에 해당하는 choice 버튼 컴포넌트를 반환합니다.
+		if index == 1 then
+			return self.choiceButton1Component
+		elseif index == 2 then
+			return self.choiceButton2Component
+		elseif index == 3 then
+			return self.choiceButton3Component
+		elseif index == 4 then
+			return self.choiceButton4Component
+		end
+
+		return self.choiceButton5Component
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetChoiceTextComponent(integer index)
+		-- 인덱스에 해당하는 choice 설명 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then
+			return self.choiceText1Component
+		elseif index == 2 then
+			return self.choiceText2Component
+		elseif index == 3 then
+			return self.choiceText3Component
+		elseif index == 4 then
+			return self.choiceText4Component
+		end
+
+		return self.choiceText5Component
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisible(boolean isVisible)
+		-- choice 이벤트 UI 루트 표시 상태를 변경합니다.
+		if self.rootEntity == nil then
+			return
+		end
+
+		self.rootEntity.Enable = isVisible
+		_UIVisibilityNotifierLogic:SendFrom(self, "choice", isVisible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayOpenTween()
+		-- Plays the choice list entrance tween from the cached resting positions.
+		self:StopTween()
+		self:EnsureChoiceBasePositions()
+
+		local duration = self.openDuration
+		if duration <= 0 then
+			self:ResetChoiceVisuals()
+			return
+		end
+
+		self.isTweenPlaying = true
+		self:SetRootAlpha(0)
+		self:ApplyChoiceTweenValue(0)
+
+		local elapsed = 0
+		local previousTime = _UtilLogic.ElapsedSeconds
+		local maxDuration = duration + self.choiceStaggerDelay * 4
+
+		local tick = function()
+			local now = _UtilLogic.ElapsedSeconds
+			local delta = now - previousTime
+			previousTime = now
+			elapsed = elapsed + delta
+
+			local allComplete = true
+			local rootProgress = math.max(0, math.min(elapsed / duration, 1))
+			local rootAlpha = _TweenLogic:Ease(0, 1, 1, EaseType.SineEaseOut, rootProgress)
+			self:SetRootAlpha(rootAlpha)
+
+			for index = 1, 5 do
+				local choiceElapsed = elapsed - self.choiceStaggerDelay * (index - 1)
+				local rawProgress = math.max(0, math.min(choiceElapsed / duration, 1))
+				local easedProgress = _TweenLogic:Ease(0, 1, 1, EaseType.SineEaseOut, rawProgress)
+				self:ApplySingleChoiceTweenValue(index, easedProgress)
+
+				if rawProgress < 1 then
+					allComplete = false
+				end
+			end
+
+			if allComplete == true or elapsed >= maxDuration then
+				self:StopTween()
+				self:SetRootAlpha(1)
+				self:ResetChoiceVisuals()
+			end
+		end
+
+		self.tweenTimerId = _TimerService:SetTimerRepeat(tick, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopTween()
+		-- Clears the active choice entrance tween timer.
+		if self.tweenTimerId > 0 then
+			_TimerService:ClearTimer(self.tweenTimerId)
+			self.tweenTimerId = 0
+		end
+
+		self.isTweenPlaying = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnsureChoiceBasePositions()
+		-- Captures resting positions once, before tween offsets are applied.
+		if self.tChoiceBasePositions == nil or self.tChoiceBasePositions[1] == nil then
+			self:CaptureChoiceBasePositions()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureChoiceBasePositions()
+		-- Stores each choice button's resting anchored position.
+		self.tChoiceBasePositions = {}
+		for index = 1, 5 do
+			local buttonComponent = self:GetChoiceButtonComponent(index)
+			if buttonComponent ~= nil and buttonComponent.Entity ~= nil and buttonComponent.Entity.UITransformComponent ~= nil then
+				self.tChoiceBasePositions[index] = buttonComponent.Entity.UITransformComponent.anchoredPosition
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyChoiceTweenValue(number progress)
+		-- Applies the same tween progress to every visible choice button.
+		for index = 1, 5 do
+			self:ApplySingleChoiceTweenValue(index, progress)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplySingleChoiceTweenValue(integer index, number progress)
+		-- Applies alpha and slide offset to one visible choice button.
+		local buttonComponent = self:GetChoiceButtonComponent(index)
+		if buttonComponent == nil or buttonComponent.Entity == nil then
+			return
+		end
+
+		local buttonEntity = buttonComponent.Entity
+		if buttonEntity.Enable == false then
+			return
+		end
+
+		local canvasGroup = buttonEntity.CanvasGroupComponent
+		if canvasGroup ~= nil then
+			canvasGroup.GroupAlpha = progress
+		end
+
+		local basePosition = self.tChoiceBasePositions[index]
+		if basePosition == nil or buttonEntity.UITransformComponent == nil then
+			return
+		end
+
+		local offsetX = self.slideOffsetX * (1 - progress)
+		buttonEntity.UITransformComponent.anchoredPosition = Vector2(basePosition.x + offsetX, basePosition.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetChoiceVisuals()
+		-- Restores choice buttons to their resting alpha and anchored positions.
+		self:EnsureChoiceBasePositions()
+
+		for index = 1, 5 do
+			local buttonComponent = self:GetChoiceButtonComponent(index)
+			if buttonComponent ~= nil and buttonComponent.Entity ~= nil then
+				local buttonEntity = buttonComponent.Entity
+				local canvasGroup = buttonEntity.CanvasGroupComponent
+				if canvasGroup ~= nil then
+					canvasGroup.GroupAlpha = 1
+				end
+
+				local basePosition = self.tChoiceBasePositions[index]
+				if basePosition ~= nil and buttonEntity.UITransformComponent ~= nil then
+					buttonEntity.UITransformComponent.anchoredPosition = basePosition
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetRootAlpha(number alpha)
+		-- Applies alpha to the choice UI root CanvasGroup when it exists.
+		if self.rootEntity == nil then
+			return
+		end
+
+		local canvasGroup = self.rootEntity.CanvasGroupComponent
+		if canvasGroup == nil then
+			return
+		end
+
+		canvasGroup.GroupAlpha = math.max(0, math.min(alpha, 1))
+	end
+end

@@ -1,0 +1,1509 @@
+@Logic
+script ScheduleProgressUILogic extends Logic
+
+	property Entity ProgressRoot = "7f029eb1-bd55-45af-acd4-5a5fa2e2eae4"
+
+	property Entity ProgressPanel = "d856e1d6-f8bf-4d65-bb61-9a3ba02acd9c"
+
+	property Entity ProgressMonthWeekText = "f87c5eb6-2401-4cf4-8b4e-dd8d7ef0ce19"
+
+	property Entity ProgressMessageText = "5adbe5f7-fe7e-4596-83a3-c79468934030"
+
+	property Entity ProgressStatDeltaText = "8de216f4-95ef-4ada-a7ab-1d471fcac58b"
+
+	property Entity WarningEntity = "c53ee3b2-2d7a-41a4-b9d4-1ce48075c3a8"
+
+	property Entity ActivitySuccessEntity = "ad7250cf-db8c-47a8-8f97-9669fc107f11"
+
+	property Entity ActivityFailEntity = "7243efe5-721a-423e-bce4-9d3408e5fc44"
+
+	property number WarningDisplayDuration = 2
+
+	property string UI_MONTH_WEEK_ACTIVITY_KEY = "ui.schedule_progress.month_week_activity"
+
+	property string UI_ACTIVITY_COMPLETED_KEY = "ui.schedule_progress.activity_completed"
+
+	property integer WarningDisplayTimerId = 0
+
+	property Entity VocalActivityImage = "5b2beec6-4f19-440a-9738-a27ac7021c3b"
+
+	property Entity DanceActivityImage = "1e3d36cc-3977-49dd-abb6-1e8303e961b2"
+
+	property Entity VisualActivityImage = "5fb6170a-bc20-447d-a6b6-f991450eca1c"
+
+	property Entity DessertActivityImage = "99930b8c-1fd6-44bb-a0ce-e9a681ce7dae"
+
+	property Entity NapActivityImage = "9b78834f-723b-49e5-b19b-d6a35b8ec0b1"
+
+	property Entity ParkActivityImage = "58504fae-7e5c-4297-902a-9f6ae091781f"
+
+	property Entity BuskingActivityImage = "9d7419c5-cfc7-4fec-b99a-8ea12f349598"
+
+	property Entity ConcertActivityImage = "24be0621-24f3-46ed-b2b6-2c69c15b82db"
+
+	property Entity MLiveActivityImage = "4074c26c-a871-4fe2-bf6d-3f14e462278d"
+
+	property Entity VocalTrainingDeco = "51bcace7-3f67-4cc4-a32f-eabf6416fbaf"
+
+	property Entity DanceTrainingDeco = "6ca08c1b-b7a9-41e5-bf85-71127ea909ff"
+
+	property Entity VisualTrainingDeco = "d3582a4c-e5d3-446b-b262-c82bd99db482"
+
+	property Entity DessertActivityDeco = "9d6379e1-69d9-47cc-a340-4e2ef98dd168"
+
+	property Entity NapActivityDeco = "ea8fcd4e-a9c0-4160-9857-9a90a40dfbdf"
+
+	property Entity ParkActivityDeco = "7d02b857-ad08-4104-afe4-898bb54f1fb0"
+
+	property Entity BuskingActivityDeco = "bd41357a-6778-4524-b6f2-28d4d891c7dd"
+
+	property Entity ConcertActivityDeco = "e1e6b1eb-c447-4384-806b-dd834c42167f"
+
+	property Entity MLiveActivityDeco = "0a4f3d95-0f96-4787-92bb-814a95e494fb"
+
+	property Entity TrainingFrame = "1535c923-fc72-4e86-b152-f3869acf6e5a"
+
+	property Entity PerformanceFrame = "77df4721-d86c-4ced-8788-4e7db0bf3349"
+
+	property Entity RestFrame = "11007b89-1180-4ce6-88dc-ee3b8ba3deee"
+
+	property Entity TrainingPostit = "057c9e29-4230-4694-bad6-9e52cd05ba02"
+
+	property Entity PerformancePostit = "e3024eac-1645-4217-ae9b-a8897d3e95d3"
+
+	property Entity RestPostit = "1ddcfcda-e21b-4d55-a4f3-3f70ca1a300f"
+
+	property Entity MondayDay = "0dfcac9f-ae93-43dc-8e73-671f3b20f42d"
+
+	property Entity TuesdayDay = "92a359f8-426b-4778-b49d-9c630f362cea"
+
+	property Entity WednesdayDay = "d837df5f-bf9b-4f28-91f8-96e7f79cb251"
+
+	property Entity ThursdayDay = "af2b21d1-149c-49b3-ae3b-0255ee1d10c0"
+
+	property Entity FridayDay = "29f556c1-0d86-415e-9735-d359bc688800"
+
+	property string PracticeCharacterPath01 = "/maps/Map_Studio/AvatarActorModel_1"
+
+	property string PracticeCharacterPath02 = "/maps/Map_Studio/AvatarActorModel_2"
+
+	property string PracticeCharacterPath03 = "/maps/Map_Studio/AvatarActorModel_3"
+
+	property number DayActiveY = 0
+
+	property number DayInactiveY = 0
+
+	property boolean IsDayPositionInitialized = false
+
+	property integer CurrentPresentationDay = 0
+
+	property integer PendingPresentationDay = 0
+
+	property any PendingPresentationSlot = nil
+
+	property boolean IsPresenting = false
+
+	property integer PanelAnimationState = 0
+
+	property number PanelAnimationElapsed = 0
+
+	property number PanelAnimationDuration = 0.28
+
+	property boolean IsSequenceDayPresentationWaiting = false
+
+	property integer SequenceDayPresentationWaitDay = 0
+
+	property number SequenceDayPresentationElapsed = 0
+
+	property number SequenceDayPresentationDuration = 3
+
+	property number ActivityResultPresentationLeadTime = 1
+
+	property integer PendingActivityResultPresentationDay = 0
+
+	property any PendingActivityResultPresentation = nil
+
+	property boolean IsActivityResultPresentationShown = false
+
+	property number PanelCenterX = 0
+
+	property number PanelOffscreenLeftX = -1600
+
+	property number PanelOffscreenRightX = 1600
+
+	property string settlementDialogId = ""
+
+	property any tActivityDecoCharacterCostumeOverridesByEntityId = {}
+
+	property boolean IsPracticeCharactersHidden = false
+
+	property any progressChangedHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 진행 발표 UI를 초기화하고 진행 데이터 갱신 이벤트를 연결합니다.
+		self:HideTriggeredEventWarning()
+		if self.ProgressRoot ~= nil then
+			self.ProgressRoot.Enable = false
+		end
+		
+		if _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+		if _DialogUILogic ~= nil then
+			self._T.dialogClosed = _DialogUILogic:ConnectEvent(DialogClosedEvent, self.OnDialogClosed)
+		end
+		self.tActivityDecoCharacterCostumeOverridesByEntityId = {}
+		self.IsPracticeCharactersHidden = false
+		self:SetProgressPanelX(self.PanelCenterX)
+		self:HideActivityVisuals()
+		self:ClearActivityResultPresentation()
+		self:HideTriggeredEventWarning()
+		self:InitializeDayPositionSlots()
+		self:SetDaySlotsY(1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 진행 발표 UI가 연결한 이벤트 핸들러를 정리합니다.
+		self:RestorePracticeCharacters()
+		self:StopSequenceDayPresentationWait()
+		self:HideTriggeredEventWarning()
+
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+			self.progressChangedHandler = nil
+		end
+		if self._T.dialogClosed ~= nil and _DialogUILogic ~= nil then
+			_DialogUILogic:DisconnectEvent(DialogClosedEvent, self._T.dialogClosed)
+			self._T.dialogClosed = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		self:UpdatePanelAnimation(delta)
+		self:UpdateSequenceDayPresentation(delta)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 발표 중 진행 데이터가 갱신되면 현재 표시 중인 진행 헤더를 다시 그립니다.
+		if self.IsPresenting == false then
+			return
+		end
+
+		self:RefreshProgressHeader()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowSequenceDay(integer day, any slot)
+		-- 이미 스케줄이 진행 중이거나 잘못된 날짜가 입력된 경우 return
+		if self.IsPresenting == false or day < 1 or day > 5 or slot == nil then
+			return
+		end
+
+		if self.CurrentPresentationDay == 0 then
+			self:ApplyDayContent(day, slot)
+			return
+		end
+
+		self.PendingPresentationDay = day
+		self.PendingPresentationSlot = slot
+		self.PanelAnimationState = 1
+		self.PanelAnimationElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDayContent(integer day, any slot)
+		-- 지정한 요일의 활동 진행 내용을 화면에 반영합니다.
+		if slot == nil then
+			return
+		end
+		
+		self.CurrentPresentationDay = day
+		self:PrepareActivityResultPresentationForDay(day)
+		self:RefreshProgressHeader()
+		self:SetEntityRichText(self.ProgressMessageText, self:BuildActivityMessageForSlot(slot))
+		self:SetEntityRichText(self.ProgressStatDeltaText, self:BuildStatDeltaTextForSlot(slot))
+		self:RefreshActivityVisuals(slot)
+
+		self:StartSequenceDayPresentationWait(day)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenWeeklySequence()
+		-- 주간 시퀀스 표시를 시작할 수 있도록 UI 상태를 엽니다.
+		self:HidePracticeCharacters()
+		self.CurrentPresentationDay = 0
+		self.PendingPresentationDay = 0
+		self.PendingPresentationSlot = nil
+		self.IsPresenting = true
+		self:StopSequenceDayPresentationWait()
+		self:SendUIVisibilityChangedEvent(true)
+		self.PanelAnimationState = 0
+		self:SetProgressPanelX(self.PanelCenterX)
+		self:ClearActivityResultPresentation()
+
+		if self.ProgressRoot ~= nil then
+			self.ProgressRoot.Enable = true
+		end
+		if self.ProgressPanel ~= nil then
+			self.ProgressPanel.Enable = true
+		end
+		self:HideTriggeredEventWarning()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshProgressHeader()
+		-- 현재 표시 중인 주차와 요일 텍스트를 진행 캐시 기준으로 다시 그립니다.
+		if self.CurrentPresentationDay <= 0 then
+			return
+		end
+
+		self:SetEntityText(self.ProgressMonthWeekText, self:BuildMonthWeekText())
+		self:SetDaySlotsY(self.CurrentPresentationDay)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void InitializeDayPositionSlots()
+		-- UI에 수동으로 배치된 Monday/Tuesday의 Y값만 활성/비활성 기준으로 저장합니다.
+		self.DayActiveY = self:GetDayAnchoredPositionY(self.MondayDay)
+		self.DayInactiveY = self:GetDayAnchoredPositionY(self.TuesdayDay)
+		self.IsDayPositionInitialized = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetDayAnchoredPositionY(Entity dayEntity)
+		-- 요일 엔티티의 현재 anchoredPosition.y를 반환합니다.
+		if dayEntity == nil or dayEntity.UITransformComponent == nil then
+			return 0
+		end
+
+		local position = dayEntity.UITransformComponent.anchoredPosition
+		if position == nil then
+			return 0
+		end
+
+		return position.y
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetDaySlotsY(integer activeDay)
+		-- 각 요일의 X는 유지하고, 활성 요일은 Monday Y로 나머지는 Tuesday Y로 배치합니다.
+		if activeDay < 1 or activeDay > 5 then
+			return
+		end
+
+		if self.IsDayPositionInitialized == false then
+			self:InitializeDayPositionSlots()
+		end
+
+		self:SetDaySlotY(self.MondayDay, activeDay == 1)
+		self:SetDaySlotY(self.TuesdayDay, activeDay == 2)
+		self:SetDaySlotY(self.WednesdayDay, activeDay == 3)
+		self:SetDaySlotY(self.ThursdayDay, activeDay == 4)
+		self:SetDaySlotY(self.FridayDay, activeDay == 5)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetDaySlotY(Entity dayEntity, boolean isActive)
+		-- 요일 엔티티의 현재 X는 유지하고 활성 여부에 맞는 Y와 텍스트 표시 상태만 적용합니다.
+		if dayEntity == nil or dayEntity.UITransformComponent == nil then
+			return
+		end
+
+		self:SetDayTextVisible(dayEntity, isActive)
+
+		local position = dayEntity.UITransformComponent.anchoredPosition
+		if position == nil then
+			return
+		end
+
+		local targetY = self.DayInactiveY
+		if isActive == true then
+			targetY = self.DayActiveY
+		end
+
+		dayEntity.UITransformComponent.anchoredPosition = Vector2(position.x, targetY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetDayTextVisible(Entity dayEntity, boolean isVisible)
+		-- 요일 스프라이트 아래의 UIText 자식만 활성 요일 여부에 맞춰 보이거나 숨깁니다.
+		if dayEntity == nil then
+			return
+		end
+
+		local textEntity = dayEntity:GetChildByName("UIText", false)
+		if textEntity == nil then
+			return
+		end
+
+		textEntity:SetVisible(isVisible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteWeeklySequence(table weeklyTotals)
+		-- 주간 시퀀스 완료 후 UI를 닫고 결산 표시를 시작합니다.
+		self.IsPresenting = false
+		self:StopSequenceDayPresentationWait()
+		self:HideActivityVisuals()
+		self:ClearActivityResultPresentation()
+		self:HideTriggeredEventWarning()
+		self:SendUIVisibilityChangedEvent(false)
+		self:RestorePracticeCharacters()
+
+		if self.ProgressRoot ~= nil then
+			self.ProgressRoot.Enable = false
+		end
+
+		self:OpenWeeklySettlementDialog(weeklyTotals)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSettlementClose()
+		-- 결산 다이얼로그 종료 후 스케줄 진행 상태를 초기화합니다.
+		self.settlementDialogId = ""
+		if _WeeklySequenceScheduler ~= nil then
+			_WeeklySequenceScheduler:ResetSequence()
+		end
+		if _SettlementCardUILogic ~= nil then
+			_SettlementCardUILogic:Close()
+		end
+		self:ResetPresentation()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDialogClosed(any dialogClosedEvent)
+		-- 현재 스케줄 결산에서 연 다이얼로그가 닫혔을 때만 결산 종료 처리를 합니다.
+		if self.settlementDialogId == "" then
+			return
+		end
+
+		if dialogClosedEvent.dialogId ~= self.settlementDialogId then
+			return
+		end
+
+		self:OnSettlementClose()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetPresentation()
+		-- 발표 UI가 들고 있는 표시 상태만 초기화합니다.
+		self.CurrentPresentationDay = 0
+		self.PendingPresentationDay = 0
+		self.PendingPresentationSlot = nil
+		self:RestorePracticeCharacters()
+		self.IsPresenting = false
+		self.PanelAnimationState = 0
+		self.PanelAnimationElapsed = 0
+		self:StopSequenceDayPresentationWait()
+		if self.ProgressPanel ~= nil then
+			self.ProgressPanel.Enable = false
+		end
+		if self.ProgressRoot ~= nil then
+			self.ProgressRoot.Enable = false
+		end
+		self:SetEntityText(self.ProgressMessageText, "")
+		self:SetEntityRichText(self.ProgressStatDeltaText, "")
+		self:SetProgressPanelX(self.PanelCenterX)
+		self:HideActivityVisuals()
+		self:ClearActivityResultPresentation()
+		self:HideTriggeredEventWarning()
+		self:SetDaySlotsY(1)
+		self:SendUIVisibilityChangedEvent(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HidePracticeCharacters()
+		-- 스케줄 시퀀스 UI가 진행되는 동안 연습실 캐릭터들을 숨깁니다.
+		if self.IsPracticeCharactersHidden == true then
+			return
+		end
+
+		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath01, false)
+		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath02, false)
+		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath03, false)
+		self.IsPracticeCharactersHidden = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestorePracticeCharacters()
+		-- 스케줄 시퀀스 UI가 숨겼던 연습실 캐릭터들의 표시 상태를 복구합니다.
+		if self.IsPracticeCharactersHidden ~= true then
+			return
+		end
+
+		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath01, true)
+		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath02, true)
+		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath03, true)
+		self.IsPracticeCharactersHidden = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPracticeCharacterVisibleByPath(string entityPath, boolean isVisible)
+		-- 지정된 경로의 연습실 캐릭터 루트 엔티티 표시 상태를 변경합니다.
+		if entityPath == nil or entityPath == "" then
+			return
+		end
+
+		local characterEntity = _EntityService:GetEntityByPath(entityPath)
+		if characterEntity == nil then
+			return
+		end
+
+		characterEntity:SetVisible(isVisible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendUIVisibilityChangedEvent(boolean isOpen)
+		-- 주간 진행 발표 UI의 표시 상태를 알립니다.
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "scheduleProgress", isOpen)
+			return
+		end
+
+		local uiVisibilityChangedEvent = UIVisibilityChangedEvent()
+		uiVisibilityChangedEvent.uiId = "scheduleProgress"
+		uiVisibilityChangedEvent.isOpen = isOpen
+		self:SendEvent(uiVisibilityChangedEvent)
+	end
+
+	-- 활동 연출 표시 구역: activity type/training type에 맞는 이미지, 데코, 프레임, 포스트잇, 카메라 연출을 관리합니다.
+	@ExecSpace("ClientOnly")
+	method void RefreshActivityVisuals(any slot)
+		-- 현재 편성 슬롯의 활동 타입에 맞는 이미지, 프레임, 포스트잇을 표시합니다.
+		if slot ~= nil and slot.activityId ~= nil and slot.activityId ~= "" then
+			self:ShowActivityVisuals(slot.activityId, slot.characterId)
+			return
+		end
+
+		self:HideActivityVisuals()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActivityVisuals(string activityId, string characterId)
+		-- 활동 테이블의 type과 스탯 구성을 기준으로 이미지, 프레임, 포스트잇만 활성화합니다.
+		self:HideActivityVisuals()
+
+		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) or nil
+		if activity == nil then
+			log_warning("[ScheduleProgressUI] activity visual data not found activityId=" .. tostring(activityId))
+			return
+		end
+
+		local visualSet = self:GetActivityVisualSet(activity)
+		local activeImage = visualSet.image
+		local activeDeco = visualSet.deco
+		local activeFrame = visualSet.frame
+		local activePostit = visualSet.postit
+
+		if activeImage ~= nil then
+			self:SetActivityVisualEnable(activeImage, true)
+		end
+
+		if activeFrame ~= nil then
+			self:SetActivityVisualEnable(activeFrame, true)
+		end
+
+		if activePostit ~= nil then
+			self:SetActivityVisualEnable(activePostit, true)
+		end
+
+		if activeDeco ~= nil then
+			self:ApplyActivityDecoCharacterCostume(activeDeco, characterId)
+			self:SetActivityVisualEnable(activeDeco, true)
+			self:PlayActivityDecoCharacterAnimation(activeDeco)
+		end
+	end
+
+	-- 활동 연출 선택: ActivityTable의 type과 training type을 실제 UI 엔티티로 변환합니다.
+	@ExecSpace("ClientOnly")
+	method table GetActivityVisualSet(any activity)
+		-- 활동 row 하나에 대응되는 이미지, 데코, 프레임, 포스트잇 엔티티 묶음을 만듭니다.
+		local visualSet = {}
+		visualSet.image = nil
+		visualSet.deco = nil
+		visualSet.frame = nil
+		visualSet.postit = nil
+
+		if activity == nil then
+			return visualSet
+		end
+
+		visualSet.image = self:GetActivityImage(activity)
+		visualSet.deco = self:GetActivityDeco(activity)
+
+		local activityType = activity.type or ""
+		if activityType == "training" then
+			visualSet.frame = self.TrainingFrame
+			visualSet.postit = self.TrainingPostit
+		elseif activityType == "performance" then
+			visualSet.frame = self.PerformanceFrame
+			visualSet.postit = self.PerformancePostit
+		elseif activityType == "rest" then
+			visualSet.frame = self.RestFrame
+			visualSet.postit = self.RestPostit
+		end
+
+		return visualSet
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetActivityImage(any activity)
+		-- training 활동의 주 스탯에 맞는 ActivityImage 하위 엔티티를 반환합니다.
+		if activity == nil then
+			return nil
+		end
+
+		local animationKey = self:GetActivityAnimationKey(activity)
+		if animationKey == "vocal" then
+			return self.VocalActivityImage
+		elseif animationKey == "dance" then
+			return self.DanceActivityImage
+		elseif animationKey == "visual" then
+			return self.VisualActivityImage
+		elseif animationKey == "dessert" then
+			return self.DessertActivityImage
+		elseif animationKey == "nap" then
+			return self.NapActivityImage
+		elseif animationKey == "park" then
+			return self.ParkActivityImage
+		elseif animationKey == "busking" then
+			return self.BuskingActivityImage
+		elseif animationKey == "concert" then
+			return self.ConcertActivityImage
+		elseif animationKey == "m_live" or animationKey == "mlive" or animationKey == "mini_live" then
+			return self.MLiveActivityImage
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetActivityDeco(any activity)
+		-- training 활동의 주 스탯에 맞는 Deco/Training 하위 엔티티를 반환합니다.
+		if activity == nil then
+			return nil
+		end
+
+		local animationKey = self:GetActivityAnimationKey(activity)
+		if animationKey == "vocal" then
+			return self.VocalTrainingDeco
+		elseif animationKey == "dance" then
+			return self.DanceTrainingDeco
+		elseif animationKey == "visual" then
+			return self.VisualTrainingDeco
+		elseif animationKey == "dessert" then
+			return self.DessertActivityDeco
+		elseif animationKey == "nap" then
+			return self.NapActivityDeco
+		elseif animationKey == "park" then
+			return self.ParkActivityDeco
+		elseif animationKey == "busking" then
+			return self.BuskingActivityDeco
+		elseif animationKey == "concert" then
+			return self.ConcertActivityDeco
+		elseif animationKey == "m_live" or animationKey == "mlive" or animationKey == "mini_live" then
+			return self.MLiveActivityDeco
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetActivityAnimationKey(any activity)
+		-- ActivityTable의 animationKey를 우선 사용하고, training은 비어 있을 때 주 훈련 타입으로 보완합니다.
+		if activity == nil then
+			return ""
+		end
+
+		local animationKey = activity.animationKey or ""
+		return string.lower(animationKey)
+	end
+
+	-- Training 데코 캐릭터: 현재 활동 캐릭터의 코스튬과 아바타 애니메이션을 반영합니다.
+	@ExecSpace("ClientOnly")
+	method boolean ApplyActivityDecoCharacterCostume(Entity activityDeco, string characterId)
+		-- 활성화할 훈련 데코 아바타에 현재 진행 캐릭터의 코스튬을 즉시 반영합니다.
+		if activityDeco == nil or characterId == nil or characterId == "" then
+			return false
+		end
+
+		local avatarEntity = self:GetActivityDecoAvatarEntity(activityDeco)
+		if avatarEntity == nil then
+			return false
+		end
+
+		---@type CharacterCostumeApplierComponent
+		local costumeApplier = avatarEntity:GetComponent("script.CharacterCostumeApplierComponent")
+		if costumeApplier ~= nil then
+			costumeApplier.characterId = characterId
+		end
+
+		if _CharacterCostumeManager == nil then
+			log_warning("[ScheduleProgressUI] CharacterCostumeManager is nil")
+			return false
+		end
+
+		local costumeManager = avatarEntity.CostumeManagerComponent
+		if isvalid(costumeManager) == false then
+			log_warning("[ScheduleProgressUI] training deco CostumeManagerComponent is missing characterId=" .. tostring(characterId))
+			return false
+		end
+
+		local tExplicitOverride = self:GetCostumeOverride(avatarEntity, costumeManager)
+		local isApplied = _CharacterCostumeManager:ClientApplyCurrentCostumeToManagerComponent(characterId, costumeManager)
+		if isApplied == false then
+			return false
+		end
+
+		self:ApplyCostumeOverride(costumeManager, tExplicitOverride)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetActivityDecoAvatarEntity(Entity activityDeco)
+		-- Training Deco 아래의 Character 아바타 엔티티를 반환합니다.
+		if activityDeco == nil then
+			return nil
+		end
+
+		local avatarEntity = activityDeco:GetChildByName("Character", false)
+		if avatarEntity == nil then
+			avatarEntity = activityDeco:GetChildByName("Chracter", false)
+		end
+
+		return avatarEntity
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean PlayActivityDecoCharacterAnimation(Entity activityDeco)
+		-- 활성화된 Training Deco Character의 인스펙터 설정 애니메이션을 재생합니다.
+		local avatarEntity = self:GetActivityDecoAvatarEntity(activityDeco)
+		if avatarEntity == nil then
+			return false
+		end
+
+		local animationComponent = avatarEntity:GetComponent("script.ActivityDecoAvatarControlComponent")
+		if animationComponent == nil then
+			return false
+		end
+
+		return animationComponent:PlayConfiguredAnimation()
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetCostumeOverride(Entity avatarEntity, CostumeManagerComponent costumeManager)
+		-- UI Character 엔티티에 직접 지정된 코스튬 슬롯만 최초 1회 캐시합니다.
+		if self.tActivityDecoCharacterCostumeOverridesByEntityId == nil then
+			self.tActivityDecoCharacterCostumeOverridesByEntityId = {}
+		end
+
+		local entityId = avatarEntity ~= nil and avatarEntity.Id or ""
+		if entityId == "" then
+			return self:BuildCostumeOverride(costumeManager)
+		end
+
+		local tOverride = self.tActivityDecoCharacterCostumeOverridesByEntityId[entityId]
+		if tOverride ~= nil then
+			return tOverride
+		end
+
+		tOverride = self:BuildCostumeOverride(costumeManager)
+		self.tActivityDecoCharacterCostumeOverridesByEntityId[entityId] = tOverride
+		return tOverride
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildCostumeOverride(CostumeManagerComponent costumeManager)
+		-- UI에 명시된 Custom*Equip 값 중 비어 있지 않은 슬롯만 오버라이드 목록으로 만듭니다.
+		local tOverride = {}
+		if isvalid(costumeManager) == false then
+			return tOverride
+		end
+
+		self:PutCostumeOverrideValue(tOverride, "body", costumeManager.CustomBodyEquip)
+		self:PutCostumeOverrideValue(tOverride, "hair", costumeManager.CustomHairEquip)
+		self:PutCostumeOverrideValue(tOverride, "face", costumeManager.CustomFaceEquip)
+		self:PutCostumeOverrideValue(tOverride, "cap", costumeManager.CustomCapEquip)
+		self:PutCostumeOverrideValue(tOverride, "cape", costumeManager.CustomCapeEquip)
+		self:PutCostumeOverrideValue(tOverride, "coat", costumeManager.CustomCoatEquip)
+		self:PutCostumeOverrideValue(tOverride, "longcoat", costumeManager.CustomLongcoatEquip)
+		self:PutCostumeOverrideValue(tOverride, "pants", costumeManager.CustomPantsEquip)
+		self:PutCostumeOverrideValue(tOverride, "glove", costumeManager.CustomGloveEquip)
+		self:PutCostumeOverrideValue(tOverride, "shoes", costumeManager.CustomShoesEquip)
+		self:PutCostumeOverrideValue(tOverride, "oneHandedWeapon", costumeManager.CustomOneHandedWeaponEquip)
+		self:PutCostumeOverrideValue(tOverride, "twoHandedWeapon", costumeManager.CustomTwoHandedWeaponEquip)
+		self:PutCostumeOverrideValue(tOverride, "subWeapon", costumeManager.CustomSubWeaponEquip)
+		self:PutCostumeOverrideValue(tOverride, "faceAccessory", costumeManager.CustomFaceAccessoryEquip)
+		self:PutCostumeOverrideValue(tOverride, "eyeAccessory", costumeManager.CustomEyeAccessoryEquip)
+		self:PutCostumeOverrideValue(tOverride, "earAccessory", costumeManager.CustomEarAccessoryEquip)
+		self:PutCostumeOverrideValue(tOverride, "ear", costumeManager.CustomEarEquip)
+		return tOverride
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PutCostumeOverrideValue(table tOverride, string key, string ruid)
+		-- 빈 슬롯은 기본 캐릭터 코스튬을 유지해야 하므로 오버라이드하지 않습니다.
+		if tOverride == nil or key == nil or key == "" or ruid == nil or ruid == "" then
+			return
+		end
+
+		tOverride[key] = ruid
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumeOverride(CostumeManagerComponent costumeManager, table tOverride)
+		-- 현재 카드 캐릭터 코스튬 위에 UI Character가 명시한 슬롯만 다시 입힙니다.
+		if isvalid(costumeManager) == false or tOverride == nil then
+			return
+		end
+
+		if tOverride.body ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Body, tOverride.body) end
+		if tOverride.hair ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Hair, tOverride.hair) end
+		if tOverride.face ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Face, tOverride.face) end
+		if tOverride.cap ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Cap, tOverride.cap) end
+		if tOverride.cape ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Cape, tOverride.cape) end
+		if tOverride.coat ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Coat, tOverride.coat) end
+		if tOverride.longcoat ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Longcoat, tOverride.longcoat) end
+		if tOverride.pants ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Pants, tOverride.pants) end
+		if tOverride.glove ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Glove, tOverride.glove) end
+		if tOverride.shoes ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Shoes, tOverride.shoes) end
+		if tOverride.oneHandedWeapon ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.OneHandedWeapon, tOverride.oneHandedWeapon) end
+		if tOverride.twoHandedWeapon ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.TwoHandedWeapon, tOverride.twoHandedWeapon) end
+		if tOverride.subWeapon ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.SubWeapon, tOverride.subWeapon) end
+		if tOverride.faceAccessory ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.FaceAccessory, tOverride.faceAccessory) end
+		if tOverride.eyeAccessory ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.EyeAccessory, tOverride.eyeAccessory) end
+		if tOverride.earAccessory ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.EarAccessory, tOverride.earAccessory) end
+		if tOverride.ear ~= nil then costumeManager:SetEquip(MapleAvatarItemCategory.Ear, tOverride.ear) end
+	end
+
+	-- 활동 연출 표시 상태: 선택되지 않은 활동 UI 묶음을 숨기고 선택된 묶음만 표시합니다.
+	@ExecSpace("ClientOnly")
+	method Entity GetActivityFrame(any activity)
+		-- activity type에 맞는 Frame 하위 엔티티를 반환합니다.
+		if activity == nil then
+			return nil
+		end
+
+		local activityType = activity.type or ""
+		if activityType == "training" then
+			return self.TrainingFrame
+		elseif activityType == "performance" then
+			return self.PerformanceFrame
+		elseif activityType == "rest" then
+			return self.RestFrame
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetActivityPostit(any activity)
+		-- activity type에 맞는 Postit 하위 엔티티를 반환합니다.
+		if activity == nil then
+			return nil
+		end
+
+		local activityType = activity.type or ""
+		if activityType == "training" then
+			return self.TrainingPostit
+		elseif activityType == "performance" then
+			return self.PerformancePostit
+		elseif activityType == "rest" then
+			return self.RestPostit
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideActivityVisuals()
+		-- 활동 연출용 ActivityImage, Frame, Postit 엔티티를 모두 비활성화합니다.
+		self:SetActivityVisualEnable(self.VocalActivityImage, false)
+		self:SetActivityVisualEnable(self.DanceActivityImage, false)
+		self:SetActivityVisualEnable(self.VisualActivityImage, false)
+		self:SetActivityVisualEnable(self.DessertActivityImage, false)
+		self:SetActivityVisualEnable(self.NapActivityImage, false)
+		self:SetActivityVisualEnable(self.ParkActivityImage, false)
+		self:SetActivityVisualEnable(self.BuskingActivityImage, false)
+		self:SetActivityVisualEnable(self.ConcertActivityImage, false)
+		self:SetActivityVisualEnable(self.MLiveActivityImage, false)
+		self:SetActivityVisualEnable(self.VocalTrainingDeco, false)
+		self:SetActivityVisualEnable(self.DanceTrainingDeco, false)
+		self:SetActivityVisualEnable(self.VisualTrainingDeco, false)
+		self:SetActivityVisualEnable(self.DessertActivityDeco, false)
+		self:SetActivityVisualEnable(self.NapActivityDeco, false)
+		self:SetActivityVisualEnable(self.ParkActivityDeco, false)
+		self:SetActivityVisualEnable(self.BuskingActivityDeco, false)
+		self:SetActivityVisualEnable(self.ConcertActivityDeco, false)
+		self:SetActivityVisualEnable(self.MLiveActivityDeco, false)
+		self:SetActivityVisualEnable(self.TrainingFrame, false)
+		self:SetActivityVisualEnable(self.PerformanceFrame, false)
+		self:SetActivityVisualEnable(self.RestFrame, false)
+		self:SetActivityVisualEnable(self.TrainingPostit, false)
+		self:SetActivityVisualEnable(self.PerformancePostit, false)
+		self:SetActivityVisualEnable(self.RestPostit, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetActivityVisualEnable(Entity visualEntity, boolean isEnabled)
+		-- 활동 연출 엔티티와 렌더러 표시 상태를 함께 맞춥니다.
+		if visualEntity == nil then
+			return
+		end
+
+		visualEntity.Enable = isEnabled
+		visualEntity:SetVisible(isEnabled)
+
+		if visualEntity.SpriteGUIRendererComponent ~= nil then
+			visualEntity.SpriteGUIRendererComponent.Enable = isEnabled
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void QueueActivityResultPresentation(integer day, any activityResult)
+		-- 서버 활동 적용 결과를 하루 연출 막바지에 한 번 표시할 수 있도록 보관합니다.
+		self.PendingActivityResultPresentationDay = day
+		self.PendingActivityResultPresentation = activityResult
+		self.IsActivityResultPresentationShown = false
+		self:HideActivityResultPresentation()
+		self:TryShowActivityResultPresentation()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TryShowActivityResultPresentation()
+		-- 하루 연출 종료 1초 전부터 성공/실패 결과 이미지를 한 번만 표시합니다.
+		if self.IsActivityResultPresentationShown == true then
+			return
+		end
+
+		if self.PendingActivityResultPresentation == nil then
+			return
+		end
+
+		if self.IsSequenceDayPresentationWaiting ~= true then
+			return
+		end
+
+		if self.PendingActivityResultPresentationDay ~= self.SequenceDayPresentationWaitDay then
+			return
+		end
+
+		local showTime = self.SequenceDayPresentationDuration - self.ActivityResultPresentationLeadTime
+		if showTime < 0 then
+			showTime = 0
+		end
+
+		if self.SequenceDayPresentationElapsed < showTime then
+			return
+		end
+
+		self:ShowActivityResultPresentation(self.PendingActivityResultPresentation)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActivityResultPresentation(any activityResult)
+		-- activityResult.failed 값에 따라 Success 또는 Fail 엔티티를 표시합니다.
+		local isFailed = activityResult ~= nil and activityResult.failed == true
+		self:SetActivityResultPresentationEnable(self.ActivitySuccessEntity, isFailed ~= true)
+		self:SetActivityResultPresentationEnable(self.ActivityFailEntity, isFailed == true)
+		if _SoundManager ~= nil then
+			if isFailed == true then
+				_SoundManager:PlayScheduleActivityFailSfx()
+			else
+				_SoundManager:PlayScheduleActivitySuccessSfx()
+			end
+		end
+		self.IsActivityResultPresentationShown = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideActivityResultPresentation()
+		-- 성공/실패 결과 이미지를 숨깁니다.
+		self:SetActivityResultPresentationEnable(self.ActivitySuccessEntity, false)
+		self:SetActivityResultPresentationEnable(self.ActivityFailEntity, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareActivityResultPresentationForDay(integer day)
+		-- 패널 전환 중 먼저 도착한 같은 날짜 결과는 보존하고 표시 상태만 초기화합니다.
+		if self.PendingActivityResultPresentationDay ~= day then
+			self.PendingActivityResultPresentationDay = 0
+			self.PendingActivityResultPresentation = nil
+		end
+
+		self.IsActivityResultPresentationShown = false
+		self:HideActivityResultPresentation()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearActivityResultPresentation()
+		-- 하루 활동 결과 표시 상태를 초기화합니다.
+		self.PendingActivityResultPresentationDay = 0
+		self.PendingActivityResultPresentation = nil
+		self.IsActivityResultPresentationShown = false
+		self:HideActivityResultPresentation()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetActivityResultPresentationEnable(Entity resultEntity, boolean isEnabled)
+		-- 성공/실패 결과 스프라이트의 표시 상태를 바꾸고, 켤 때는 리소스를 다시 바인딩해 첫 프레임부터 재생되도록 초기화합니다.
+		if resultEntity == nil then
+			return
+		end
+
+		resultEntity.Enable = isEnabled
+		resultEntity:SetVisible(isEnabled)
+
+		local renderer = resultEntity.SpriteGUIRendererComponent
+		if renderer ~= nil then
+			if isEnabled ~= true then
+				renderer.Enable = false
+				return
+			end
+
+			local imageRuid = renderer.ImageRUID
+			local imageDataId = ""
+			if imageRuid ~= nil and imageRuid.DataId ~= nil then
+				imageDataId = imageRuid.DataId
+			end
+
+			renderer.Enable = false
+			renderer.ImageRUID = DataRef("")
+			renderer.StartFrameIndex = 0
+			if imageDataId ~= "" then
+				renderer.ImageRUID = DataRef(imageDataId)
+			end
+			renderer.Enable = true
+		end
+	end
+
+	-- 돌발 이벤트 Warning 표시 구역: 돌발 이벤트 실행 전 1초성 경고 표시를 담당합니다.
+	@ExecSpace("ClientOnly")
+	method boolean PlayTriggeredEventWarning(integer day)
+		-- 돌발 이벤트 실행 전 Warning을 1초 동안 표시합니다.
+		if isvalid(self.WarningEntity) ~= true or _TimerService == nil then
+			return false
+		end
+
+		self:ClearTriggeredEventWarningTimer()
+		self.WarningEntity.Enable = true
+		self.WarningEntity:SetVisible(true)
+		self.WarningDisplayTimerId = _TimerService:SetTimerOnce(function()
+			self:OnTriggeredEventWarningTimer(day)
+		end, self.WarningDisplayDuration)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTriggeredEventWarningTimer(integer day)
+		-- Warning 표시 타이머가 끝나면 숨기고 스케줄러에 돌발 이벤트 실행 가능 상태를 알립니다.
+		self.WarningDisplayTimerId = 0
+		self:HideTriggeredEventWarning()
+		if _WeeklySequenceScheduler ~= nil then
+			_WeeklySequenceScheduler:OnTriggeredEventWarningEnd(day)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideTriggeredEventWarning()
+		-- Warning 표시 상태를 초기화하고 엔티티를 숨깁니다.
+		self:ClearTriggeredEventWarningTimer()
+		if isvalid(self.WarningEntity) == true then
+			self.WarningEntity:SetVisible(false)
+			self.WarningEntity.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearTriggeredEventWarningTimer()
+		-- 대기 중인 Warning 표시 타이머를 정리합니다.
+		if self.WarningDisplayTimerId > 0 and _TimerService ~= nil then
+			_TimerService:ClearTimer(self.WarningDisplayTimerId)
+		end
+
+		self.WarningDisplayTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartSequenceDayPresentationWait(integer day)
+		-- 하루 연출 시간이 끝난 뒤 스케줄러에 진행 가능 여부를 물어보기 위한 대기를 시작합니다.
+		self.IsSequenceDayPresentationWaiting = true
+		self.SequenceDayPresentationWaitDay = day
+		self.SequenceDayPresentationElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopSequenceDayPresentationWait()
+		-- 하루 연출 종료 대기 상태를 끕니다.
+		self.IsSequenceDayPresentationWaiting = false
+		self.SequenceDayPresentationWaitDay = 0
+		self.SequenceDayPresentationElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateSequenceDayPresentation(number delta)
+		-- 하루 연출 시간이 끝났으면 스케줄러에 다음 흐름으로 넘어갈 수 있는지 폴링.
+		if self.IsSequenceDayPresentationWaiting ~= true then
+			return
+		end
+
+		if self.IsPresenting ~= true then
+			self:StopSequenceDayPresentationWait()
+			return
+		end
+
+		if self.PanelAnimationState ~= 0 then
+			return
+		end
+
+		self.SequenceDayPresentationElapsed = self.SequenceDayPresentationElapsed + delta
+		self:TryShowActivityResultPresentation()
+		if self.SequenceDayPresentationElapsed < self.SequenceDayPresentationDuration then
+			return
+		end
+
+		self:HideActivityResultPresentation()
+		if _WeeklySequenceScheduler == nil then
+			return
+		end
+
+		local waitDay = self.SequenceDayPresentationWaitDay
+		local isHandled = _WeeklySequenceScheduler:OnSequenceDayPresentationEnd(waitDay)
+		if isHandled == true and self.SequenceDayPresentationWaitDay == waitDay then
+			self:StopSequenceDayPresentationWait()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdatePanelAnimation(number delta)
+		if self.PanelAnimationState == 0 or self.ProgressPanel == nil then
+			return
+		end
+		
+		self.PanelAnimationElapsed = self.PanelAnimationElapsed + delta
+		local ratio = self.PanelAnimationElapsed / self.PanelAnimationDuration
+		if ratio > 1 then
+			ratio = 1
+		end
+		local eased = ratio * ratio * (3 - 2 * ratio)
+		
+		if self.PanelAnimationState == 1 then
+			self:SetProgressPanelX(self.PanelCenterX + (self.PanelOffscreenLeftX - self.PanelCenterX) * eased)
+			if ratio >= 1 then
+				self:SetProgressPanelX(self.PanelOffscreenRightX)
+				local pendingDay = self.PendingPresentationDay
+				local pendingSlot = self.PendingPresentationSlot
+				self:ApplyDayContent(pendingDay, pendingSlot)
+				self.PendingPresentationDay = 0
+				self.PendingPresentationSlot = nil
+				self.PanelAnimationState = 2
+				self.PanelAnimationElapsed = 0
+			end
+		elseif self.PanelAnimationState == 2 then
+			self:SetProgressPanelX(self.PanelOffscreenRightX + (self.PanelCenterX - self.PanelOffscreenRightX) * eased)
+			if ratio >= 1 then
+				self:SetProgressPanelX(self.PanelCenterX)
+				self.PanelAnimationState = 0
+				self.PanelAnimationElapsed = 0
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetProgressPanelX(number x)
+		-- 패널 애니메이션 중 X만 갱신하고 에디터에서 잡아둔 Y 위치는 유지합니다.
+		if self.ProgressPanel ~= nil and self.ProgressPanel.UITransformComponent ~= nil then
+			local position = self.ProgressPanel.UITransformComponent.anchoredPosition
+			local y = 0
+			if position ~= nil then
+				y = position.y
+			end
+
+			self.ProgressPanel.UITransformComponent.anchoredPosition = Vector2(x, y)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildActivityMessageForSlot(any slot)
+		-- 현재 편성 슬롯에 표시할 진행 메시지를 만듭니다.
+		if slot == nil then
+			return ""
+		end
+
+		local activityId = slot.activityId
+		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) or nil
+		if activity == nil then
+			return tostring(activityId) .. " 활동 데이터를 찾을 수 없습니다."
+		end
+
+		local activityName = activity.description or ""
+		if activityName == "" then
+			activityName = activity.name or ""
+		end
+
+		if activityName == "" then
+			activityName = tostring(activityId)
+		end
+
+		local richActivityName = self:BuildActivityNameRichText(activityName, activity.nameColor or "")
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:Format(self.UI_ACTIVITY_COMPLETED_KEY, "{value1}을 진행했습니다.", richActivityName, nil, nil, "")
+		end
+
+		return richActivityName .. "을 진행했습니다."
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildActivityNameRichText(string activityName, string nameColor)
+		-- 활동 이름에만 ActivityTable의 nameColor를 적용한 리치 텍스트를 만듭니다.
+		local safeName = activityName or ""
+		if nameColor == nil or nameColor == "" then
+			return safeName
+		end
+
+		return "<color=" .. nameColor .. ">" .. safeName .. "</color>"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildStatDeltaTextForSlot(any slot)
+		-- 현재 편성 슬롯에 표시할 스탯 변화 문자열을 만듭니다.
+		if slot == nil then
+			return ""
+		end
+
+		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(slot.activityId) or nil
+		if activity == nil then
+			return ""
+		end
+
+		return self:BuildStatChangeText(activity, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSettlementPortraitOverrideResourceId(string characterId)
+		-- 주간 결산 캐릭터 ID에 대응하는 전신 미소 초상화 리소스 ID를 반환합니다.
+		if characterId == "character_lucid" then
+			return "portrait_lucid_fullbody_smile"
+		elseif characterId == "character_lilin" then
+			return "portrait_lilin_fullbody_smile"
+		elseif characterId == "character_cygnus" then
+			return "portrait_cygnus_fullbody_smile"
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenWeeklySettlementDialog(table weeklyTotals)
+		-- 주간 결산용 다이얼로그 ID를 선택하고 결산 캐릭터를 바인딩해 엽니다.
+		if _SoundManager ~= nil then
+			_SoundManager:RestoreBGMAfterWeeklySchedule()
+		end
+
+		if weeklyTotals == nil or #weeklyTotals <= 0 then
+			self:OnSettlementClose()
+			return
+		end
+
+		-- 주스탯(현재 공연/목표 weight 기준)과, 주스탯 상승폭이 가장 높은 캐릭터를 발화자로 결정
+		local mainStatKey = self:ResolveCurrentMainStatKey()
+		local speakerIndex = self:ResolveSettlementSpeakerIndex(weeklyTotals, mainStatKey)
+		local speakerTotal = weeklyTotals[speakerIndex]
+		local speakerCharacterId = speakerTotal.characterId or ""
+
+		-- 진행도 %(현재 팀 주스탯 점수 / 15000) → 구간 → result_main_{주스탯}_{구간} 대화 id
+		local progressPercent = self:ComputeSettlementMainStatProgress(weeklyTotals, mainStatKey)
+		local zone = self:ResolveSettlementZone(progressPercent)
+		local dialogId = "result_main_" .. mainStatKey .. "_" .. zone
+		local settlementCards = self:BuildSettlementCards(weeklyTotals)
+
+		log("[ScheduleProgressUI] 정산 대화 mainStat=" .. mainStatKey
+			.. " progress=" .. tostring(math.floor(progressPercent)) .. "%"
+			.. " zone=" .. zone .. " speaker=" .. speakerCharacterId .. " dialogId=" .. dialogId)
+
+		if _SettlementCardUILogic ~= nil then
+			_SettlementCardUILogic:Open(settlementCards)
+		end
+
+		if _DialogUILogic ~= nil then
+			self.settlementDialogId = dialogId
+			-- 결산 화자를 옵션의 액터 바인딩으로 전달합니다.
+			local options = DialogOpenOptions()
+			options.dialogId = dialogId or ""
+			options.useActorBinding = true
+			options.speakerActorId = speakerCharacterId
+			options.leftActorId = speakerCharacterId
+			options.leftOverrideResourceId = self:GetSettlementPortraitOverrideResourceId(speakerCharacterId)
+			_DialogUILogic:Open(options)
+			return
+		end
+
+		log_warning("[ScheduleProgressUI] settlement dialog open failed")
+		self.settlementDialogId = ""
+		self:OnSettlementClose()
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildSettlementCards(table weeklyTotals)
+		-- 주간 결산 합산값을 카드 UI가 표시할 데이터 목록으로 변환합니다.
+		local settlementCards = {}
+
+		if weeklyTotals == nil then
+			return settlementCards
+		end
+
+		for index, total in ipairs(weeklyTotals) do
+			if index > 3 then
+				break
+			end
+
+			settlementCards[index] = {
+				characterId = total.characterId,
+				vocal = total.vocal,
+				dance = total.dance,
+				visual = total.visual,
+				fandom = total.fandom,
+				fatigue = total.fatigue
+			}
+		end
+
+		return settlementCards
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasSettlementCardStatChange(any total)
+		-- 정산 카드에 표시하는 스탯 중 실제 변화량이 하나라도 있는지 확인합니다.
+		if total == nil then
+			return false
+		end
+
+		return (total.vocal or 0) ~= 0
+			or (total.dance or 0) ~= 0
+			or (total.visual or 0) ~= 0
+			or (total.fandom or 0) ~= 0
+			or (total.fatigue or 0) ~= 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSettlementDialogId(any total)
+		-- 주간 스탯 합산값에서 가장 대표적인 결산 다이얼로그 ID를 반환합니다.
+		-- TODO 조건식 변경
+		if total == nil then
+			return "result_default"
+		end
+
+		local vocal = total.vocal or 0
+		local dance = total.dance or 0
+		local visual = total.visual or 0
+		local fatigue = total.fatigue or 0
+
+		if vocal <= 0 and dance <= 0 and visual <= 0 then
+			if fatigue ~= 0 then
+				return "result_fatigue"
+			end
+
+			return "result_default"
+		end
+
+		if vocal >= dance and vocal >= visual then
+			return "result_vocal"
+		elseif dance >= vocal and dance >= visual then
+			return "result_dance"
+		end
+
+		return "result_visual"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveCurrentMainStatKey()
+		-- 현재 진행 중인 공연/목표의 주스탯(vocal/dance/visual)을 반환. weight 최고값, 동점이면 보컬>댄스>비주얼
+		local vocalWeight = 1
+		local danceWeight = 1
+		local visualWeight = 1
+
+		local perfId = ""
+		if _ProgressManager ~= nil then
+			local progress = _ProgressManager:ClientGetProgress()
+			if progress ~= nil then
+				perfId = progress.gameGoalId or ""
+			end
+		end
+
+		if perfId ~= "" and _PerformanceMaster ~= nil then
+			-- tHeader: PerformanceRow
+			local tHeader = _PerformanceMaster:GetPerformance(perfId)
+			if tHeader ~= nil then
+				vocalWeight = tHeader.vocalWeight
+				danceWeight = tHeader.danceWeight
+				visualWeight = tHeader.visualWeight
+			end
+		end
+
+		local mainKey = "vocal"
+		local mainWeight = vocalWeight
+		if danceWeight > mainWeight then
+			mainKey = "dance"
+			mainWeight = danceWeight
+		end
+		if visualWeight > mainWeight then
+			mainKey = "visual"
+			mainWeight = visualWeight
+		end
+		return mainKey
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer ResolveSettlementSpeakerIndex(table weeklyTotals, string mainStatKey)
+		-- 주스탯 상승폭(주간 delta)이 가장 높은 캐릭터의 인덱스를 반환. 동점이면 앞 순서 우선
+		local bestIndex = 1
+		local bestGrowth = nil
+		for index, total in ipairs(weeklyTotals) do
+			local growth = self:GetStatDeltaByKey(total, mainStatKey)
+			if bestGrowth == nil or growth > bestGrowth then
+				bestGrowth = growth
+				bestIndex = index
+			end
+		end
+		return bestIndex
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetStatDeltaByKey(any total, string statKey)
+		-- 주간 스탯 상승폭(정산 카드 delta)에서 지정 스탯 값을 반환
+		if total == nil then
+			return 0
+		end
+		if statKey == "vocal" then return total.vocal or 0 end
+		if statKey == "dance" then return total.dance or 0 end
+		if statKey == "visual" then return total.visual or 0 end
+		return 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method number ComputeSettlementMainStatProgress(table weeklyTotals, string mainStatKey)
+		-- 정산 캐릭터(최대 3인)의 현재 주스탯을 공연 공식(센터×1.4)으로 계산해 15000 대비 진행도 %를 반환.
+		-- 센터가 누구인지 알 수 없으므로 주스탯 현재값이 가장 높은 캐릭터를 센터로 간주.
+		-- 계산식 SSOT: PerformanceResultManager.ComputeStatScore (centerStatWeight=1.4, mainStatMultiplier=10, mainStatMax=15000)
+		local values = {}
+		for index, total in ipairs(weeklyTotals) do
+			if index > 3 then
+				break
+			end
+			table.insert(values, self:GetCurrentStatByKey(total.characterId or "", mainStatKey))
+		end
+
+		if #values <= 0 then
+			return 0
+		end
+
+		-- 센터 = 주스탯 현재값 최고
+		local centerValue = -1
+		local centerIndex = 1
+		for index, value in ipairs(values) do
+			if value > centerValue then
+				centerValue = value
+				centerIndex = index
+			end
+		end
+
+		local sumOthers = 0
+		for index, value in ipairs(values) do
+			if index ~= centerIndex then
+				sumOthers = sumOthers + value
+			end
+		end
+
+		local teamStat = (centerValue * 1.4 + sumOthers) / 3.4
+		local mainStatScore = teamStat * 10
+		if mainStatScore > 15000 then
+			mainStatScore = 15000
+		end
+		if mainStatScore < 0 then
+			mainStatScore = 0
+		end
+
+		return mainStatScore / 15000 * 100
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCurrentStatByKey(string characterId, string statKey)
+		-- 캐릭터의 현재 스탯 값(vocal/dance/visual)을 클라 캐시에서 조회
+		if characterId == nil or characterId == "" or _CharacterManager == nil then
+			return 0
+		end
+
+		local tCharacter = _CharacterManager:ClientGetCharacterById(characterId)
+		if tCharacter == nil then
+			return 0
+		end
+
+		if statKey == "vocal" then return tCharacter.vocal or 0 end
+		if statKey == "dance" then return tCharacter.dance or 0 end
+		if statKey == "visual" then return tCharacter.visual or 0 end
+		return 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveSettlementZone(number progressPercent)
+		-- 진행도 % → 구간 문자열. 0~50 위험(risky) / 51~80 보통(normal) / 81~90 안정권(safe). 90 초과도 안정권
+		local percent = math.floor(progressPercent)
+		if percent <= 50 then
+			return "risky"
+		end
+		if percent <= 80 then
+			return "normal"
+		end
+		return "safe"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildMonthWeekText()
+		-- ProgressManager의 현재 월/주차를 주간 활동 헤더 문자열로 만듭니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		local month = progress ~= nil and progress.currentMonth or 1
+		local week = progress ~= nil and progress.currentWeek or 1
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:Format(self.UI_MONTH_WEEK_ACTIVITY_KEY, "{value1}월 {value2}주차 주간 활동", month, week, nil, "")
+		end
+
+		return tostring(month) .. "월 " .. tostring(week) .. "주차 주간 활동"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildStatChangeText(any changes, boolean onlyChangedStats)
+		-- 스탯 이름은 텍스트로 유지하고 수치에만 색을 입힌 변화량 문자열을 만듭니다.
+		return _ScheduleStatTextUtil:BuildStatChangeTextRichText(changes, onlyChangedStats, "\n")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityText(Entity entity, string value)
+		if entity == nil then
+			return
+		end
+		if entity.TextComponent ~= nil then
+			entity.TextComponent.Text = value
+		elseif entity.TextGUIRendererComponent ~= nil then
+			entity.TextGUIRendererComponent.Text = value
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityRichText(Entity entity, string value)
+		-- 지정한 텍스트 엔티티에 스케줄 스탯 리치 텍스트 설정과 문자열을 함께 적용합니다.
+		if entity == nil then
+			return
+		end
+
+		if entity.TextComponent ~= nil then
+			entity.TextComponent.IsRichText = true
+			entity.TextComponent.Text = value
+		elseif entity.TextGUIRendererComponent ~= nil then
+			entity.TextGUIRendererComponent.IsRichText = true
+			entity.TextGUIRendererComponent.Text = value
+		end
+	end
+end

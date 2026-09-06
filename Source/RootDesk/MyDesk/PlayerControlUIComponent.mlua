@@ -1,0 +1,27 @@
+@Component
+script PlayerControlUIComponent extends Component
+
+	property Entity playerControlUIGroup = "091380c6-12ee-42c5-9d99-4ce741334f93"
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:SetControlsEnabled(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		self:SetControlsEnabled(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetControlsEnabled(boolean isEnabled)
+		-- 조작 UI 활성 상태 변경
+		if self.playerControlUIGroup == nil then
+			log("[PlayerControlUIComponent] UI를 찾을 수 없음")
+			return
+		end
+
+		self.playerControlUIGroup.Enable = isEnabled
+	end
+
+end

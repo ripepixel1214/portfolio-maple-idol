@@ -1,0 +1,162 @@
+@Logic
+@ExecSpace("ClientOnly")
+script OutdoorMapTransitionUILogic extends Logic
+
+	property Entity root = "18b008f7-e860-4a5c-b684-3b35fc37bb33"
+
+	property UITransformComponent panelTransform = "78743ffc-7116-4b21-94f6-9c89f01fc511"
+
+	property ButtonComponent destinationButton = "be6a2802-a5b3-4b9c-8cae-757c5aee91df"
+
+	property TextGUIRendererComponent destinationButtonText = "be6a2802-a5b3-4b9c-8cae-757c5aee91df"
+
+	property UITransformComponent destinationButtonTransform = "be6a2802-a5b3-4b9c-8cae-757c5aee91df"
+
+	property ButtonComponent destinationButton2 = "edeb4815-6a26-4051-983e-1ca611a4363c"
+
+	property TextGUIRendererComponent destinationButtonText2 = "edeb4815-6a26-4051-983e-1ca611a4363c"
+
+	property UITransformComponent destinationButtonTransform2 = "edeb4815-6a26-4051-983e-1ca611a4363c"
+
+	property Entity emptyText = "f68aac0a-1535-43cc-821e-5976eb189fdf"
+
+	property ButtonComponent closeButton = "df7a4212-e54e-4d97-bf43-57547d96b414"
+
+	property string selectedMapName = ""
+
+	property string selectedMapName2 = ""
+
+	property string UI_ID = "outdoorMapTransition"
+
+	property number PANEL_BASE_HEIGHT = 400
+
+	property number DESTINATION_ROW_HEIGHT = 110
+
+	property any destinationClickHandler = nil
+
+	property any destinationClickHandler2 = nil
+
+	property any closeClickHandler = nil
+
+	method void OnBeginPlay()
+		-- 이동 버튼 연결과 초기 닫힘 상태 적용
+		if self.destinationButton ~= nil and self.destinationButton.Entity ~= nil then
+			self.destinationClickHandler = self.destinationButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDestinationClicked)
+		end
+		if self.destinationButton2 ~= nil and self.destinationButton2.Entity ~= nil then
+			self.destinationClickHandler2 = self.destinationButton2.Entity:ConnectEvent(ButtonClickEvent, self.OnDestination2Clicked)
+		end
+		if self.closeButton ~= nil and self.closeButton.Entity ~= nil then
+			self.closeClickHandler = self.closeButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCloseClicked)
+		end
+		self:SetVisible(false)
+	end
+
+	method void OnEndPlay()
+		-- UI 버튼 연결 해제
+		if self.destinationClickHandler ~= nil and self.destinationButton ~= nil and self.destinationButton.Entity ~= nil then
+			self.destinationButton.Entity:DisconnectEvent(ButtonClickEvent, self.destinationClickHandler)
+		end
+		if self.destinationClickHandler2 ~= nil and self.destinationButton2 ~= nil and self.destinationButton2.Entity ~= nil then
+			self.destinationButton2.Entity:DisconnectEvent(ButtonClickEvent, self.destinationClickHandler2)
+		end
+		if self.closeClickHandler ~= nil and self.closeButton ~= nil and self.closeButton.Entity ~= nil then
+			self.closeButton.Entity:DisconnectEvent(ButtonClickEvent, self.closeClickHandler)
+		end
+	end
+
+	method void Open()
+		-- 현재 맵에서 이동 가능한 외출 맵 표시
+		if self.root == nil or _OutdoorMapTransitionLogic == nil then
+			return
+		end
+
+		local player = _UserService.LocalPlayer
+		local currentMapName = player ~= nil and player.CurrentMap ~= nil and player.CurrentMap.Name or ""
+		local destinations = _OutdoorMapTransitionLogic:GetDestinations(currentMapName)
+		self.selectedMapName = ""
+		self.selectedMapName2 = ""
+
+		if #destinations > 0 then
+			local destination = destinations[1]
+			self.selectedMapName = destination.mapName
+			self.destinationButtonText.Text = destination.displayName
+			self.destinationButton.Entity.Enable = true
+		else
+			self.destinationButton.Entity.Enable = false
+		end
+
+		if #destinations > 1 then
+			local destination = destinations[2]
+			self.selectedMapName2 = destination.mapName
+			self.destinationButtonText2.Text = destination.displayName
+			self.destinationButton2.Entity.Enable = true
+		else
+			self.destinationButton2.Entity.Enable = false
+		end
+
+		self.emptyText.Enable = #destinations == 0
+		self:ApplyDestinationLayout(math.min(#destinations, 2))
+
+		self:SetVisible(true)
+		log("[OutdoorMapTransitionUI] open count=" .. tostring(#destinations))
+	end
+
+	method void ApplyDestinationLayout(integer activeCount)
+		-- 활성 목적지 수 기준 패널 높이와 버튼 중앙 정렬
+		if self.panelTransform == nil then
+			return
+		end
+
+		local extraRowCount = math.max(activeCount - 1, 0)
+		local panelHeight = self.PANEL_BASE_HEIGHT + extraRowCount * self.DESTINATION_ROW_HEIGHT
+		self.panelTransform.RectSize = Vector2(self.panelTransform.RectSize.x, panelHeight)
+
+		if activeCount <= 0 then
+			return
+		end
+
+		local firstPositionY = (activeCount - 1) * self.DESTINATION_ROW_HEIGHT * 0.5
+		self.destinationButtonTransform.anchoredPosition = Vector2(0, firstPositionY)
+		if activeCount > 1 then
+			self.destinationButtonTransform2.anchoredPosition = Vector2(0, firstPositionY - self.DESTINATION_ROW_HEIGHT)
+		end
+	end
+
+	method void Close()
+		self:SetVisible(false)
+	end
+
+	method void OnDestinationClicked(ButtonClickEvent event)
+		local mapName = self.selectedMapName
+		if mapName == "" then
+			return
+		end
+		self:Close()
+		_OutdoorMapTransitionLogic:MoveToMap(mapName)
+	end
+
+	method void OnDestination2Clicked(ButtonClickEvent event)
+		local mapName = self.selectedMapName2
+		if mapName == "" then
+			return
+		end
+		self:Close()
+		_OutdoorMapTransitionLogic:MoveToMap(mapName)
+	end
+
+	method void OnCloseClicked(ButtonClickEvent event)
+		self:Close()
+	end
+
+	method void SetVisible(boolean visible)
+		if self.root == nil then
+			return
+		end
+		self.root.Enable = visible
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, self.UI_ID, visible)
+		end
+	end
+
+end

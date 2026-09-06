@@ -1,0 +1,197 @@
+@Component
+@ExecSpace("ClientOnly")
+script DragIndicator extends Component
+
+	property number travelDistance = 300
+
+	-- 왼쪽에서 오른쪽으로 이동하는 시간
+	property number travelDuration = 1.0
+
+	property number fadeDuration = 0.5
+	
+	property integer repeatCount = 3
+
+	@HideFromInspector
+	property Vector2 basePosition = Vector2(0, 0)
+
+	@HideFromInspector
+	property number elapsed = 0
+
+	@HideFromInspector
+	property Color baseColor = Color(1, 1, 1, 1)
+
+	@HideFromInspector
+	property integer completedCount = 0
+
+	-- 부모 커맨드 스테이지 활성 상태
+	@HideFromInspector
+	property boolean wasParentEnabled = false
+
+	@HideFromInspector
+	property boolean isPlaying = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:CacheBasePosition()
+		self:CacheBaseColor()
+		self:ResetIndicator()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestartIndicator()
+		-- 커맨드 미니게임 시작 시 안내 애니메이션을 재시작
+		self:CacheBasePosition()
+		self:CacheBaseColor()
+		self.wasParentEnabled = false
+		self:ResetIndicator()
+		self.wasParentEnabled = true
+		self:StartIndicator()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		local parent = self.Entity.Parent
+		local parentEnabled = parent ~= nil and parent.EnabledInHierarchy == true
+
+		if parentEnabled == false then
+			if self.wasParentEnabled == true then
+				self:ResetIndicator()
+			end
+
+			self.wasParentEnabled = false
+			return
+		end
+
+		if self.wasParentEnabled == false then
+			self:StartIndicator()
+		end
+
+		self.wasParentEnabled = true
+
+		if self.isPlaying == false then
+			return
+		end
+
+		self.elapsed = self.elapsed + math.max(delta, 0)
+		local duration = math.max(self.travelDuration, 0.1)
+		local fadeDuration = math.max(self.fadeDuration, 0.1)
+		local progress = math.min(self.elapsed / duration, 1)
+		local startX = self.basePosition.x - math.max(self.travelDistance, 0) * 0.5
+		local endX = self.basePosition.x + math.max(self.travelDistance, 0) * 0.5
+
+		self:SetIndicatorPosition(startX + (endX - startX) * progress)
+
+		if progress < 1 then
+			self:SetRendererAlpha(1)
+			return
+		end
+
+		local fadeProgress = math.min((self.elapsed - duration) / fadeDuration, 1)
+		self:SetIndicatorPosition(endX)
+		self:SetRendererAlpha(1 - fadeProgress)
+
+		if fadeProgress < 1 then
+			return
+		end
+
+		self.completedCount = self.completedCount + 1
+		if self.completedCount >= math.max(self.repeatCount, 1) then
+			self:FinishIndicator()
+			return
+		end
+
+		self.elapsed = 0
+		self:SetIndicatorPosition(startX)
+		self:SetRendererAlpha(1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheBasePosition()
+		-- UI 기준 위치를 캐시
+		local transform = self.Entity.UITransformComponent
+		if transform == nil then
+			return
+		end
+
+		self.basePosition = transform.anchoredPosition or Vector2(0, 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheBaseColor()
+		-- 안내 스프라이트 기본 색상을 캐시
+		local renderer = self.Entity.SpriteGUIRendererComponent
+		if renderer == nil then
+			return
+		end
+
+		self.baseColor = renderer.Color or Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartIndicator()
+		-- 안내 애니메이션을 왼쪽 시작점에서 재생
+		self:CacheBasePosition()
+		self:CacheBaseColor()
+		self.elapsed = 0
+		self.completedCount = 0
+		self.isPlaying = true
+		self:SetRendererEnabled(true)
+		self:SetRendererAlpha(1)
+		self:SetIndicatorPosition(self.basePosition.x - math.max(self.travelDistance, 0) * 0.5)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetIndicator()
+		-- 스테이지 비활성화 시 안내 상태를 초기화
+		self.elapsed = 0
+		self.completedCount = 0
+		self.isPlaying = false
+		self:SetIndicatorPosition(self.basePosition.x)
+		self:SetRendererAlpha(0)
+		self:SetRendererEnabled(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishIndicator()
+		-- 지정한 반복 횟수만큼 재생한 뒤 안내를 숨김
+		self.isPlaying = false
+		self.elapsed = 0
+		self:SetIndicatorPosition(self.basePosition.x)
+		self:SetRendererAlpha(0)
+		self:SetRendererEnabled(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIndicatorPosition(number x)
+		-- 손가락 스프라이트의 가로 위치를 갱신
+		local transform = self.Entity.UITransformComponent
+		if transform == nil then
+			return
+		end
+
+		transform.anchoredPosition = Vector2(x, self.basePosition.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetRendererEnabled(boolean enabled)
+		-- 안내 스프라이트 표시 상태를 갱신
+		local renderer = self.Entity.SpriteGUIRendererComponent
+		if renderer == nil then
+			return
+		end
+
+		renderer.Enable = enabled
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetRendererAlpha(number alpha)
+		-- 안내 스프라이트 투명도를 갱신
+		local renderer = self.Entity.SpriteGUIRendererComponent
+		if renderer == nil then
+			return
+		end
+
+		local safeAlpha = math.max(0, math.min(alpha, 1))
+		renderer.Color = Color(self.baseColor.r, self.baseColor.g, self.baseColor.b, safeAlpha)
+	end
+end

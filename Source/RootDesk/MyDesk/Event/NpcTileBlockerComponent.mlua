@@ -1,0 +1,95 @@
+@Component
+@ExecSpace("ClientOnly")
+script NpcTileBlockerComponent extends Component
+
+	-- 충돌 타일이 실제로 그려지는 RectTileMap 엔티티 이름.
+	-- "Collidable" 맵 레이어(MapleMapLayer_2, LayerSortOrder 7)의 타일맵 = RectTileMap_2 (SortingLayer MapLayer7).
+	property string collisionTilemapName = "RectTileMap_2"
+	-- 이동 불가 타일 이름 (Studio 타일셋의 CollisionTile)
+	property string blockerTileName = "CollisionTile"
+	-- 막을 영역 크기 (월드유닛). 충돌 레이어의 GridSize로 셀 수를 자동 환산한다.
+	property Vector2 footprintWorld = Vector2(0.5, 0.375)
+	-- 발밑(엔티티 위치) 기준 중심 보정 (월드유닛)
+	property Vector2 worldOffset = Vector2(0, 0)
+
+	-- 스탬프한 셀 사각 영역 (원복용). hasStamp=false 이면 미스탬프 상태.
+	@HideFromInspector
+	property boolean hasStamp = false
+	@HideFromInspector
+	property integer fromX = 0
+	@HideFromInspector
+	property integer fromY = 0
+	@HideFromInspector
+	property integer toX = 0
+	@HideFromInspector
+	property integer toY = 0
+
+	method void OnEndPlay()
+		-- 엔티티 제거/맵 언로드 시 자동 원복 (스폰측에서 명시적으로도 지우지만 안전장치)
+		self:ClearBlock()
+	end
+
+	method void Stamp()
+		-- 발밑 위치를 충돌 레이어 셀로 변환해, footprintWorld(월드유닛)를 GridSize로 환산한 셀 수만큼 blocker 타일을 채운다.
+		local tilemap = self:GetCollisionTilemap()
+		if tilemap == nil then
+			log_warning("[NpcTileBlocker] 충돌 타일맵을 찾지 못함: " .. tostring(self.collisionTilemapName))
+			return
+		end
+
+		-- 재스탬프 대비: 기존 것 먼저 제거
+		self:ClearBlock()
+
+		local basePos = self.Entity.TransformComponent.WorldPosition
+		-- NPC 원점은 발에 있으므로: 가로는 발 기준 중앙 정렬, 세로는 발 끝에서 머리 쪽(+Y)으로만 뻗는다.
+		local footX = basePos.x + self.worldOffset.x
+		local footY = basePos.y + self.worldOffset.y
+		local halfW = self.footprintWorld.x / 2
+
+		-- 월드 좌표의 두 코너(발-왼쪽 / 머리-오른쪽)를 각각 셀로 변환한 뒤 min/max로 영역을 잡는다.
+		-- (셀 y축 방향과 무관하게 발→머리 범위를 견고하게 커버)
+		local cellFoot = tilemap:ToCellPosition(Vector3(footX - halfW, footY, basePos.z))
+		local cellHead = tilemap:ToCellPosition(Vector3(footX + halfW, footY + self.footprintWorld.y, basePos.z))
+
+		self.fromX = math.min(cellFoot.x, cellHead.x)
+		self.toX = math.max(cellFoot.x, cellHead.x)
+		self.fromY = math.min(cellFoot.y, cellHead.y)
+		self.toY = math.max(cellFoot.y, cellHead.y)
+
+		tilemap:BoxFill(self.blockerTileName, Vector2Int(self.fromX, self.fromY), Vector2Int(self.toX, self.toY))
+		self.hasStamp = true
+
+		log("[NpcTileBlocker] stamp (" .. tostring(self.fromX) .. "," .. tostring(self.fromY) .. ")~(" ..
+			tostring(self.toX) .. "," .. tostring(self.toY) .. ") layer=" .. self.collisionTilemapName)
+	end
+
+	method void ClearBlock()
+		-- 이전에 찍어 둔 blocker 타일 영역을 제거한다. (찍은 게 없으면 무시)
+		if self.hasStamp == false then
+			return
+		end
+
+		local tilemap = self:GetCollisionTilemap()
+		if tilemap ~= nil then
+			tilemap:BoxRemove(Vector2Int(self.fromX, self.fromY), Vector2Int(self.toX, self.toY))
+		end
+
+		self.hasStamp = false
+	end
+
+	method any GetCollisionTilemap()
+		-- 현재 맵에서 충돌 타일맵 엔티티를 찾아 RectTileMapComponent를 반환한다. (nil 안전)
+		local map = self.Entity.CurrentMap
+		if isvalid(map) == false then
+			return nil
+		end
+
+		local layer = map:GetChildByName(self.collisionTilemapName, true)
+		if isvalid(layer) == false then
+			return nil
+		end
+
+		return layer.RectTileMapComponent
+	end
+
+end

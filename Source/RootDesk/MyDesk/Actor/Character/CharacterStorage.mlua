@@ -1,0 +1,469 @@
+-- CharacterManager가 사용하는 서버 권위 캐릭터 저장 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script CharacterStorage extends Logic
+
+	property string charactersStorageKey = "characterData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedCharactersString = ""
+
+	property boolean canSaveCharacters = false
+
+	property boolean isNeedDefaultLoad = false
+
+	-- 비동기 저장 중 들어온 최신 저장 요청을 보관합니다.
+	property boolean isCharactersSaveInProgress = false
+
+	property string pendingCharactersUserId = ""
+
+	property string pendingCharactersString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadCharacters(string userId)
+		-- UserDataStorage에서 캐릭터 저장 문자열을 읽고, 없으면 기본 로드 필요 상태만 표시합니다.
+		self.isNeedDefaultLoad = false
+
+		if userId == nil or userId == "" then
+			log_warning("[CharacterStorage] userId is required")
+			self.loadedCharactersString = ""
+			self.canSaveCharacters = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedCharactersString = userStorage:GetAndWait(self.charactersStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedCharactersString = ""
+			self.canSaveCharacters = true
+			self.isNeedDefaultLoad = true
+			return nil
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedCharactersString = ""
+			self.canSaveCharacters = false
+			return nil
+		end
+
+		if storedCharactersString == nil or storedCharactersString == "" then
+			log("[CharacterStorage] characters save is empty userId=" .. tostring(userId) .. " 디폴트 로드")
+			self.loadedCharactersString = ""
+			self.canSaveCharacters = true
+			self.isNeedDefaultLoad = true
+			return nil
+		end
+
+		local tCharactersPlainTable = self:CreateCharactersPlainTableFromString(storedCharactersString)
+		if tCharactersPlainTable == nil then
+			log_warning("[CharacterStorage] character load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedCharactersString = storedCharactersString
+			self.canSaveCharacters = false
+			return nil
+		end
+
+		self.loadedCharactersString = storedCharactersString
+		self.canSaveCharacters = true
+		return tCharactersPlainTable
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCharacterArchiveAsync(string userId, any tCharacters, any activeCharacterIds, string selectedCharacterId)
+		-- 전체 캐릭터 아카이브와 현재 편성 id 목록을 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		-- tCharacters: { CharacterData, CharacterData, ... }
+		-- activeCharacterIds: { characterId:string, characterId:string, characterId:string }
+		-- 유저 캐릭터 목록을 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveCharacters == false then
+			log_warning("[CharacterStorage] character save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[CharacterStorage] userId is required")
+			return
+		end
+
+		local tCharactersPlainTable = self:CreateCharactersPlainTable(tCharacters, activeCharacterIds, selectedCharacterId)
+		if tCharactersPlainTable == nil then
+			log_warning("[CharacterStorage] charactersPlainTable is invalid")
+			return
+		end
+
+		local charactersString = self:CreateCharactersStringFromPlainTable(tCharactersPlainTable)
+		if charactersString == self.loadedCharactersString then
+			return
+		end
+
+		if self.isCharactersSaveInProgress then
+			self.pendingCharactersUserId = userId
+			self.pendingCharactersString = charactersString
+			return
+		end
+
+		self:SaveCharactersStringAsync(userId, charactersString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCharactersStringAsync(string userId, string charactersString)
+		-- 직렬화된 캐릭터 저장 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isCharactersSaveInProgress = true
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.charactersStorageKey, charactersString, function(errorCode, key)
+			self:OnCharactersSaveCompleted(userId, charactersString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnCharactersSaveCompleted(string userId, string charactersString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청을 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.loadedCharactersString = charactersString
+		end
+
+		self.isCharactersSaveInProgress = false
+		self:CheckPendingCharactersSave()
+
+		if isSaved then
+			local tCharactersPlainTable = self:CreateCharactersPlainTableFromString(charactersString)
+			if tCharactersPlainTable ~= nil then
+				log("[CharacterStorage] characters save complete count=" .. tostring(#tCharactersPlainTable.characters))
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingCharactersSave()
+		-- 대기 중인 최신 캐릭터 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.pendingCharactersString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingCharactersUserId
+		local pendingCharactersString = self.pendingCharactersString
+		self.pendingCharactersUserId = ""
+		self.pendingCharactersString = ""
+
+		if pendingCharactersString == self.loadedCharactersString then
+			return
+		end
+
+		self:SaveCharactersStringAsync(pendingUserId, pendingCharactersString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharactersPlainTableFromString(string charactersString)
+		-- 저장 문자열을 캐릭터 저장 plain table로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(charactersString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[CharacterStorage] character save string parse failed")
+			return nil
+		end
+
+		return self:CreateCharactersPlainTableFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateCharactersStringFromPlainTable(any tCharactersPlainTable)
+		-- 캐릭터 저장 plain table을 DataStorage에 넣을 문자열로 만듭니다.
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.selectedCharacterId = tCharactersPlainTable.selectedCharacterId
+		tFlatPlainTable.activeCharacterCount = #tCharactersPlainTable.activeCharacterIds
+		tFlatPlainTable.characterCount = #tCharactersPlainTable.characters
+
+		for index, characterId in ipairs(tCharactersPlainTable.activeCharacterIds) do
+			local suffix = tostring(index)
+			tFlatPlainTable["activeCharacterId" .. suffix] = characterId
+		end
+
+		for index, tCharacterSaveRow in ipairs(tCharactersPlainTable.characters) do
+			local suffix = tostring(index)
+			tFlatPlainTable["characterId" .. suffix] = tCharacterSaveRow.id
+			tFlatPlainTable["baseCharacterId" .. suffix] = tCharacterSaveRow.baseCharacterId
+			tFlatPlainTable["vocal" .. suffix] = tCharacterSaveRow.vocal
+			tFlatPlainTable["dance" .. suffix] = tCharacterSaveRow.dance
+			tFlatPlainTable["visual" .. suffix] = tCharacterSaveRow.visual
+			tFlatPlainTable["fatigue" .. suffix] = tCharacterSaveRow.fatigue
+			tFlatPlainTable["intimacy" .. suffix] = tCharacterSaveRow.intimacy
+			tFlatPlainTable["maxIntimacyReached" .. suffix] = tCharacterSaveRow.maxIntimacyReached
+			tFlatPlainTable["isDiscovered" .. suffix] = tCharacterSaveRow.isDiscovered
+			tFlatPlainTable["hasPlayed" .. suffix] = tCharacterSaveRow.hasPlayed
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharactersPlainTableFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 풀린 flat plain table의 버전을 확인하고 캐릭터 저장 plain table로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion == 1 then
+			return self:CreateCharactersPlainTableFromFlatPlainTableV1(tFlatPlainTable)
+		end
+
+		log_warning("[CharacterStorage] unsupported character saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharactersPlainTableFromFlatPlainTableV1(any tFlatPlainTable)
+		-- v1 flat plain table을 캐릭터 저장 plain table로 정규화합니다.
+		local characterCount = self:NormalizeInteger(tFlatPlainTable.characterCount, 0, 0)
+		if characterCount <= 0 then
+			return nil
+		end
+
+		local tCharactersPlainTable = {}
+		tCharactersPlainTable.selectedCharacterId = self:NormalizeString(tFlatPlainTable.selectedCharacterId, "")
+		tCharactersPlainTable.activeCharacterIds = {}
+		tCharactersPlainTable.characters = {}
+
+		for index = 1, characterCount do
+			local suffix = tostring(index)
+			local tSaveRow = {}
+			tSaveRow.id = tFlatPlainTable["characterId" .. suffix]
+			tSaveRow.baseCharacterId = tFlatPlainTable["baseCharacterId" .. suffix]
+			tSaveRow.vocal = tFlatPlainTable["vocal" .. suffix]
+			tSaveRow.dance = tFlatPlainTable["dance" .. suffix]
+			tSaveRow.visual = tFlatPlainTable["visual" .. suffix]
+			tSaveRow.fatigue = tFlatPlainTable["fatigue" .. suffix]
+			tSaveRow.intimacy = tFlatPlainTable["intimacy" .. suffix]
+			tSaveRow.maxIntimacyReached = tFlatPlainTable["maxIntimacyReached" .. suffix]
+			tSaveRow.isDiscovered = tFlatPlainTable["isDiscovered" .. suffix]
+			tSaveRow.hasPlayed = tFlatPlainTable["hasPlayed" .. suffix]
+			if tSaveRow.isDiscovered == nil then
+				tSaveRow.isDiscovered = true
+			end
+			if tSaveRow.hasPlayed == nil then
+				tSaveRow.hasPlayed = true
+			end
+
+			local tNormalizedSaveRow = self:CreateCharacterSaveRowFromPlainTable(tSaveRow)
+			if tNormalizedSaveRow == nil then
+				return nil
+			end
+
+			table.insert(tCharactersPlainTable.characters, tNormalizedSaveRow)
+		end
+
+		local activeCharacterCount = self:NormalizeInteger(tFlatPlainTable.activeCharacterCount, 0, 0)
+		for index = 1, activeCharacterCount do
+			local characterId = self:NormalizeString(tFlatPlainTable["activeCharacterId" .. tostring(index)], "")
+			if characterId ~= "" then
+				table.insert(tCharactersPlainTable.activeCharacterIds, characterId)
+			end
+		end
+
+		if #tCharactersPlainTable.activeCharacterIds <= 0 then
+			for index = 1, math.min(3, #tCharactersPlainTable.characters) do
+				table.insert(tCharactersPlainTable.activeCharacterIds, tCharactersPlainTable.characters[index].id)
+			end
+		end
+
+		if tCharactersPlainTable.selectedCharacterId == "" and #tCharactersPlainTable.characters > 0 then
+			tCharactersPlainTable.selectedCharacterId = tCharactersPlainTable.characters[1].id
+		end
+
+		return tCharactersPlainTable
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharactersPlainTable(any tCharacters, any activeCharacterIds, string selectedCharacterId)
+		-- 서버 권위 캐릭터 목록을 저장용 plain table로 만듭니다.
+		if tCharacters == nil or type(tCharacters) ~= "table" or #tCharacters <= 0 then
+			return nil
+		end
+
+		local tCharactersPlainTable = {}
+		tCharactersPlainTable.selectedCharacterId = self:NormalizeString(selectedCharacterId, "")
+		tCharactersPlainTable.activeCharacterIds = self:CreateActiveCharacterIdList(activeCharacterIds)
+		tCharactersPlainTable.characters = {}
+
+		for _, tCharacter in ipairs(tCharacters) do
+			local tSaveRow = self:CreateCharacterSaveRow(tCharacter)
+			if tSaveRow == nil then
+				return nil
+			end
+
+			table.insert(tCharactersPlainTable.characters, tSaveRow)
+		end
+
+		if tCharactersPlainTable.selectedCharacterId == "" and #tCharactersPlainTable.characters > 0 then
+			tCharactersPlainTable.selectedCharacterId = tCharactersPlainTable.characters[1].id
+		end
+
+		if #tCharactersPlainTable.activeCharacterIds <= 0 then
+			for index = 1, math.min(3, #tCharactersPlainTable.characters) do
+				table.insert(tCharactersPlainTable.activeCharacterIds, tCharactersPlainTable.characters[index].id)
+			end
+		end
+
+		return tCharactersPlainTable
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateActiveCharacterIdList(any activeCharacterIds)
+		-- activeCharacterIds: { characterId:string, ... }
+		local tActiveCharacterIds = {}
+		if activeCharacterIds == nil or type(activeCharacterIds) ~= "table" then
+			return tActiveCharacterIds
+		end
+
+		for _, characterId in ipairs(activeCharacterIds) do
+			local normalizedCharacterId = self:NormalizeString(characterId, "")
+			if normalizedCharacterId ~= "" then
+				table.insert(tActiveCharacterIds, normalizedCharacterId)
+			end
+		end
+
+		return tActiveCharacterIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharacterSaveRow(any tCharacter)
+		-- CharacterData 한 건을 저장용 row로 만듭니다.
+		if tCharacter == nil then
+			return nil
+		end
+
+		local tSaveRow = {}
+		tSaveRow.id = tCharacter.id
+		tSaveRow.baseCharacterId = tCharacter.id
+		tSaveRow.vocal = tCharacter.vocal
+		tSaveRow.dance = tCharacter.dance
+		tSaveRow.visual = tCharacter.visual
+		tSaveRow.fatigue = tCharacter.fatigue
+		tSaveRow.intimacy = tCharacter.intimacy
+		tSaveRow.maxIntimacyReached = tCharacter.maxIntimacyReached
+		tSaveRow.isDiscovered = tCharacter.isDiscovered
+		tSaveRow.hasPlayed = tCharacter.hasPlayed
+
+		return self:CreateCharacterSaveRowFromPlainTable(tSaveRow)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharacterSaveRowFromPlainTable(any tPlainTableData)
+		-- 외부 입력 table을 안전한 캐릭터 저장 row로 정규화합니다.
+		if tPlainTableData == nil or type(tPlainTableData) ~= "table" then
+			return nil
+		end
+
+		local characterId = self:NormalizeString(tPlainTableData.id, "")
+		local baseCharacterId = self:NormalizeString(tPlainTableData.baseCharacterId, "")
+		if baseCharacterId == "" then
+			baseCharacterId = characterId
+		end
+
+		if baseCharacterId == "" then
+			baseCharacterId = self:NormalizeString(tPlainTableData.typeId, "")
+		end
+
+		if characterId == "" then
+			characterId = baseCharacterId
+		end
+
+		if characterId == "" or baseCharacterId == "" then
+			return nil
+		end
+
+		local tSaveRow = {}
+		tSaveRow.id = characterId
+		tSaveRow.baseCharacterId = baseCharacterId
+		tSaveRow.vocal = self:NormalizeNumberOrNil(tPlainTableData.vocal, 0)
+		tSaveRow.dance = self:NormalizeNumberOrNil(tPlainTableData.dance, 0)
+		tSaveRow.visual = self:NormalizeNumberOrNil(tPlainTableData.visual, 0)
+		tSaveRow.fatigue = self:NormalizeNumberOrNil(tPlainTableData.fatigue, 0)
+
+		if tSaveRow.vocal == nil or tSaveRow.dance == nil or tSaveRow.visual == nil or tSaveRow.fatigue == nil then
+			return nil
+		end
+
+		local intimacy = self:NormalizeNumberOrNil(tPlainTableData.intimacy, 0)
+		if intimacy == nil then
+			intimacy = 0
+		end
+		tSaveRow.intimacy = intimacy
+
+		local maxIntimacyReached = self:NormalizeNumberOrNil(tPlainTableData.maxIntimacyReached, 0)
+		if maxIntimacyReached == nil then
+			maxIntimacyReached = intimacy
+		end
+		tSaveRow.maxIntimacyReached = math.max(maxIntimacyReached, intimacy)
+		tSaveRow.isDiscovered = self:NormalizeBoolean(tPlainTableData.isDiscovered, false)
+		tSaveRow.hasPlayed = self:NormalizeBoolean(tPlainTableData.hasPlayed, false)
+
+		return tSaveRow
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any NormalizeNumberOrNil(any value, number minValue)
+		-- 숫자 값이 있으면 최소값 이상으로 보정하고, 없으면 nil을 유지합니다.
+		if value == nil then
+			return nil
+		end
+
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return nil
+		end
+
+		return _MathUtil:ClampMin(numberValue, minValue)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean NormalizeBoolean(any value, boolean defaultValue)
+		-- boolean 값이 아니어도 저장 문자열에서 온 값을 안전하게 boolean으로 보정합니다.
+		if value == nil then
+			return defaultValue
+		end
+
+		if value == true or value == false then
+			return value
+		end
+
+		local textValue = tostring(value)
+		if textValue == "true" or textValue == "1" then
+			return true
+		end
+
+		if textValue == "false" or textValue == "0" then
+			return false
+		end
+
+		return defaultValue
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

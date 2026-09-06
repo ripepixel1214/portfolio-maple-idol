@@ -1,0 +1,385 @@
+@Logic
+script ActivityManager extends Logic
+
+	property boolean isActivityUnlockLoaded = false
+
+	-- unlockedActivityIds: { activityId:string, activityId:string, ... }
+	property any unlockedActivityIds = {}
+
+	-- unlockedActivityIdSet: { [activityId:string] = true }
+	property any unlockedActivityIdSet = {}
+
+	-- savedUnlockedActivityIds: defaultUnlocked가 아닌 추가 해금 활동만 저장합니다.
+	property any savedUnlockedActivityIds = {}
+
+	property string currentUserId = ""
+
+	property any userEnterHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 서버 권위 활동 해금 목록을 로드하고 클라이언트에 동기화합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 서버 종료 시점에 유저 입장 이벤트 핸들러를 정리합니다.
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientHasActivityUnlocked(string activityId)
+		-- 클라이언트 로컬 캐시에 저장된 활동 해금 여부를 반환합니다.
+		if activityId == nil or activityId == "" then
+			return false
+		end
+
+		if self.unlockedActivityIdSet[activityId] == true then
+			return true
+		end
+
+		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) or nil
+		return activity ~= nil and activity.defaultUnlocked == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetUnlockedActivityIds()
+		-- 클라이언트 로컬 캐시의 해금 활동 id 목록 복사본을 반환합니다.
+		return self:CopyStringList(self.unlockedActivityIds)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetUnlockedActivities()
+		-- 클라이언트 로컬 캐시의 해금 활동 id를 ActivityMaster 정적 데이터 목록으로 변환합니다.
+		local activities = {}
+		if _ActivityMaster == nil then
+			return activities
+		end
+
+		for _, activity in ipairs(_ActivityMaster:GetAllActivities()) do
+			local activityId = activity ~= nil and (activity.id or activity.activityId) or ""
+			if activityId ~= "" and self:ClientHasActivityUnlocked(activityId) then
+				table.insert(activities, activity)
+			end
+		end
+
+		return activities
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestUnlockActivity(string activityId)
+		-- 클라이언트 요청으로 지정한 활동을 해금하고 최신 목록을 동기화합니다.
+		if self:CanUseActivities(senderUserId) == false then
+			return false
+		end
+
+		return self:UnlockActivityWithCommit(activityId, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 유저가 서버에 입장하면 활동 해금 데이터를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][ActivityManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadActivities()
+
+		if self:IsActivitiesLoaded() then
+			self:PushActivitiesToClient(event.UserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadActivities()
+		-- Storage에서 추가 해금 활동 id 목록을 읽고 defaultUnlocked 활동과 합쳐 서버 권위 캐시로 보관합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ActivityManager] currentUserId is required")
+			self.isActivityUnlockLoaded = false
+			return
+		end
+
+		local loadedActivityIds = {}
+		if _ActivityStorage ~= nil then
+			loadedActivityIds = _ActivityStorage:LoadActivities(self.currentUserId)
+			if loadedActivityIds == nil then
+				log_warning("[ActivityManager] activity ids are nil")
+				self.isActivityUnlockLoaded = false
+				return
+			end
+		end
+
+		self:RegisterUnlockedActivities(loadedActivityIds)
+		self.isActivityUnlockLoaded = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsActivitiesLoaded()
+		-- 서버 활동 해금 데이터 로드 여부를 반환합니다.
+		return self.isActivityUnlockLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseActivities(string userId)
+		-- Request 입구에서 현재 유저와 활동 해금 데이터 로드 상태를 검증합니다.
+		if self:IsActivitiesLoaded() == false then
+			log_warning("[ActivityManager] request rejected because activities are not loaded")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ActivityManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[ActivityManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ServerHasActivityUnlocked(string activityId)
+		-- 서버 권위 캐시에 지정한 활동이 해금되어 있는지 반환합니다.
+		if self:IsActivitiesLoaded() == false then
+			return false
+		end
+
+		if activityId == nil or activityId == "" then
+			return false
+		end
+
+		return self.unlockedActivityIdSet[activityId] == true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetUnlockedActivityIds()
+		-- 서버 권위 해금 활동 id 목록 복사본을 반환합니다.
+		if self:IsActivitiesLoaded() == false then
+			return {}
+		end
+
+		return self:CopyStringList(self.unlockedActivityIds)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean UnlockActivity(string activityId)
+		-- ActivityMaster에 존재하는 활동을 서버 권위 해금 목록에 추가합니다.
+		if self:IsActivitiesLoaded() == false then
+			return false
+		end
+
+		if activityId == nil or activityId == "" then
+			log_warning("[ActivityManager] unlock activityId is empty")
+			return false
+		end
+
+		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) or nil
+		if activity == nil then
+			log_warning("[ActivityManager] unlock activity not found activityId=" .. tostring(activityId))
+			return false
+		end
+
+		if self.unlockedActivityIdSet[activityId] == true then
+			return true
+		end
+
+		table.insert(self.unlockedActivityIds, activityId)
+		self.unlockedActivityIdSet[activityId] = true
+
+		if self:IsDefaultUnlockedActivity(activityId) == false then
+			self:AddSavedUnlockedActivityIdIfValid(activityId)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean UnlockActivityWithCommit(string activityId, string forUserId)
+		-- 활동 해금을 런타임 캐시에 반영한 뒤 저장하고 대상 클라이언트에 동기화합니다.
+		local isUnlocked = self:UnlockActivity(activityId)
+		if isUnlocked == false then
+			return false
+		end
+
+		self:SaveActivitiesToStorage()
+		if forUserId ~= nil and forUserId ~= "" then
+			self:PushActivitiesToClient(forUserId)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveActivitiesToStorage()
+		-- 서버 권위 추가 해금 활동 목록을 Storage에 저장합니다.
+		if _ActivityStorage == nil then
+			return
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ActivityManager] currentUserId is required")
+			return
+		end
+
+		if self:IsActivitiesLoaded() == false then
+			log_warning("[ActivityManager] activities are not loaded")
+			return
+		end
+
+		_ActivityStorage:SaveActivitiesAsync(self.currentUserId, self:CopyStringList(self.savedUnlockedActivityIds))
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterUnlockedActivities(any activityIds)
+		-- 로드한 추가 해금 활동과 마스터의 기본 해금 활동을 서버 권위 캐시에 등록합니다.
+		self.unlockedActivityIds = {}
+		self.unlockedActivityIdSet = {}
+		self.savedUnlockedActivityIds = {}
+
+		self:RegisterDefaultUnlockedActivities()
+
+		if activityIds == nil or type(activityIds) ~= "table" then
+			return
+		end
+
+		for _, activityId in ipairs(activityIds) do
+			self:AddUnlockedActivityIdIfValid(activityId)
+			self:AddSavedUnlockedActivityIdIfValid(activityId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterDefaultUnlockedActivities()
+		-- ActivityMaster의 defaultUnlocked 활동을 항상 해금 캐시에 포함합니다.
+		if _ActivityMaster == nil then
+			return
+		end
+
+		local activities = _ActivityMaster:GetAllActivities()
+		for _, activity in ipairs(activities) do
+			local activityId = activity ~= nil and (activity.id or activity.activityId) or ""
+			if activityId ~= "" and activity.defaultUnlocked == true then
+				self:AddUnlockedActivityIdIfValid(activityId)
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddUnlockedActivityIdIfValid(string activityId)
+		-- 중복 없이 유효한 activityId만 해금 목록에 추가합니다.
+		if activityId == nil or activityId == "" then
+			return
+		end
+
+		if _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) == nil then
+			log_warning("[ActivityManager] ignored unknown activityId=" .. tostring(activityId))
+			return
+		end
+
+		if self.unlockedActivityIdSet[activityId] == true then
+			return
+		end
+
+		table.insert(self.unlockedActivityIds, activityId)
+		self.unlockedActivityIdSet[activityId] = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddSavedUnlockedActivityIdIfValid(string activityId)
+		-- defaultUnlocked가 아닌 추가 해금 activityId만 저장 목록에 추가합니다.
+		if activityId == nil or activityId == "" then
+			return
+		end
+
+		if self:IsDefaultUnlockedActivity(activityId) then
+			return
+		end
+
+		if _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) == nil then
+			return
+		end
+
+		for _, savedActivityId in ipairs(self.savedUnlockedActivityIds) do
+			if savedActivityId == activityId then
+				return
+			end
+		end
+
+		table.insert(self.savedUnlockedActivityIds, activityId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsDefaultUnlockedActivity(string activityId)
+		-- ActivityMaster의 defaultUnlocked 값을 기준으로 기본 해금 활동인지 확인합니다.
+		if activityId == nil or activityId == "" or _ActivityMaster == nil then
+			return false
+		end
+
+		local activity = _ActivityMaster:GetActivity(activityId)
+		return activity ~= nil and activity.defaultUnlocked == true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushActivitiesToClient(string forUserId)
+		-- 서버 권위 활동 해금 목록을 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		self:SyncActivities(self:CopyStringList(self.unlockedActivityIds), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncActivities(table activityIds)
+		-- 서버에서 받은 활동 해금 목록을 클라이언트 로컬 캐시에 반영합니다.
+		self:RegisterUnlockedActivitiesClientOnly(activityIds)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RegisterUnlockedActivitiesClientOnly(any activityIds)
+		-- 클라이언트 로컬 해금 활동 캐시를 교체합니다.
+		self.unlockedActivityIds = {}
+		self.unlockedActivityIdSet = {}
+
+		if activityIds == nil or type(activityIds) ~= "table" then
+			return
+		end
+
+		for _, activityId in ipairs(activityIds) do
+			if activityId ~= nil and activityId ~= "" and self.unlockedActivityIdSet[activityId] ~= true then
+				table.insert(self.unlockedActivityIds, activityId)
+				self.unlockedActivityIdSet[activityId] = true
+			end
+		end
+	end
+
+	method any CopyStringList(any source)
+		-- 문자열 배열 복사본을 만듭니다.
+		local copied = {}
+		if source == nil or type(source) ~= "table" then
+			return copied
+		end
+
+		for _, value in ipairs(source) do
+			if value ~= nil and value ~= "" then
+				table.insert(copied, tostring(value))
+			end
+		end
+
+		return copied
+	end
+
+end

@@ -1,0 +1,490 @@
+@Logic
+script LoadingUILogic extends Logic
+
+	property Entity LoadingRoot = "9cd84a76-25ba-4dd3-8973-753cc50523a8"
+
+	property Entity MainTitleRoot = "727ce267-6756-4f31-9867-2281e818bb84"
+
+	property UITransformComponent LoadingCdTransform = "8ae53a2f-ca60-4103-b4e1-4cabdd880e97"
+
+	property Entity Dot1 = "efaaa3c9-c82a-483f-b74d-c2417c0aef2b"
+
+	property Entity Dot2 = "86fd78ad-9257-488e-8200-074199077281"
+
+	property Entity Dot3 = "b9a3d653-4230-461b-8725-b3db87dc5037"
+
+	property number DotInterval = 0.4
+
+	property number elapsedTime = 0
+
+	property number MinLoadingDuration = 2
+
+	property number PreloadTimeoutDuration = 15
+
+	property number loadingElapsedTime = 0
+
+	property number TransitionFadeOutDuration = 0.5
+
+	property number TransitionFadeInDuration = 0.5
+
+	property integer visibleDotCount = 1
+
+	property number cdRotationAngle = 0
+
+	property number CdRotationSpeed = 72
+
+	property boolean hasTransitionedToTitle = false
+
+	property boolean isTransitioningToTitle = false
+
+	property boolean isPreloadStarted = false
+
+	property boolean isPreloadComplete = false
+
+	property integer preloadTotalCount = 0
+
+	property integer preloadFailureCount = 0
+
+	property boolean preloadTimedOut = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 로딩 화면을 먼저 표시하고 프리로드 완료까지 점과 CD 애니메이션을 재생합니다.
+		self.elapsedTime = 0
+		self.loadingElapsedTime = 0
+		self.visibleDotCount = 1
+		self.cdRotationAngle = 0
+		self.hasTransitionedToTitle = false
+		self.isTransitioningToTitle = false
+		self.isPreloadStarted = false
+		self.isPreloadComplete = false
+		self.preloadTotalCount = 0
+		self.preloadFailureCount = 0
+		self.preloadTimedOut = false
+		self:ApplyScreenVisibility()
+		self:ApplyDotVisibility()
+		self:BeginStartupPreload()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 일정 시간마다 표시할 점을 하나씩 늘리고 세 번째 점 다음에는 처음으로 돌아갑니다.
+		if self.hasTransitionedToTitle == false then
+			self.loadingElapsedTime += delta
+			self:CheckPreloadTimeout()
+			self:ApplyScreenVisibility()
+			self:UpdateCdRotation(delta)
+			self:TryTransitionToMainTitle()
+			if self.hasTransitionedToTitle == true then
+				return
+			end
+		end
+
+		local interval = self.DotInterval
+		if interval <= 0 then
+			interval = 0.4
+		end
+
+		self.elapsedTime += delta
+		if self.elapsedTime < interval then
+			return
+		end
+
+		while self.elapsedTime >= interval do
+			self.elapsedTime -= interval
+			self.visibleDotCount += 1
+			if self.visibleDotCount > 3 then
+				self.visibleDotCount = 1
+			end
+		end
+
+		self:ApplyDotVisibility()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CheckPreloadTimeout()
+		-- 프리로드 콜백이 지연되더라도 제한 시간이 지나면 타이틀 전환을 계속합니다.
+		if self.isPreloadStarted == false or self.isPreloadComplete == true then
+			return
+		end
+
+		if self.loadingElapsedTime < self.PreloadTimeoutDuration then
+			return
+		end
+
+		self.preloadTimedOut = true
+		self.isPreloadComplete = true
+		log_warning("[LoadingUILogic] preload timed out elapsed=" .. tostring(self.loadingElapsedTime) .. " total=" .. tostring(self.preloadTotalCount))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCdRotation(number delta)
+		-- 메인 타이틀 CD와 같은 속도로 로딩 화면 CD를 계속 회전시킵니다.
+		if self.LoadingCdTransform == nil or self.CdRotationSpeed == 0 then
+			return
+		end
+
+		self.cdRotationAngle = (self.cdRotationAngle + self.CdRotationSpeed * delta) % 360
+		self.LoadingCdTransform.UIRotation = Vector3(0, 0, self.cdRotationAngle)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TransitionToMainTitle()
+		-- 화면을 덮은 뒤 로딩 UI를 메인 타이틀로 교체하고 다시 화면을 밝힙니다.
+		if self.hasTransitionedToTitle == true or self.isTransitioningToTitle == true then
+			return
+		end
+
+		if _ScreenEffectUILogic == nil then
+			self.hasTransitionedToTitle = true
+			self:ApplyScreenVisibility()
+			return
+		end
+
+		self.isTransitioningToTitle = true
+		local fadeOutDuration = math.max(self.TransitionFadeOutDuration or 0, 0)
+		local fadeInDuration = math.max(self.TransitionFadeInDuration or 0, 0)
+
+		_ScreenEffectUILogic:FadeOut(fadeOutDuration, function()
+			self.hasTransitionedToTitle = true
+			self:ApplyScreenVisibility()
+
+			if _ScreenEffectUILogic == nil then
+				self.isTransitioningToTitle = false
+				return
+			end
+
+			_ScreenEffectUILogic:FadeIn(fadeInDuration, function()
+				self.isTransitioningToTitle = false
+			end)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TryTransitionToMainTitle()
+		-- 프리로드와 최소 로딩 연출 시간이 모두 끝난 경우에만 메인 타이틀로 전환합니다.
+		if self.hasTransitionedToTitle == true or self.isTransitioningToTitle == true then
+			return
+		end
+
+		if self.isPreloadComplete == false then
+			return
+		end
+
+		local minimumDuration = self.MinLoadingDuration
+		if minimumDuration < 0 then
+			minimumDuration = 0
+		end
+		if self.loadingElapsedTime < minimumDuration then
+			return
+		end
+
+		self:TransitionToMainTitle()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginStartupPreload()
+		-- ResourceTable과 메인 타이틀 UI의 주요 리소스를 비동기로 캐시에 올립니다.
+		if self.isPreloadStarted == true then
+			return
+		end
+
+		self.isPreloadStarted = true
+		local ruidList = self:BuildStartupPreloadRuids()
+		self.preloadTotalCount = #ruidList
+
+		if self.preloadTotalCount <= 0 then
+			self:OnStartupPreloadCompleted({})
+			return
+		end
+
+		_ResourceService:PreloadAsync(ruidList, function(results)
+			self:OnStartupPreloadCompleted(results)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildStartupPreloadRuids()
+		-- 일반 리소스, 상점 아이템, 배포용 UI 스프라이트 RUID를 중복 없이 조립합니다.
+		local ruidList = {}
+		local excludedRuids = self:BuildStartupPreloadExcludedRuids()
+		local seenRuids = {}
+
+		self:AddResourceTablePreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddDialogOptionBgmPreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddShopItemPreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddCharacterBaseCostumePreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddPerformanceCostumePreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddUiSpritePreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddDowntownMapResourcePreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddExplicitDynamicUiPreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddExplicitWorldSpritePreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddExplicitAnimationClipPreloadRuids(ruidList, excludedRuids, seenRuids)
+		self:AddExplicitSoundPreloadRuids(ruidList, excludedRuids, seenRuids)
+		return ruidList
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildStartupPreloadExcludedRuids()
+		-- PreloadAsync에서 CannotLoad가 확인된 미지원/누락 리소스 집합을 반환합니다.
+		return {
+			["71da3967ae01471cacf6800a1edfe67b"] = true,
+			["55dd6a9cd4a06a240920a17e34568148"] = true,
+			["4fea64a3307cda641809ad8be0d4890b"] = true,
+			["81ef7f881a3a4ce3a2cf28b58f0fabde"] = true,
+			["5dc0893cb22342e6b4d4408703f9ddb8"] = true,
+			["701d8491e264462588de3b863171609c"] = true,
+			["6867e2aeba1145a79e69046857fdbd5b"] = true,
+			["2495b732e3eb470383f12df75257e9d9"] = true,
+			["24cf25177f4a4f349872564a6064a964"] = true,
+			["cc3457b8e97b3e14f9d5c39ccdd640bf"] = true,
+			["ecabb6fff10ac864697292bdbeda2606"] = true,
+			["cd0560c4fc7f3b14994b90a502f00a21"] = true,
+			["cc55ed79f099cc94fae152e754984ddd"] = true,
+			["b44742a7c3de2604ba4999a54ae0b4ed"] = true,
+			["499c70eab41cfeb418a3ad9f87fd0285"] = true,
+			["83b7e4bf01f5ba14abf3adaa68cb3ad3"] = true,
+			["3e9d52ed52d64794bbd6f72bab8ee3d9"] = true,
+			["07d90a3597561504f90752a4137b57f2"] = true,
+			["7d614552ba7843049bb48ebd4509fb8f"] = true,
+			["9158d77e7b71ce747a7cfa12f35b7a74"] = true,
+			["cec4bf6a03860ae4e9882ac5a89cf721"] = true,
+			["2860136c06ab075439721c027de365af"] = true
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddResourceTablePreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- ResourceTable에 등록된 일반 게임 리소스를 추가합니다.
+		self:AddDataTablePreloadRuids(ruidList, excludedRuids, seenRuids, "ResourceTable")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddDialogOptionBgmPreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- DialogOptionTable에 명시된 대화 전용 BGM을 시작 로딩 캐시에 추가합니다.
+		local dataSet = _DataService:GetTable("DialogOptionTable")
+		if dataSet == nil then
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local ruid = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogBgmRuid", "")
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddShopItemPreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 상점 아이템 데이터셋의 RUID를 시작 로딩 캐시에 추가
+		self:AddDataTablePreloadRuids(ruidList, excludedRuids, seenRuids, "ShopItemTable")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddCharacterBaseCostumePreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 캐릭터 기본 코스튬 테이블의 17개 아바타 장착 슬롯 RUID를 모두 추가합니다.
+		local dataSet = _DataService:GetTable("CharacterBaseCostumeTable")
+		if dataSet == nil then
+			log_warning("[LoadingUILogic] preload table not found name=CharacterBaseCostumeTable")
+			return
+		end
+
+		local slotColumns = {
+			"Body", "Hair", "Face", "Cap", "Cape", "Coat", "Longcoat", "Pants", "Glove",
+			"Shoes", "OneHandedWeapon", "TwoHandedWeapon", "SubWeapon", "FaceAccessory",
+			"EyeAccessory", "EarAccessory", "Ear"
+		}
+		for rowIndex = 1, dataSet:GetRowCount() do
+			for _, columnName in ipairs(slotColumns) do
+				local ruid = _DataTableUtil:SafeGetString(dataSet, rowIndex, columnName, "")
+				self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddPerformanceCostumePreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 공연 고정 코스튬에 직접 등록된 아바타 장착 리소스를 시작 로딩 캐시에 추가
+		local costumeRuids = {
+			"b103dbf5d7a741e4ba61ddb44d73966b",
+			"363b7144e7a04fb68cbf19f200fe0b71",
+			"669cbb110dd6414aae8448610d822a49",
+			"372be596f6e84cf4af87b6fb105afa20",
+			"cec0797742eb4a38987799782c72c392",
+			"daeb0e1724f64bb1ba90c415e1328a84",
+			"9d1bd2e260174485bec72c7e34d8e1c3",
+			"25f870aa99284a348edb185a836f8fe5",
+			"51c6e707f70b4c4f8389f6da864acd27",
+			"ebd7369de15740a881592ec647b7d205",
+			"49f31f4123554db09d0d020cb0142da3",
+			"56ea2fb1808548878af6f2585d56a863",
+			"78fa72c0cf5145c08c17e8f0a6778d49",
+			"d1134922e21042b8ae92c1f87959e85f",
+			"1736f355ab874cb59e459f4e72e14304",
+			"8325814af9c14c27b51f35afcc2e94cd",
+			"0ce6a97dd09045fd9bdd5b2c08b2c352"
+		}
+		for _, ruid in ipairs(costumeRuids) do
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddUiSpritePreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 1차/2차 배포용 UI에서 추출한 스프라이트 RUID를 모두 추가합니다.
+		self:AddDataTablePreloadRuids(ruidList, excludedRuids, seenRuids, "UIResourcePreloadTable")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddDowntownMapResourcePreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- Map_Downtown에서 추출한 스프라이트와 타일 리소스 프리로드
+		self:AddDataTablePreloadRuids(ruidList, excludedRuids, seenRuids, "CityMapResourcePreloadTable")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddExplicitDynamicUiPreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 그리드와 런타임 UI 코드에서 직접 교체하는 이미지/AnimationClip RUID를 추가합니다.
+		local dynamicUiRuids = {
+			"efd29925505946719c34d8fe8007838f",
+			"6f0a819cd92d4f1ab4f56680377fae56",
+			"8b4426708f064f9d8a685402670bcfb5",
+			"307c843a931d409fbaf4480fe687782d",
+			"207998ae11eb48f5bc4134cd0a63403d",
+			"093dd313030e48a28371b68227ba280c",
+			-- 공연 커맨드 미니게임 방향 화살표 4종(MiniGameCommandBox arrowUp/Down/Left/Right). 별도 프리로드 없이 여기서 상주 처리
+			"6516507c4c8644898fad0eb012121119",
+			"57ce2b1cd81e4f6baa464e9f9d79b643",
+			"9e2420affcd748afbdebe34617a0077e",
+			"8d9eb632549f4242b269d7a048047491",
+			"5a0242fe7ba142feb86f825c1a3ec29a"
+		}
+		for _, ruid in ipairs(dynamicUiRuids) do
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddExplicitWorldSpritePreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 런타임에 동적으로 생성하는 월드 스프라이트 RUID를 명시적으로 추가합니다.
+		local worldSpriteRuids = {
+			"86435f462bc5461e82b2ef5f0120e838"
+		}
+		for _, ruid in ipairs(worldSpriteRuids) do
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddExplicitAnimationClipPreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 데이터 테이블과 UI 테이블에서 수집되지 않는 전용 AnimationClip을 명시적으로 추가합니다.
+		local animationClipRuids = {
+			"3a684ccec3234bdbb1e9afc582f7aae0",
+			"3278ce0471e74db6ab2c6b6b410183ba",
+			"de538ed75f964038b61d6d735cd9ae0b"
+		}
+		for _, ruid in ipairs(animationClipRuids) do
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddExplicitSoundPreloadRuids(table ruidList, table excludedRuids, table seenRuids)
+		-- 코드와 공연 테이블에서 직접 사용하는 BGM 및 효과음 RUID를 명시적으로 추가합니다.
+		local soundRuids = {
+			"6a3a57485388476da1969ca1a8d6d4c4",
+			"5935885b480a4f84ba880f71c97accbe",
+			"a6803c3691ee4058b200aa1fe999dabe",
+			"fb2ae50a8aeb49c29c04bc3db91e7e6a",
+			"87455f5f463441b4befc83a2c0b8b12a",
+			"972843e759204d3e9ad84e7d3fa94f83",
+			"af59dcc4de044dc793ea31c71c2e4e91",
+			"8727e134756141c58bf2f525a1598eee",
+			"d8cc9147090e49e989d15aa4a28e07f3",
+			"3f57147ef5f64f769dd812d79dc5f314",
+			"cdd2ca876f4d436a8bac7135e856f7e2",
+			"ee52f48638244989bbde48d64656a858",
+			"1f78fca1853e4a7685c1f3698817c3ec",
+			"cbd72e6d23ce4d7293553656a35b8e93",
+			"4cb1653159ea487eb5a35cf72073bc68"
+		}
+		for _, ruid in ipairs(soundRuids) do
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddDataTablePreloadRuids(table ruidList, table excludedRuids, table seenRuids, string tableName)
+		-- 지정한 데이터 테이블의 ruid 열을 읽어 공통 검증 경로로 추가합니다.
+		local dataSet = _DataService:GetTable(tableName)
+		if dataSet == nil then
+			log_warning("[LoadingUILogic] preload table not found name=" .. tableName)
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local ruid = _DataTableUtil:SafeGetString(dataSet, rowIndex, "ruid", "")
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddStartupPreloadRuid(table ruidList, table excludedRuids, table seenRuids, string ruid)
+		-- 32자리 16진수 RUID만 목록에 한 번 추가합니다.
+		if ruid == nil or string.len(ruid) ~= 32 then
+			return
+		end
+
+		if string.match(ruid, "^[0-9a-fA-F]+$") == nil then
+			return
+		end
+		if excludedRuids[ruid] == true or seenRuids[ruid] == true then
+			return
+		end
+
+		seenRuids[ruid] = true
+		table.insert(ruidList, ruid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartupPreloadCompleted(table results)
+		-- 프리로드 결과를 집계한 뒤 메인 타이틀로 즉시 전환합니다.
+		self.preloadFailureCount = 0
+		if results == nil then
+			self.preloadFailureCount = self.preloadTotalCount
+		else
+			for _, status in ipairs(results) do
+				if status ~= PreloadResultStatus.Success then
+					self.preloadFailureCount += 1
+				end
+			end
+		end
+
+		self.isPreloadComplete = true
+		self:TryTransitionToMainTitle()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyScreenVisibility()
+		-- 전환 상태에 따라 로딩 UI와 메인 타이틀 UI를 서로 반대로 표시합니다.
+		if self.LoadingRoot ~= nil then
+			self.LoadingRoot.Enable = self.hasTransitionedToTitle == false
+		end
+		if self.MainTitleRoot ~= nil then
+			self.MainTitleRoot.Enable = self.hasTransitionedToTitle
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDotVisibility()
+		-- 현재 단계에 맞춰 dot1부터 필요한 개수만 누적해서 표시합니다.
+		if self.Dot1 ~= nil then
+			self.Dot1.Enable = true
+		end
+		if self.Dot2 ~= nil then
+			self.Dot2.Enable = self.visibleDotCount >= 2
+		end
+		if self.Dot3 ~= nil then
+			self.Dot3.Enable = self.visibleDotCount >= 3
+		end
+	end
+
+end

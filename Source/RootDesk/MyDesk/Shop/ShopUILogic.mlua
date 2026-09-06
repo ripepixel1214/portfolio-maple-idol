@@ -1,0 +1,1630 @@
+-- 상점 UI에서 카테고리별 아이템을 itemGrid에 채워 넣는 클라이언트 로직입니다.
+@Logic
+script ShopUILogic extends Logic
+
+	property string UI_OWNED_KEY = "ui.shop.owned"
+
+	property string UI_BEHAVIOR_DEFAULT_KEY = "ui.shop.behavior.default"
+
+	property string UI_BEHAVIOR_WALK_KEY = "ui.shop.behavior.walk"
+
+	property string UI_BEHAVIOR_MOTION_KEY = "ui.shop.behavior.motion"
+
+	-- 아이템 슬롯이 채워지는 그리드(ScrollLayoutGroup 자동 정렬).
+	property Entity ItemGridEntity = "77ba33ec-3d46-4c93-ad71-f0b22d417482"
+
+	-- 런타임 복제용 슬롯 템플릿(itemGrid/Item01).
+	property Entity ItemTemplateEntity = "2309965e-a12f-429e-b511-8db5849e2318"
+
+	property ButtonComponent HairTabButton = "abf792b4-227d-4d8b-9d37-bd22607ee2cb"
+
+	property ButtonComponent ClothesTabButton = "bd365283-9b3e-42ca-9550-16222f4187de"
+
+	property ButtonComponent ShoesTabButton = "e32012b2-0717-4132-89d0-3b9ad0e2337b"
+
+	property ButtonComponent HatTabButton = "d6516121-6907-4cec-8777-8cb2fb007d76"
+
+	property ButtonComponent GoodsTabButton = "5fb11323-cf31-4d39-9b89-c2cf6ca49fe7"
+
+	-- selectedItemPanel의 카테고리별 선택 아이템 이름 텍스트.
+	property TextGUIRendererComponent HairSelectedText = "38c0aa13-22e4-4493-843b-75c1b4263d96"
+
+	property TextGUIRendererComponent ClothesSelectedText = "20be90af-b9c5-4ca5-861f-6fc4bcdfe211"
+
+	property TextGUIRendererComponent ShoesSelectedText = "fdcb0603-4c4a-49e9-a994-bf6f371cda74"
+
+	property TextGUIRendererComponent HatSelectedText = "a743dd6c-0424-4256-a3a2-1a03f420e3c5"
+
+	property TextGUIRendererComponent GoodsSelectedText = "e58c8ae7-b58e-4204-9817-89c5ed6f41c8"
+
+	-- BG/portraitFrameN/portrait 스프라이트(액티브 캐릭터 3명 가로 초상화).
+	property SpriteGUIRendererComponent Portrait1Image = "e79c9f86-32db-48da-a656-92e9fe54ab8d"
+
+	property SpriteGUIRendererComponent Portrait2Image = "970357c7-f8cc-46b0-b7cf-9f64f2e151c9"
+
+	property SpriteGUIRendererComponent Portrait3Image = "ba38b88b-3d2b-4586-a4ed-8fbb3add78bf"
+
+	-- 가로 초상화가 없을 때 사용할 플레이스홀더 RUID.
+	property string PortraitPlaceholderRuid = "67d9ae562627455e8b0f6bc6037f6911"
+
+	property any characterChangedHandler = nil
+
+	-- 치장 미리보기 아바타(CostumeManager + AvatarGUIRenderer + CharacterCostumeApplier).
+	property Entity AvatarEntity = "0ece5bd0-1fdd-4975-a411-bad383a26078"
+
+	property ButtonComponent PortraitFrame1Button = "d76c905e-a51b-4d1a-848f-98ececc5bbd8"
+
+	property ButtonComponent PortraitFrame2Button = "3fb9f255-ec52-4ea8-bc3b-be7abde3cdbe"
+
+	property ButtonComponent PortraitFrame3Button = "2b590912-8ced-42f5-afc8-2a75e0c32508"
+
+	-- 현재 미리보기 중인 캐릭터 id.
+	property string previewCharacterId = ""
+
+	-- 초상화 프레임 클릭 핸들러 목록({ entity, eventHandler }).
+	property any tPortraitFrameHandlers = {}
+
+	-- selectedItemPanel의 카테고리별 장착 해제 버튼.
+	property ButtonComponent HairUnequipButton = "401dc796-3515-4e59-bbe4-56d913fe2e5c"
+
+	property ButtonComponent ClothesUnequipButton = "08679020-5e8f-4a4f-a1fd-1cd1220f2ae5"
+
+	property ButtonComponent ShoesUnequipButton = "5333bf6d-4d0b-4cb0-9cbe-628eeb0ff290"
+
+	property ButtonComponent HatUnequipButton = "e34657d7-81dd-428e-91e6-acab9827ac40"
+
+	property ButtonComponent GoodsUnequipButton = "d1dc0edf-865f-4ff5-b5db-4ea86d621253"
+
+	-- 장착 해제 버튼 클릭 핸들러 목록({ entity, eventHandler }).
+	property any tUnequipButtonHandlers = {}
+
+	-- 아바타 동작(애니메이션) 전환 UI.
+	property ButtonComponent BehaviorLeftButton = "9b2489ae-ea1c-4db8-ab57-6b3ec6576056"
+
+	property ButtonComponent BehaviorRightButton = "4bb9fa13-80eb-48ab-8dd9-5bb471b28fae"
+
+	property TextGUIRendererComponent BehaviorText = "91ff8879-663f-4470-b04a-c8fc761091fa"
+
+	-- 현재 선택된 동작 인덱스(1=기본, 2=걷기, 3=모션).
+	property integer behaviorIndex = 1
+
+	property any tBehaviorButtonHandlers = {}
+
+	-- 뷰 전환 대상 패널: 치장(deco) 조합 3개 + 아이돌 패널.
+	property Entity ItemPanelEntity = "2e74e86b-af71-4b1b-b90a-7e4a8dd0c737"
+
+	property Entity SelectedItemPanelEntity = "4690e804-9401-4a79-b6d5-4ce50651d95b"
+
+	property Entity CharacterShowWindowPanelEntity = "cad75bf7-f674-48d9-9dfe-df0be19c3e37"
+
+	property Entity IdolPanelEntity = "ef468a8c-0f4c-4e32-9c5c-bdbfc4624f5b"
+
+	-- 치장/시즌 탭 버튼(ItemPanel과 IdolPanel 양쪽에 각각 존재).
+	property ButtonComponent ItemDecoTabButton = "dfc049c2-914c-424b-9351-86c527c65604"
+
+	property ButtonComponent ItemSeasonTabButton = "3e431243-3bb4-4e97-aa8c-57c262f53f51"
+
+	property ButtonComponent IdolDecoTabButton = "a6315e94-b7a9-4bdb-8164-90831df3f868"
+
+	property ButtonComponent IdolSeasonTabButton = "cb22a8cd-7c63-4c9f-a683-4b72c4bfeace"
+
+	property any tViewTabHandlers = {}
+
+	-- 탭 버튼 활성/비활성 스프라이트 RUID.
+	property string TabActiveRuid = "ead5f05eda9f449d8e14c3d5b1158658"
+
+	property string TabInactiveRuid = "c1f0a8bfed1e433c82f129213c73f7c0"
+
+	-- 월드 코인 표시 텍스트(임시 월드 코인 tempWorldCoin 표시).
+	property TextGUIRendererComponent WorldCoinText = "54af654d-712a-4ab4-bf92-997bc8a02630"
+
+	property any progressChangedHandler = nil
+
+	property any shopItemChangedHandler = nil
+
+	-- 선택된 worldCoin 아이템 가격 합계 표시 텍스트.
+	property TextGUIRendererComponent SelectedCoinText = "727d203b-e4d9-4df1-9eb7-db1bcd6b610a"
+
+	-- 구매 확인 팝업과 관련 버튼.
+	property Entity EnsureBuyPanelEntity = "0b2d7418-1398-4c8a-94f7-9ec9bfb551f1"
+
+	property ButtonComponent BuyButton = "a07d6eae-0d06-4ef1-a0e4-0a60b30680aa"
+
+	property ButtonComponent EnsureBuyCancelButton = "d5f3fab1-aa63-411f-96ee-85497e1b650a"
+
+	property ButtonComponent EnsureBuyConfirmButton = "d5c54cdc-8219-4000-9631-aa8632196426"
+
+	property any buyButtonClickHandler = nil
+
+	property any ensureBuyCancelClickHandler = nil
+
+	property any ensureBuyConfirmClickHandler = nil
+
+	-- 상점 열기/닫기 트리거.
+	property Entity ShopRootEntity = "560ac113-2456-4065-a3de-bc33d22d50c8"
+
+	property ButtonComponent OpenShopButton = "3be6e488-434c-4e7d-8c63-c89ae9fa02e0"
+
+	property ButtonComponent CloseShopButton = "351826e8-fbcd-47bd-81f3-a81e071dff0e"
+
+	property ButtonComponent IdolCloseShopButton = "bfd0e3a0-e66b-477f-a380-27adc5066f49"
+
+	property any openShopClickHandler = nil
+
+	property any closeShopClickHandler = nil
+
+	property any idolCloseShopClickHandler = nil
+
+	-- 시즌(아이돌) 구매 준비 팝업.
+	property Entity PreparePanelEntity = "08aa9a98-59e0-4d3a-b146-dd7ee2790e66"
+
+	property ButtonComponent IdolBuyButton = "286aab8f-4574-4b19-8c17-c4bb5dc7a766"
+
+	property ButtonComponent PrepareExitButton = "1bf14206-8fd8-489a-b3fc-80cd2860bbcd"
+
+	property any idolBuyClickHandler = nil
+
+	property any prepareExitClickHandler = nil
+
+	-- 팝업 뒤 입력을 막는 딤머(EnsureBuyPanel/PreparePanel 중 하나라도 열리면 활성).
+	property Entity DimmerEntity = "52464359-5007-446b-b9e8-0929584355fa"
+
+	-- 처음 표시할 카테고리.
+	property string currentCategory = "hair"
+
+	-- 카테고리별 선택 아이템 id. { [category:string] = shopItemId:string }
+	property any tSelectedByCategory = {}
+
+	-- 런타임 복제 슬롯 목록.
+	property any tRuntimeSlots = {}
+
+	-- 슬롯 클릭 핸들러 목록({ entity, eventHandler }).
+	property any tSlotClickHandlers = {}
+
+	-- 카테고리 탭 클릭 핸들러 목록({ entity, eventHandler }).
+	property any tTabClickHandlers = {}
+
+	-- 현재 선택된 상점 아이템 id.
+	property string selectedShopItemId = ""
+
+	property boolean IsInitialized = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 그리드/템플릿이 준비되면 탭을 연결하고 기본 카테고리를 표시합니다.
+		if self.IsInitialized == true then
+			return
+		end
+		if self.ItemGridEntity == nil or self.ItemTemplateEntity == nil then
+			return
+		end
+
+		self.IsInitialized = true
+		self:PrepareTemplate()
+		self:ClearSelectedTexts()
+		self:ConnectCategoryTabs()
+		self:ConnectCharacterChanged()
+		self:ConnectPortraitFrames()
+		self:ConnectUnequipButtons()
+		self:ConnectBehaviorButtons()
+		self:ConnectViewTabs()
+		self:ConnectProgressChanged()
+		self:ConnectShopItemChanged()
+		self:ShowCategory(self.currentCategory)
+		self:RefreshActivePortraits()
+		self:EnsureDefaultPreviewCharacter()
+		self:ApplyBehavior()
+		self:ShowDecoView()
+		self:RefreshWorldCoinText()
+		self:RefreshSelectedCoinText()
+		self:ConnectBuyButtons()
+		self:CloseEnsureBuyPanel()
+		self:ConnectShopToggle()
+		self:ConnectPreparePanel()
+		self:ClosePreparePanel()
+		self:CloseShop()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearSelectedTexts()
+		-- 아무것도 선택되지 않은 초기 상태에서는 모든 카테고리 선택 이름 텍스트를 비웁니다(디자인 기본값 제거).
+		self.tSelectedByCategory = {}
+		self:UpdateSelectedText("hair", "")
+		self:UpdateSelectedText("clothes", "")
+		self:UpdateSelectedText("shoes", "")
+		self:UpdateSelectedText("hat", "")
+		self:UpdateSelectedText("goods", "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- UI 엔티티가 늦게 준비되는 경우 초기화를 다시 시도합니다.
+		if self.IsInitialized == false then
+			self:OnBeginPlay()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 런타임 슬롯과 이벤트 핸들러를 정리합니다.
+		self:ClearRuntimeSlots()
+		self:DisconnectCategoryTabs()
+		self:DisconnectCharacterChanged()
+		self:DisconnectPortraitFrames()
+		self:DisconnectUnequipButtons()
+		self:DisconnectBehaviorButtons()
+		self:DisconnectViewTabs()
+		self:DisconnectProgressChanged()
+		self:DisconnectShopItemChanged()
+		self:DisconnectBuyButtons()
+		self:DisconnectShopToggle()
+		self:DisconnectPreparePanel()
+		self.IsInitialized = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCharacterChanged()
+		-- 액티브 캐릭터 변경 이벤트를 초상화 갱신에 연결합니다.
+		if _CharacterManager ~= nil and self.characterChangedHandler == nil then
+			self.characterChangedHandler = _CharacterManager:ConnectEvent(CharacterChangedEvent, self.OnCharacterChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCharacterChanged()
+		-- 액티브 캐릭터 변경 이벤트 연결을 해제합니다.
+		if self.characterChangedHandler ~= nil and _CharacterManager ~= nil then
+			_CharacterManager:DisconnectEvent(CharacterChangedEvent, self.characterChangedHandler)
+		end
+		self.characterChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCharacterChanged(any characterChangedEvent)
+		-- 액티브 캐릭터가 바뀌면 초상화를 다시 받아 표시하고, 기본 미리보기 캐릭터를 보장합니다.
+		self:RefreshActivePortraits()
+		self:EnsureDefaultPreviewCharacter()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnsureDefaultPreviewCharacter()
+		-- 아직 선택된 미리보기 캐릭터가 없으면 첫 번째 액티브 캐릭터를 기본으로 미리보기합니다.
+		if self.previewCharacterId ~= "" then
+			return
+		end
+
+		local activeIds = {}
+		if _CharacterManager ~= nil then
+			activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		end
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		local firstCharacterId = activeIds[1] or ""
+		if firstCharacterId == "" then
+			return
+		end
+
+		self:SelectPreviewCharacter(firstCharacterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshActivePortraits()
+		-- CharacterManager의 액티브 캐릭터 3명 가로 초상화를 portraitFrame1/2/3에 표시합니다.
+		local activeIds = {}
+		if _CharacterManager ~= nil then
+			activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		end
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		self:ApplyPortrait(self.Portrait1Image, activeIds[1] or "")
+		self:ApplyPortrait(self.Portrait2Image, activeIds[2] or "")
+		self:ApplyPortrait(self.Portrait3Image, activeIds[3] or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyPortrait(SpriteGUIRendererComponent portraitImage, string characterId)
+		-- 캐릭터 id로 가로 초상화를 받아 이미지에 적용합니다. 없으면 투명 처리합니다.
+		if portraitImage == nil then
+			return
+		end
+
+		if characterId == nil or characterId == "" then
+			portraitImage.ImageRUID = DataRef("")
+			portraitImage.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		local ruid = self:GetActorHorizontalPortraitRuid(characterId)
+		if ruid == "" then
+			portraitImage.ImageRUID = DataRef("")
+			portraitImage.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		portraitImage.ImageRUID = DataRef(ruid)
+		portraitImage.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetActorHorizontalPortraitRuid(string characterId)
+		-- RuntimeActorManager에서 액터의 가로 초상화 RUID를 가져오고, 없으면 플레이스홀더를 반환합니다.
+		if _RuntimeActorManager ~= nil then
+			local ruid = _RuntimeActorManager:ClientGetActorPortraitHorizontalRuid(characterId, "")
+			if ruid ~= nil and ruid ~= "" then
+				return ruid
+			end
+		end
+
+		return self.PortraitPlaceholderRuid
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareTemplate()
+		-- 디자인 원본 슬롯(Item01)을 숨겨 빈 칸으로 보이지 않게 합니다.
+		if self.ItemTemplateEntity ~= nil then
+			self.ItemTemplateEntity.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCategoryTabs()
+		-- 카테고리 탭 버튼을 각 카테고리 표시 동작에 연결합니다.
+		self:ConnectCategoryTab(self.HairTabButton, "hair")
+		self:ConnectCategoryTab(self.ClothesTabButton, "clothes")
+		self:ConnectCategoryTab(self.ShoesTabButton, "shoes")
+		self:ConnectCategoryTab(self.HatTabButton, "hat")
+		self:ConnectCategoryTab(self.GoodsTabButton, "goods")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCategoryTab(ButtonComponent tabButton, string category)
+		-- 개별 탭 버튼 클릭을 지정 카테고리 표시에 연결합니다.
+		if tabButton == nil or tabButton.Entity == nil then
+			return
+		end
+
+		local capturedCategory = category
+		local clickHandler = tabButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:ShowCategory(capturedCategory)
+		end)
+		table.insert(self.tTabClickHandlers, { entity = tabButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCategoryTabs()
+		-- 카테고리 탭 버튼 클릭 핸들러를 해제합니다.
+		if self.tTabClickHandlers == nil then
+			self.tTabClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tTabClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.tTabClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCategory(string category)
+		-- 선택된 카테고리 버튼 색을 갱신하고 그리드를 다시 구성합니다.
+		if category == nil or category == "" then
+			return
+		end
+
+		self.currentCategory = category
+		self:RefreshCategoryTabVisuals()
+		self:RebuildSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCategoryTabVisuals()
+		-- 초기 진입을 포함해 현재 카테고리에는 SelectedColor, 나머지에는 NormalColor를 적용합니다.
+		self:SetCategoryTabActive(self.HairTabButton, self.currentCategory == "hair")
+		self:SetCategoryTabActive(self.ClothesTabButton, self.currentCategory == "clothes")
+		self:SetCategoryTabActive(self.ShoesTabButton, self.currentCategory == "shoes")
+		self:SetCategoryTabActive(self.HatTabButton, self.currentCategory == "hat")
+		self:SetCategoryTabActive(self.GoodsTabButton, self.currentCategory == "goods")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCategoryTabActive(ButtonComponent tabButton, boolean isActive)
+		if tabButton == nil or tabButton.Entity == nil or tabButton.Colors == nil then
+			return
+		end
+
+		local renderer = tabButton.Entity.SpriteGUIRendererComponent
+		if renderer == nil then
+			return
+		end
+
+		local targetColor = tabButton.Colors.NormalColor
+		if isActive then
+			targetColor = tabButton.Colors.SelectedColor
+		end
+
+		if targetColor ~= nil then
+			renderer.Color = targetColor
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RebuildSlots()
+		-- 현재 카테고리의 아이템 목록으로 그리드 슬롯을 다시 만듭니다.
+		self:ClearRuntimeSlots()
+
+		local template = self.ItemTemplateEntity
+		if template == nil then
+			log_warning("[ShopUILogic] item template is nil")
+			return
+		end
+		if _ShopItemMaster == nil then
+			log_warning("[ShopUILogic] ShopItemMaster is nil")
+			return
+		end
+
+		template.Enable = false
+
+		local items = _ShopItemMaster:GetShopItemsByCategory(self.currentCategory)
+		if items == nil then
+			return
+		end
+
+		for index = 1, #items do
+			local tShopItem = items[index]
+			local slot = template:Clone(self:GetRuntimeSlotName(index))
+			if slot ~= nil then
+				slot.Enable = true
+				self:SetSlot(slot, tShopItem)
+				self:ConnectSlotClick(slot, tShopItem)
+				table.insert(self.tRuntimeSlots, slot)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearRuntimeSlots()
+		-- 런타임 슬롯과 클릭 핸들러를 모두 정리합니다.
+		self:DisconnectSlotClicks()
+
+		if self.tRuntimeSlots == nil then
+			self.tRuntimeSlots = {}
+			return
+		end
+
+		for _, slot in ipairs(self.tRuntimeSlots) do
+			if isvalid(slot) then
+				slot:Destroy()
+			end
+		end
+
+		self.tRuntimeSlots = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetRuntimeSlotName(integer index)
+		-- 슬롯 인덱스를 런타임 전용 복제 슬롯 이름으로 변환합니다.
+		if index < 10 then
+			return "RuntimeShopItem0" .. tostring(index)
+		end
+
+		return "RuntimeShopItem" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSlot(Entity slot, any tShopItem)
+		-- tShopItem: ShopItemRow
+		-- 슬롯에 아이콘/재화/가격을 채웁니다.
+		if slot == nil or tShopItem == nil then
+			return
+		end
+
+		self:SetSlotIcon(slot, tShopItem)
+
+		-- 보유 중이면 가격/재화 대신 "보유 중"을 표시합니다.
+		if self:IsShopItemOwned(tShopItem.shopItemId or "") then
+			self:SetSlotOwned(slot)
+		else
+			self:SetSlotCoin(slot, tShopItem.coinType or "")
+			self:SetSlotPrice(slot, tShopItem.price or 0)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSlotOwned(Entity slot)
+		-- 보유 중 슬롯: 재화 아이콘을 숨기고 가격 텍스트를 "보유 중"으로 바꿉니다.
+		local mesoIcon = slot:GetChildByName("meso", true)
+		if mesoIcon ~= nil then
+			mesoIcon.Enable = false
+		end
+
+		local worldCoinIcon = slot:GetChildByName("worldCoin", true)
+		if worldCoinIcon ~= nil then
+			worldCoinIcon.Enable = false
+		end
+
+		local priceText = slot:GetChildByName("UIText", true)
+		if priceText ~= nil and priceText.TextGUIRendererComponent ~= nil then
+			priceText.TextGUIRendererComponent.Text = self:GetLocalizedText(self.UI_OWNED_KEY, "")
+			-- 재화 아이콘이 없으므로 텍스트의 x 위치만 32로 옮긴다(y는 유지).
+			if priceText.UITransformComponent ~= nil then
+				local currentPosition = priceText.UITransformComponent.anchoredPosition
+				priceText.UITransformComponent.anchoredPosition = Vector2(32, currentPosition.y)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsShopItemOwned(string shopItemId)
+		-- 클라이언트 캐시 기준 해당 상점 아이템 보유 여부를 반환합니다.
+		if shopItemId == nil or shopItemId == "" or _ShopItemManager == nil then
+			return false
+		end
+
+		return _ShopItemManager:ClientHasShopItem(shopItemId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSlotIcon(Entity slot, any tShopItem)
+		-- tShopItem: ShopItemRow
+		-- 아바타 아이템 썸네일을 슬롯 아이콘에 적용하고 표시 크기를 반영합니다.
+		local icon = slot:GetChildByName("Icon", true)
+		if icon == nil or icon.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		local ruid = tShopItem.ruid or ""
+		if ruid == "" then
+			icon.SpriteGUIRendererComponent.ImageRUID = DataRef("")
+			icon.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		-- 아바타 아이템은 thumbnail:// 접두어가 있어야 렌더됩니다.
+		icon.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. ruid)
+		icon.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+
+		-- 표시 크기(width/height)가 지정된 경우에만 아이콘 rect를 조정합니다.
+		local width = tShopItem.width or 0
+		local height = tShopItem.height or 0
+		if width > 0 and height > 0 and icon.UITransformComponent ~= nil then
+			icon.UITransformComponent.RectSize = Vector2(width, height)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSlotCoin(Entity slot, string coinType)
+		-- 재화 종류에 따라 meso/worldCoin 아이콘 중 하나만 표시합니다.
+		local mesoIcon = slot:GetChildByName("meso", true)
+		if mesoIcon ~= nil then
+			mesoIcon.Enable = coinType == "meso"
+		end
+
+		local worldCoinIcon = slot:GetChildByName("worldCoin", true)
+		if worldCoinIcon ~= nil then
+			worldCoinIcon.Enable = coinType == "worldCoin"
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSlotPrice(Entity slot, integer price)
+		-- 슬롯 하단 가격 텍스트를 갱신합니다. 0 이하이면 빈 문자열입니다.
+		local priceText = slot:GetChildByName("UIText", true)
+		if priceText == nil or priceText.TextGUIRendererComponent == nil then
+			return
+		end
+
+		if price > 0 then
+			priceText.TextGUIRendererComponent.Text = tostring(price)
+		else
+			priceText.TextGUIRendererComponent.Text = ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectSlotClick(Entity slot, any tShopItem)
+		-- tShopItem: ShopItemRow
+		-- 슬롯 버튼 클릭을 아이템 선택에 연결합니다.
+		if slot == nil or tShopItem == nil then
+			return
+		end
+
+		local shopItemId = tShopItem.shopItemId or ""
+		if shopItemId == "" then
+			return
+		end
+
+		local capturedId = shopItemId
+		local clickHandler = slot:ConnectEvent(ButtonClickEvent, function()
+			self:OnSlotClicked(capturedId)
+		end)
+		table.insert(self.tSlotClickHandlers, { entity = slot, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectSlotClicks()
+		-- 슬롯에 연결한 클릭 핸들러를 해제합니다.
+		if self.tSlotClickHandlers == nil then
+			self.tSlotClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tSlotClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.tSlotClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSlotClicked(string shopItemId)
+		-- 슬롯 선택을 카테고리별 상태에 기록하고 해당 카테고리의 선택 이름 텍스트를 갱신합니다.
+		if shopItemId == nil or shopItemId == "" then
+			return
+		end
+		if _ShopItemMaster == nil then
+			log_warning("[ShopUILogic] ShopItemMaster is nil")
+			return
+		end
+
+		local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+		if tShopItem == nil then
+			return
+		end
+
+		local category = tShopItem.category or ""
+		local itemRuid = tShopItem.ruid or ""
+		local selectedShopItemId = self.tSelectedByCategory[category] or ""
+		local baseRuid = self:GetBaseCostumeRuid(category)
+		if selectedShopItemId == shopItemId or (itemRuid ~= "" and itemRuid == baseRuid) then
+			-- 임시 선택을 다시 누르거나 기존 치장을 누르면 빈 슬롯이 아니라 CharacterCostumeManager의 기본 치장으로 복귀합니다.
+			self:RestoreCategoryToBase(category)
+		else
+			self.selectedShopItemId = shopItemId
+			self.tSelectedByCategory[category] = shopItemId
+			self:UpdateSelectedText(category, self:GetSelectedItemDisplayText(tShopItem))
+			self:ApplyOverrideForCategory(category, itemRuid)
+		end
+		self:PlayCurrentBehaviorAction()
+		self:RefreshSelectedCoinText()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreCategoryToBase(string category)
+		-- 캐시샵 임시 선택만 제거하고 저장된 기존 치장을 다시 적용합니다. 기존 치장은 절대 빈 RUID로 덮지 않습니다.
+		self.selectedShopItemId = ""
+		self.tSelectedByCategory[category] = nil
+		self:UpdateSelectedText(category, "")
+		self:ApplyBaseCostume()
+		self:ApplyAllOverrides()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSelectedItemDisplayText(any tShopItem)
+		-- 보유 아이템은 이름 뒤에 상태를 붙여, 선택된 코디와 구매 필요 여부를 함께 보여줍니다.
+		if tShopItem == nil then
+			return ""
+		end
+
+		local itemName = tShopItem.name or ""
+		local shopItemId = tShopItem.shopItemId or ""
+		local category = tShopItem.category or ""
+		local itemRuid = tShopItem.ruid or ""
+		if itemRuid ~= "" and itemRuid == self:GetBaseCostumeRuid(category) then
+			-- 현재 캐릭터가 캐시샵에 들어오기 전부터 입고 있던 기본 치장은 변경 사항이 아니므로 숨깁니다.
+			return ""
+		end
+		if itemName ~= "" and shopItemId ~= "" and self:IsShopItemOwned(shopItemId) then
+			return itemName .. " (" .. self:GetLocalizedText(self.UI_OWNED_KEY, "") .. ")"
+		end
+
+		return itemName
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedTextsFromSelections()
+		-- 캐릭터를 바꾸거나 구매가 완료되어도 상점 세션의 공통 선택 정보를 다시 표시합니다.
+		local categories = { "hair", "clothes", "shoes", "hat", "goods" }
+		for _, category in ipairs(categories) do
+			local shopItemId = self:GetSelectedShopItemId(category)
+			local displayText = ""
+			if shopItemId ~= "" and _ShopItemMaster ~= nil then
+				local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+				displayText = self:GetSelectedItemDisplayText(tShopItem)
+			end
+			self:UpdateSelectedText(category, displayText)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateSelectedText(string category, string name)
+		-- 지정 카테고리의 선택 이름 텍스트를 갱신합니다.
+		local selectedText = self:GetSelectedTextComponent(category)
+		if selectedText == nil then
+			return
+		end
+
+		selectedText.Text = name or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetSelectedTextComponent(string category)
+		-- 카테고리에 대응하는 selectedItemPanel 선택 이름 텍스트 컴포넌트를 반환합니다.
+		if category == "hair" then
+			return self.HairSelectedText
+		elseif category == "clothes" then
+			return self.ClothesSelectedText
+		elseif category == "shoes" then
+			return self.ShoesSelectedText
+		elseif category == "hat" then
+			return self.HatSelectedText
+		elseif category == "goods" then
+			return self.GoodsSelectedText
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSelectedShopItemId(string category)
+		-- 지정 카테고리에서 현재 선택된 상점 아이템 id를 반환합니다. 없으면 빈 문자열입니다.
+		if category == nil or category == "" then
+			return ""
+		end
+
+		return self.tSelectedByCategory[category] or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectPortraitFrames()
+		-- 초상화 프레임 버튼을 캐릭터 미리보기 전환에 연결합니다.
+		self:ConnectPortraitFrame(self.PortraitFrame1Button, 1)
+		self:ConnectPortraitFrame(self.PortraitFrame2Button, 2)
+		self:ConnectPortraitFrame(self.PortraitFrame3Button, 3)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectPortraitFrame(ButtonComponent frameButton, integer index)
+		-- 개별 초상화 프레임 클릭을 해당 슬롯 캐릭터 미리보기에 연결합니다.
+		if frameButton == nil or frameButton.Entity == nil then
+			return
+		end
+
+		local capturedIndex = index
+		local clickHandler = frameButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:OnPortraitFrameClicked(capturedIndex)
+		end)
+		table.insert(self.tPortraitFrameHandlers, { entity = frameButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectPortraitFrames()
+		-- 초상화 프레임 버튼 클릭 핸들러를 해제합니다.
+		if self.tPortraitFrameHandlers == nil then
+			self.tPortraitFrameHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tPortraitFrameHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.tPortraitFrameHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPortraitFrameClicked(integer index)
+		-- 클릭한 프레임에 대응하는 액티브 캐릭터를 미리보기 대상으로 선택합니다.
+		local activeIds = {}
+		if _CharacterManager ~= nil then
+			activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		end
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		local characterId = activeIds[index] or ""
+		if characterId == "" then
+			return
+		end
+
+		self:SelectPreviewCharacter(characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectPreviewCharacter(string characterId)
+		-- 캐릭터의 기본 치장 위에 상점 세션의 공통 선택 치장을 유지해서 다시 적용합니다.
+		self.previewCharacterId = characterId or ""
+		self:ApplyBaseCostume()
+		self:ApplyAllOverrides()
+		self:RefreshSelectedTextsFromSelections()
+		self:RefreshSelectedCoinText()
+		self:PlayCurrentBehaviorAction()
+		log("[ShopUILogic][SharedSelection] character=" .. (self.previewCharacterId or "") .. " selectionsPreserved=true")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyBaseCostume()
+		-- 현재 미리보기 캐릭터의 런타임 치장을 아바타의 CostumeManagerComponent에 적용합니다.
+		local applier = self:GetAvatarCostumeApplier()
+		if applier == nil then
+			log_warning("[ShopUILogic] avatar costume applier is nil")
+			return
+		end
+
+		applier:SetCharacterId(self.previewCharacterId or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method CharacterCostumeApplierComponent GetAvatarCostumeApplier()
+		-- 아바타 엔티티의 CharacterCostumeApplierComponent를 반환합니다.
+		if self.AvatarEntity == nil then
+			return nil
+		end
+
+		---@type CharacterCostumeApplierComponent
+		local applier = self.AvatarEntity:GetComponent("script.CharacterCostumeApplierComponent")
+		return applier
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetSelectionToCurrentCostume()
+		-- 현재 장착 치장을 미리보기의 기본값으로 적용하되, 이번 상점 세션의 선택 텍스트에는 포함하지 않습니다.
+		self.selectedShopItemId = ""
+		self:ClearSelectedTexts()
+		self:ApplyBaseCostume()
+		self:RefreshSelectedCoinText()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeRuid(string category)
+		-- 현재 미리보기 캐릭터가 실제로 저장해 둔 카테고리별 장착 RUID를 반환합니다.
+		if self.previewCharacterId == "" or _CharacterCostumeManager == nil then
+			return ""
+		end
+
+		local costume = _CharacterCostumeManager:ClientGetCostume(self.previewCharacterId)
+		if costume == nil then
+			return ""
+		end
+
+		if category == "hair" then
+			return costume.hair or ""
+		elseif category == "clothes" then
+			return costume.longcoat or ""
+		elseif category == "shoes" then
+			return costume.shoes or ""
+		elseif category == "hat" then
+			return costume.cap or ""
+		elseif category == "goods" then
+			return costume.oneHandedWeapon or ""
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyAllOverrides()
+		-- 카테고리별로 선택된 상점 아이템을 모두 오버라이드로 다시 적용합니다.
+		if _ShopItemMaster == nil then
+			return
+		end
+
+		for category, shopItemId in pairs(self.tSelectedByCategory) do
+			local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+			if tShopItem ~= nil then
+				self:ApplyOverrideForCategory(category, tShopItem.ruid or "")
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyOverrideForCategory(string category, string ruid)
+		-- 상점 카테고리에 대응하는 아바타 슬롯에 아이템 RUID를 오버라이드로 적용합니다.
+		local costumeManager = nil
+		if self.AvatarEntity ~= nil then
+			costumeManager = self.AvatarEntity.CostumeManagerComponent
+		end
+		if isvalid(costumeManager) == false then
+			log_warning("[ShopUILogic] avatar CostumeManagerComponent is nil")
+			return
+		end
+
+		if category == "hair" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Hair, ruid)
+		elseif category == "clothes" then
+			-- 드레스류는 Longcoat 슬롯을 사용하며 coat/pants 슬롯을 함께 점유하므로 충돌을 비웁니다.
+			costumeManager:SetEquip(MapleAvatarItemCategory.Longcoat, ruid)
+			costumeManager:SetEquip(MapleAvatarItemCategory.Coat, "")
+			costumeManager:SetEquip(MapleAvatarItemCategory.Pants, "")
+		elseif category == "shoes" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Shoes, ruid)
+		elseif category == "hat" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Cap, ruid)
+		elseif category == "goods" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.OneHandedWeapon, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectUnequipButtons()
+		-- selectedItemPanel의 카테고리 버튼을 해당 슬롯 장착 해제에 연결합니다.
+		self:ConnectUnequipButton(self.HairUnequipButton, "hair")
+		self:ConnectUnequipButton(self.ClothesUnequipButton, "clothes")
+		self:ConnectUnequipButton(self.ShoesUnequipButton, "shoes")
+		self:ConnectUnequipButton(self.HatUnequipButton, "hat")
+		self:ConnectUnequipButton(self.GoodsUnequipButton, "goods")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectUnequipButton(ButtonComponent unequipButton, string category)
+		-- 개별 카테고리 버튼 클릭을 해당 슬롯 장착 해제에 연결합니다.
+		if unequipButton == nil or unequipButton.Entity == nil then
+			return
+		end
+
+		local capturedCategory = category
+		local clickHandler = unequipButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:OnUnequipButtonClicked(capturedCategory)
+		end)
+		table.insert(self.tUnequipButtonHandlers, { entity = unequipButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectUnequipButtons()
+		-- 장착 해제 버튼 클릭 핸들러를 해제합니다.
+		if self.tUnequipButtonHandlers == nil then
+			self.tUnequipButtonHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tUnequipButtonHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.tUnequipButtonHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUnequipButtonClicked(string category)
+		-- 카테고리 버튼 클릭 시 해당 슬롯의 상점 오버라이드를 해제합니다.
+		self:UnequipCategory(category)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UnequipCategory(string category)
+		-- 캐시샵에서 임시로 덮어쓴 아이템만 해제하고 CharacterCostumeManager의 기존 치장으로 복귀합니다.
+		if category == nil or category == "" then
+			return
+		end
+		if (self.tSelectedByCategory[category] or "") == "" then
+			return
+		end
+
+		self:RestoreCategoryToBase(category)
+		self:PlayCurrentBehaviorAction()
+		self:RefreshSelectedCoinText()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectBehaviorButtons()
+		-- 좌/우 버튼을 아바타 동작 이전/다음 전환에 연결합니다.
+		self:ConnectBehaviorButton(self.BehaviorLeftButton, -1)
+		self:ConnectBehaviorButton(self.BehaviorRightButton, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectBehaviorButton(ButtonComponent behaviorButton, integer delta)
+		-- 개별 동작 전환 버튼 클릭을 순환 전환에 연결합니다.
+		if behaviorButton == nil or behaviorButton.Entity == nil then
+			return
+		end
+
+		local capturedDelta = delta
+		local clickHandler = behaviorButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:CycleBehavior(capturedDelta)
+		end)
+		table.insert(self.tBehaviorButtonHandlers, { entity = behaviorButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectBehaviorButtons()
+		-- 동작 전환 버튼 클릭 핸들러를 해제합니다.
+		if self.tBehaviorButtonHandlers == nil then
+			self.tBehaviorButtonHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tBehaviorButtonHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.tBehaviorButtonHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CycleBehavior(integer delta)
+		-- 동작 인덱스를 delta만큼 순환 이동하고 반영합니다.
+		local count = self:GetBehaviorCount()
+		if count <= 0 then
+			return
+		end
+
+		self.behaviorIndex = self.behaviorIndex + delta
+		if self.behaviorIndex < 1 then
+			self.behaviorIndex = count
+		elseif self.behaviorIndex > count then
+			self.behaviorIndex = 1
+		end
+
+		self:ApplyBehavior()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyBehavior()
+		-- 현재 동작 인덱스의 라벨을 텍스트에 표시하고 아바타에 애니메이션을 재생합니다.
+		if self.BehaviorText ~= nil then
+			self.BehaviorText.Text = self:GetBehaviorLabel(self.behaviorIndex)
+		end
+
+		self:PlayCurrentBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCurrentBehaviorAction()
+		-- 현재 동작 인덱스의 액션을 shop 아바타에 루프 재생합니다.
+		self:PlayAvatarAction(self:GetBehaviorAction(self.behaviorIndex))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayAvatarAction(string actionName)
+		-- UI 아바타(AvatarGUIRenderer)의 body 엔티티에 액션을 루프로 재생합니다.
+		if actionName == nil or actionName == "" then
+			return
+		end
+		if self.AvatarEntity == nil then
+			return
+		end
+
+		local avatarRenderer = self.AvatarEntity.AvatarGUIRendererComponent
+		if isvalid(avatarRenderer) == false then
+			return
+		end
+
+		local bodyEntity = avatarRenderer:GetBodyEntity()
+		if isvalid(bodyEntity) == false then
+			return
+		end
+
+		local event = ActionStateChangedEvent()
+		event.CoreActionName = actionName
+		event.PartsActionName = actionName
+		event.PlayRate = 1
+		event.PlayType = SpriteAnimClipPlayType.Loop
+		bodyEntity:SendEvent(event)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetBehaviorCount()
+		return 3
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBehaviorAction(integer index)
+		-- 동작 인덱스에 대응하는 스프라이트 액션 ID를 반환합니다.
+		if index == 1 then
+			return "stand1"
+		elseif index == 2 then
+			return "walk1"
+		elseif index == 3 then
+			return "swingO2"
+		end
+
+		return "stand1"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBehaviorLabel(integer index)
+		-- 동작 인덱스에 대응하는 표시 라벨을 반환합니다.
+		if index == 1 then
+			return self:GetLocalizedText(self.UI_BEHAVIOR_DEFAULT_KEY, "")
+		elseif index == 2 then
+			return self:GetLocalizedText(self.UI_BEHAVIOR_WALK_KEY, "")
+		elseif index == 3 then
+			return self:GetLocalizedText(self.UI_BEHAVIOR_MOTION_KEY, "")
+		end
+
+		return self:GetLocalizedText(self.UI_BEHAVIOR_DEFAULT_KEY, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectViewTabs()
+		-- ItemPanel/IdolPanel 양쪽의 치장/시즌 탭 버튼을 뷰 전환에 연결합니다.
+		self:ConnectViewTab(self.ItemDecoTabButton, true)
+		self:ConnectViewTab(self.ItemSeasonTabButton, false)
+		self:ConnectViewTab(self.IdolDecoTabButton, true)
+		self:ConnectViewTab(self.IdolSeasonTabButton, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectViewTab(ButtonComponent tabButton, boolean isDeco)
+		-- 개별 탭 버튼 클릭을 치장/아이돌 뷰 전환에 연결합니다.
+		if tabButton == nil or tabButton.Entity == nil then
+			return
+		end
+
+		local capturedIsDeco = isDeco
+		local clickHandler = tabButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			if capturedIsDeco == true then
+				self:ShowDecoView()
+			else
+				self:ShowIdolView()
+			end
+		end)
+		table.insert(self.tViewTabHandlers, { entity = tabButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectViewTabs()
+		-- 뷰 전환 탭 버튼 클릭 핸들러를 해제합니다.
+		if self.tViewTabHandlers == nil then
+			self.tViewTabHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tViewTabHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.tViewTabHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowDecoView()
+		-- 치장 조합(ItemPanel + selectedItemPanel + characterShowWindowPanel)을 켜고 IdolPanel을 끕니다.
+		self:SetPanelEnable(self.ItemPanelEntity, true)
+		self:SetPanelEnable(self.SelectedItemPanelEntity, true)
+		self:SetPanelEnable(self.CharacterShowWindowPanelEntity, true)
+		self:SetPanelEnable(self.IdolPanelEntity, false)
+		self:UpdateTabSprites(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowIdolView()
+		-- IdolPanel을 켜고 치장 조합 3개를 끕니다(상호 배타).
+		self:SetPanelEnable(self.ItemPanelEntity, false)
+		self:SetPanelEnable(self.SelectedItemPanelEntity, false)
+		self:SetPanelEnable(self.CharacterShowWindowPanelEntity, false)
+		self:SetPanelEnable(self.IdolPanelEntity, true)
+		self:UpdateTabSprites(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateTabSprites(boolean isDeco)
+		-- 현재 뷰에 맞춰 치장/시즌 탭 버튼의 활성/비활성 스프라이트를 갱신합니다.
+		local decoRuid = self.TabInactiveRuid
+		local seasonRuid = self.TabInactiveRuid
+		if isDeco == true then
+			decoRuid = self.TabActiveRuid
+		else
+			seasonRuid = self.TabActiveRuid
+		end
+
+		self:SetTabButtonSprite(self.ItemDecoTabButton, decoRuid)
+		self:SetTabButtonSprite(self.IdolDecoTabButton, decoRuid)
+		self:SetTabButtonSprite(self.ItemSeasonTabButton, seasonRuid)
+		self:SetTabButtonSprite(self.IdolSeasonTabButton, seasonRuid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTabButtonSprite(ButtonComponent tabButton, string ruid)
+		-- 탭 버튼 엔티티의 SpriteGUIRendererComponent 이미지를 교체합니다.
+		if tabButton == nil or tabButton.Entity == nil then
+			return
+		end
+
+		local sprite = tabButton.Entity.SpriteGUIRendererComponent
+		if isvalid(sprite) == false then
+			return
+		end
+
+		sprite.ImageRUID = DataRef(ruid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPanelEnable(Entity panel, boolean enable)
+		-- 패널 엔티티의 Enable을 안전하게 설정합니다.
+		if panel ~= nil then
+			panel.Enable = enable
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectShopToggle()
+		-- 상점 열기 버튼과 ItemPanel/IdolPanel의 닫기 버튼 클릭을 연결합니다.
+		if self.OpenShopButton ~= nil and self.OpenShopButton.Entity ~= nil and self.openShopClickHandler == nil then
+			self.openShopClickHandler = self.OpenShopButton.Entity:ConnectEvent(ButtonClickEvent, self.OnOpenShopClicked)
+		end
+
+		if self.CloseShopButton ~= nil and self.CloseShopButton.Entity ~= nil and self.closeShopClickHandler == nil then
+			self.closeShopClickHandler = self.CloseShopButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCloseShopClicked)
+		end
+
+		if self.IdolCloseShopButton ~= nil and self.IdolCloseShopButton.Entity ~= nil and self.idolCloseShopClickHandler == nil then
+			self.idolCloseShopClickHandler = self.IdolCloseShopButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCloseShopClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectShopToggle()
+		-- 상점 열기/닫기 버튼 클릭 연결을 해제합니다.
+		if self.OpenShopButton ~= nil and self.OpenShopButton.Entity ~= nil and self.openShopClickHandler ~= nil then
+			self.OpenShopButton.Entity:DisconnectEvent(ButtonClickEvent, self.openShopClickHandler)
+		end
+		self.openShopClickHandler = nil
+
+		if self.CloseShopButton ~= nil and self.CloseShopButton.Entity ~= nil and self.closeShopClickHandler ~= nil then
+			self.CloseShopButton.Entity:DisconnectEvent(ButtonClickEvent, self.closeShopClickHandler)
+		end
+		self.closeShopClickHandler = nil
+
+		if self.IdolCloseShopButton ~= nil and self.IdolCloseShopButton.Entity ~= nil and self.idolCloseShopClickHandler ~= nil then
+			self.IdolCloseShopButton.Entity:DisconnectEvent(ButtonClickEvent, self.idolCloseShopClickHandler)
+		end
+		self.idolCloseShopClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnOpenShopClicked(ButtonClickEvent event)
+		-- CashShopButton으로 상점을 엽니다.
+		self:OpenShop()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCloseShopClicked(ButtonClickEvent event)
+		-- UIButton으로 상점을 닫습니다.
+		self:CloseShop()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenShop()
+		-- 상점 루트를 켜고 기본 치장 뷰로 초기화합니다.
+		self:SetPanelEnable(self.ShopRootEntity, true)
+		if _SoundManager ~= nil then
+			_SoundManager:PlayShopBGM()
+		end
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "shop", true)
+		end
+		self:CloseEnsureBuyPanel()
+		self:ClosePreparePanel()
+		self:RefreshActivePortraits()
+		self:EnsureDefaultPreviewCharacter()
+		self:ResetSelectionToCurrentCostume()
+		log("[ShopUILogic][Baseline] shop opened with empty selected texts character=" .. (self.previewCharacterId or ""))
+		self:ShowDecoView()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseShop()
+		-- 상점 루트와 각 팝업을 닫습니다.
+		if _SoundManager ~= nil then
+			_SoundManager:RestoreBGMAfterShop()
+		end
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "shop", false)
+		end
+		self:CloseEnsureBuyPanel()
+		self:ClosePreparePanel()
+		self:ResetSelectionToCurrentCostume()
+		self:SetPanelEnable(self.ShopRootEntity, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectPreparePanel()
+		-- 시즌 구매(IdolPanel/BuyButton) 및 준비 팝업 닫기(Exit) 버튼 클릭을 연결합니다.
+		if self.IdolBuyButton ~= nil and self.IdolBuyButton.Entity ~= nil and self.idolBuyClickHandler == nil then
+			self.idolBuyClickHandler = self.IdolBuyButton.Entity:ConnectEvent(ButtonClickEvent, self.OnIdolBuyClicked)
+		end
+
+		if self.PrepareExitButton ~= nil and self.PrepareExitButton.Entity ~= nil and self.prepareExitClickHandler == nil then
+			self.prepareExitClickHandler = self.PrepareExitButton.Entity:ConnectEvent(ButtonClickEvent, self.OnPrepareExitClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectPreparePanel()
+		-- 준비 팝업 열기/닫기 버튼 클릭 연결을 해제합니다.
+		if self.IdolBuyButton ~= nil and self.IdolBuyButton.Entity ~= nil and self.idolBuyClickHandler ~= nil then
+			self.IdolBuyButton.Entity:DisconnectEvent(ButtonClickEvent, self.idolBuyClickHandler)
+		end
+		self.idolBuyClickHandler = nil
+
+		if self.PrepareExitButton ~= nil and self.PrepareExitButton.Entity ~= nil and self.prepareExitClickHandler ~= nil then
+			self.PrepareExitButton.Entity:DisconnectEvent(ButtonClickEvent, self.prepareExitClickHandler)
+		end
+		self.prepareExitClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdolBuyClicked(ButtonClickEvent event)
+		-- 시즌 BuyButton으로 준비 팝업을 엽니다.
+		self:OpenPreparePanel()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPrepareExitClicked(ButtonClickEvent event)
+		-- Exit 버튼으로 준비 팝업을 닫습니다.
+		self:ClosePreparePanel()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenPreparePanel()
+		-- 시즌 구매 준비 팝업을 엽니다.
+		self:SetPanelEnable(self.PreparePanelEntity, true)
+		self:RefreshDimmer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClosePreparePanel()
+		-- 시즌 구매 준비 팝업을 닫습니다.
+		self:SetPanelEnable(self.PreparePanelEntity, false)
+		self:RefreshDimmer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshDimmer()
+		-- EnsureBuyPanel/PreparePanel 중 하나라도 열려 있으면 딤머를 켜 뒤 입력을 막습니다.
+		local shouldDim = false
+		if self.EnsureBuyPanelEntity ~= nil and self.EnsureBuyPanelEntity.Enable == true then
+			shouldDim = true
+		end
+		if self.PreparePanelEntity ~= nil and self.PreparePanelEntity.Enable == true then
+			shouldDim = true
+		end
+
+		self:SetPanelEnable(self.DimmerEntity, shouldDim)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectProgressChanged()
+		-- 진행 데이터 변경 이벤트를 월드 코인 표시 갱신에 연결합니다.
+		if _ProgressManager ~= nil and self.progressChangedHandler == nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectProgressChanged()
+		-- 진행 데이터 변경 이벤트 연결을 해제합니다.
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+		end
+		self.progressChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 진행 데이터가 바뀌면 월드 코인 표시를 갱신합니다.
+		self:RefreshWorldCoinText()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectShopItemChanged()
+		-- 상점 보유 목록 변경 이벤트를 그리드/합계 갱신에 연결합니다.
+		if _ShopItemManager ~= nil and self.shopItemChangedHandler == nil then
+			self.shopItemChangedHandler = _ShopItemManager:ConnectEvent(ShopItemChangedEvent, self.OnShopItemChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectShopItemChanged()
+		-- 상점 보유 목록 변경 이벤트 연결을 해제합니다.
+		if self.shopItemChangedHandler ~= nil and _ShopItemManager ~= nil then
+			_ShopItemManager:DisconnectEvent(ShopItemChangedEvent, self.shopItemChangedHandler)
+		end
+		self.shopItemChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnShopItemChanged(any shopItemChangedEvent)
+		-- 보유 목록이 바뀌면(구매 등) 그리드, 선택 텍스트의 보유 상태, 합계를 다시 계산합니다.
+		self:RebuildSlots()
+		self:RefreshSelectedTextsFromSelections()
+		self:RefreshSelectedCoinText()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshWorldCoinText()
+		-- 현재 임시 월드 코인(tempWorldCoin)을 월드 코인 텍스트에 콤마 포맷으로 표시합니다.
+		if self.WorldCoinText == nil then
+			return
+		end
+
+		local tempWorldCoin = 0
+		if _ProgressManager ~= nil then
+			local progress = _ProgressManager:ClientGetProgress()
+			if progress ~= nil and progress.tempWorldCoin ~= nil then
+				tempWorldCoin = progress.tempWorldCoin
+			end
+		end
+
+		self.WorldCoinText.Text = self:FormatIntegerWithComma(tempWorldCoin)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedCoinText()
+		-- 현재 선택된 worldCoin 아이템 price 합계를 표시합니다.
+		local selectedWorldCoinTotal = self:GetSelectedWorldCoinTotal()
+		if self.SelectedCoinText ~= nil then
+			self.SelectedCoinText.Text = self:FormatIntegerWithComma(selectedWorldCoinTotal)
+		end
+
+		self:RefreshBuyButtonState(selectedWorldCoinTotal)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBuyButtonState(integer selectedWorldCoinTotal)
+		-- 구매할 아이템이 있을 때만 버튼 입력을 활성화하며, 비활성 상태는 ButtonComponent의 DisabledColor를 사용합니다.
+		if self.BuyButton == nil or self.BuyButton.Entity == nil then
+			return
+		end
+
+		self.BuyButton.Entity.Enable = true
+		self.BuyButton.Enable = selectedWorldCoinTotal > 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetSelectedWorldCoinTotal()
+		-- 선택된 아이템 중 coinType이 worldCoin이고 아직 보유하지 않은 것들의 price 합계를 반환합니다.
+		local total = 0
+		if _ShopItemMaster ~= nil and self.tSelectedByCategory ~= nil then
+			for category, shopItemId in pairs(self.tSelectedByCategory) do
+				local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+				if tShopItem ~= nil and (tShopItem.coinType or "") == "worldCoin" and self:IsShopItemOwned(shopItemId) == false then
+					total = total + (tShopItem.price or 0)
+				end
+			end
+		end
+
+		return total
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectBuyButtons()
+		-- 구매하기 버튼과 확인 팝업 취소 버튼 클릭을 연결합니다.
+		if self.BuyButton ~= nil and self.BuyButton.Entity ~= nil and self.buyButtonClickHandler == nil then
+			self.buyButtonClickHandler = self.BuyButton.Entity:ConnectEvent(ButtonClickEvent, self.OnBuyButtonClicked)
+		end
+		self:RefreshBuyButtonState(self:GetSelectedWorldCoinTotal())
+
+		if self.EnsureBuyCancelButton ~= nil and self.EnsureBuyCancelButton.Entity ~= nil and self.ensureBuyCancelClickHandler == nil then
+			self.ensureBuyCancelClickHandler = self.EnsureBuyCancelButton.Entity:ConnectEvent(ButtonClickEvent, self.OnEnsureBuyCancelClicked)
+		end
+
+		if self.EnsureBuyConfirmButton ~= nil and self.EnsureBuyConfirmButton.Entity ~= nil and self.ensureBuyConfirmClickHandler == nil then
+			self.ensureBuyConfirmClickHandler = self.EnsureBuyConfirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnEnsureBuyConfirmClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectBuyButtons()
+		-- 구매하기/취소 버튼 클릭 연결을 해제합니다.
+		if self.BuyButton ~= nil and self.BuyButton.Entity ~= nil and self.buyButtonClickHandler ~= nil then
+			self.BuyButton.Entity:DisconnectEvent(ButtonClickEvent, self.buyButtonClickHandler)
+		end
+		self.buyButtonClickHandler = nil
+
+		if self.EnsureBuyCancelButton ~= nil and self.EnsureBuyCancelButton.Entity ~= nil and self.ensureBuyCancelClickHandler ~= nil then
+			self.EnsureBuyCancelButton.Entity:DisconnectEvent(ButtonClickEvent, self.ensureBuyCancelClickHandler)
+		end
+		self.ensureBuyCancelClickHandler = nil
+
+		if self.EnsureBuyConfirmButton ~= nil and self.EnsureBuyConfirmButton.Entity ~= nil and self.ensureBuyConfirmClickHandler ~= nil then
+			self.EnsureBuyConfirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.ensureBuyConfirmClickHandler)
+		end
+		self.ensureBuyConfirmClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBuyButtonClicked(ButtonClickEvent event)
+		-- 선택한 worldCoin 합계가 0 초과일 때만 구매 확인 팝업을 엽니다.
+		if self:GetSelectedWorldCoinTotal() <= 0 then
+			return
+		end
+
+		self:OpenEnsureBuyPanel()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEnsureBuyCancelClicked(ButtonClickEvent event)
+		-- 취소 버튼으로 구매 확인 팝업을 닫습니다.
+		self:CloseEnsureBuyPanel()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEnsureBuyConfirmClicked(ButtonClickEvent event)
+		-- 확인 버튼으로 선택된 worldCoin 아이템 결제를 서버에 요청하고 팝업을 닫습니다.
+		local tPurchaseIds = self:GetSelectedWorldCoinItemIds()
+		if _ShopItemManager ~= nil and #tPurchaseIds > 0 then
+			-- 실제 차감/검증/저장은 서버가 수행한다. 결과는 서버 Push로 코인/보유가 갱신된다.
+			_ShopItemManager:RequestPurchaseItems(tPurchaseIds)
+		end
+
+		self:CloseEnsureBuyPanel()
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetSelectedWorldCoinItemIds()
+		-- 선택된 아이템 중 coinType이 worldCoin이고 아직 보유하지 않은 것들의 shopItemId 목록을 반환합니다.
+		local tIds = {}
+		if _ShopItemMaster ~= nil and self.tSelectedByCategory ~= nil then
+			for category, shopItemId in pairs(self.tSelectedByCategory) do
+				local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+				if tShopItem ~= nil and (tShopItem.coinType or "") == "worldCoin" and self:IsShopItemOwned(shopItemId) == false then
+					table.insert(tIds, shopItemId)
+				end
+			end
+		end
+
+		return tIds
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenEnsureBuyPanel()
+		-- 구매 확인 팝업을 엽니다.
+		self:SetPanelEnable(self.EnsureBuyPanelEntity, true)
+		self:RefreshDimmer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseEnsureBuyPanel()
+		-- 구매 확인 팝업을 닫습니다.
+		self:SetPanelEnable(self.EnsureBuyPanelEntity, false)
+		self:RefreshDimmer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedText(string key, string fallbackText)
+		-- 현재 locale의 UI 문구를 조회합니다.
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:GetText(key, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatIntegerWithComma(number value)
+		-- 정수 값을 천 단위 쉼표가 포함된 문자열로 변환합니다.
+		local integerValue = math.floor(math.max(value or 0, 0))
+		local formattedText = tostring(integerValue)
+
+		while true do
+			local nextText, replaceCount = string.gsub(formattedText, "^(-?%d+)(%d%d%d)", "%1,%2")
+			formattedText = nextText
+			if replaceCount == 0 then
+				break
+			end
+		end
+
+		return formattedText
+	end
+
+end

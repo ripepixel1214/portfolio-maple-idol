@@ -1,0 +1,57 @@
+-- CharacterTypeTable을 로드하고 캐릭터 타입 ID에 해당하는 타입 정보를 제공합니다.
+@Logic
+script CharacterTypeMaster extends Logic
+
+	property boolean IsCharacterTypeLoaded = false
+
+	-- CharacterTypeRow
+	property any tCharacterTypeById = {}
+
+	method void OnBeginPlay()
+		-- 로직 시작 때 캐릭터 타입 마스터 데이터를 로드합니다.
+		self:LoadCharacterType()
+	end
+
+	method void LoadCharacterType()
+		-- 캐릭터 타입 테이블의 행을 읽고 타입 id 기준으로 캐싱합니다.
+		self.tCharacterTypeById = {}
+		self.IsCharacterTypeLoaded = false
+		local loadedCount = 0
+		
+		local dataSet = _DataService:GetTable("CharacterTypeTable")
+		
+		if dataSet == nil then
+			log_warning("[CharacterTypeMaster] CharacterTypeTable not found")
+			return
+		end
+		
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local id = _DataTableUtil:SafeGetString(dataSet, rowIndex, "characterTypeId", "")
+		
+			if id ~= "" then
+				local tCharacterType = CharacterTypeRow()
+				tCharacterType.id = id
+				local nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+				tCharacterType.name = ""
+				if _LocalizationLogic ~= nil then
+					tCharacterType.name = _LocalizationLogic:GetText(nameKey, "")
+				end
+		
+				self.tCharacterTypeById[id] = tCharacterType
+				loadedCount = loadedCount + 1
+			end
+		end
+		
+		self.IsCharacterTypeLoaded = true
+	end
+
+	method any GetCharacterType(string id)
+		-- 타입 id에 해당하는 캐릭터 타입 row를 반환합니다.
+		if self.IsCharacterTypeLoaded == false then
+			self:LoadCharacterType()
+		end
+		
+		return self.tCharacterTypeById[id]
+	end
+
+end

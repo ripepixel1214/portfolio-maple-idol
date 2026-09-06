@@ -1,0 +1,1173 @@
+-- 플레이어의 전체 게임 진행 상태와 클라이언트 표시용 로컬 캐시를 관리합니다.
+@Logic
+script ProgressManager extends Logic
+
+	property boolean isProgressLoaded = false
+
+	-- ProgressData
+	property any tCurrentProgress = nil
+
+	-- save/load
+	property string currentUserId = ""
+
+	property boolean isStorageResetInProgress = false
+
+	property any userEnterHandler = nil
+
+	-- enter map
+	property string studioMapId = "Map_Studio"
+
+	property string mainTitleMapId = "Map_MainTitle"
+
+	property number studioPositionX = 0
+
+	property number studioPositionY = 0
+
+	property number downtownPositionX = -2.5
+
+	property number downtownPositionY = -1.0
+
+	-- 행동력 최대치 (주말 진입 시 이 값으로 충전하고, 행동력 세팅 시 상한으로 사용)
+	property integer maxActionPoint = 2
+
+	method void OnBeginPlay()
+		-- 서버는 유저 입장을 구독하고 클라이언트는 진행 동기화 결과로 맵 상태를 복원합니다.
+		if self:IsServer() then
+			self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+		end
+	end
+
+	method void OnEndPlay()
+		-- 진행 매니저가 연결한 이벤트를 실행 공간에 맞게 정리합니다.
+		if self:IsServer() and self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendProgressChangedEvent()
+		-- 진행 데이터 변경을 구독 중인 UI와 로직에 알립니다.
+		if self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return
+		end
+
+		local progressChangedEvent = ProgressChangedEvent()
+		self:SendEvent(progressChangedEvent)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetProgress()
+		-- 클라이언트 로컬 캐시에 저장된 현재 진행 데이터의 복사본을 반환합니다.
+		if self.tCurrentProgress == nil then
+			return nil
+		end
+
+		return self:CopyProgressData(self.tCurrentProgress)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer ClientGetCurrentStep()
+		-- 클라이언트 로컬 캐시의 현재 진행 단계를 반환. 캐시가 아직 없으면 0(미확정)
+		if self.tCurrentProgress == nil or self.tCurrentProgress.eCurrentStep == nil then
+			return 0
+		end
+
+		return self.tCurrentProgress.eCurrentStep
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestMoveToNextStep(integer expectedStep)
+		-- 클라이언트가 진행 단계를 다음 단계로 넘기도록 서버에 요청. expectedStep은 요청 시점에 클라이언트가 보고 있던 단계이며, 서버 권위 단계와 다르면 이미 처리된 중복 요청으로 보고 거절
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+
+		if self:IsExpectedStep(expectedStep) == false then
+			return false
+		end
+
+		local isApplied = self:ApplyMoveToNextStep()
+		if isApplied then
+			self:PushProgressToClient(senderUserId)
+			self:SaveAllStorageData()
+		end
+
+		return isApplied
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsExpectedStep(integer expectedStep)
+		-- 요청자가 버튼을 누른 시점의 단계와 서버 권위 단계가 일치하는지 확인. 같은 버튼 연타로 단계가 이미 넘어간 뒤 도착한 중복 요청을 차단
+		if self.tCurrentProgress == nil then
+			return false
+		end
+
+		if expectedStep == nil or expectedStep <= 0 then
+			log_warning("[ProgressManager] move rejected because expectedStep is missing")
+			return false
+		end
+
+		local currentStep = self.tCurrentProgress.eCurrentStep
+		if currentStep ~= expectedStep then
+			log_warning("[ProgressManager] move rejected expected=" .. _EProgressStep:GetName(expectedStep) .. " current=" .. _EProgressStep:GetName(currentStep))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestCompleteDemo()
+		-- 데모 종료 시 서버 권위 진행 단계를 종단 상태로 변경하고 전체 런타임 데이터를 저장합니다.
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+
+		local currentStep = self.tCurrentProgress.eCurrentStep
+		if currentStep ~= _EProgressStep.Step_Performance and currentStep ~= _EProgressStep.Step_DemoEnd then
+			log_warning("[ProgressManager] demo completion requires performance step=" .. tostring(currentStep))
+			return false
+		end
+
+		self.tCurrentProgress.eCurrentStep = _EProgressStep.Step_DemoEnd
+		self:UpdateProgressPositionByUserId(senderUserId)
+		self:PushProgressToClient(senderUserId)
+		self:SaveAllStorageData()
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestAddWeek()
+		-- 클라이언트가 현재 주차를 1 증가시키도록 서버에 요청합니다.
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+
+		local isApplied = self:ApplyWeekDelta(1)
+		if isApplied then
+			self:PushProgressToClient(senderUserId)
+		end
+
+		return isApplied
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetActionPoint(integer actionPoint)
+		-- 디버그 입력에서 현재 액션 포인트를 지정값으로 세팅하도록 서버에 요청합니다.
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+
+		self:ApplyActionPoint(actionPoint)
+		self:PushProgressToClient(senderUserId)
+		self:SaveProgressToStorage()
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestAddActionPoint(integer amount)
+		-- 디버그 입력에서 현재 액션 포인트에 델타를 적용하도록 서버에 요청합니다.
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+
+		self:ApplyActionPointDelta(amount)
+		self:PushProgressToClient(senderUserId)
+		self:SaveProgressToStorage()
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestDebugMoveToPerformanceWeek(string performanceId)
+		-- 디버그 입력에서 지정 공연의 공연 주간으로 즉시 이동하도록 서버 진행도를 변경합니다.
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+		if performanceId == nil or performanceId == "" then
+			log_warning("[ProgressManager] debug performanceId is required")
+			return false
+		end
+
+		self.tCurrentProgress.gameGoalId = performanceId
+		self.tCurrentProgress.eCurrentStep = _EProgressStep.Step_Performance
+		self:SetProgressPosition(self.studioPositionX, self.studioPositionY)
+		self:PushProgressToClient(senderUserId)
+		self:SaveAllStorageData()
+		self:EnterPerformanceWeekForDebug(senderUserId)
+		log("[ProgressManager] debug move to performance week id=" .. performanceId)
+		return true
+	end
+
+	@ExecSpace("Client")
+	method void EnterPerformanceWeekForDebug()
+		-- 서버에서 공연 주간 진행도를 적용한 사용자를 스튜디오 맵으로 이동합니다.
+		self:EnterStudioMap()
+	end
+
+	@ExecSpace("Server")
+	method void RequestSaveProgressToStorage()
+		-- 디버그 입력으로 현재 서버 진행 데이터를 Storage에 저장합니다.
+		if self:CanUseProgress(senderUserId) == false then
+			return
+		end
+
+		self:UpdateProgressPositionByUserId(senderUserId)
+		self:SaveProgressToStorage()
+	end
+
+	@ExecSpace("Server")
+	method void RequestSaveAllStorageData()
+		if self:CanUseProgress(senderUserId) == false then
+			return
+		end
+
+		self:UpdateProgressPositionByUserId(senderUserId)
+		self:SaveAllStorageData()
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestResetAllStorageData()
+		-- 요청한 유저 본인의 전체 저장 데이터를 삭제하고 모든 런타임 캐시를 기본값으로 다시 구성합니다.
+		if self.isStorageResetInProgress then
+			return false
+		end
+
+		if self:CanUseProgress(senderUserId) == false then
+			return false
+		end
+
+		self.isStorageResetInProgress = true
+		local isReset = self:ResetAllStorageData(senderUserId)
+		self.isStorageResetInProgress = false
+		return isReset
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ResetAllStorageData(string userId)
+		-- 사운드 설정을 포함한 전체 저장 데이터를 삭제한 뒤 모든 캐시를 기본값으로 다시 구성합니다.
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			return false
+		end
+
+		self:ClearPendingStorageSaves()
+
+		local waitElapsed = 0
+		while self:HasStorageSaveInProgress() and waitElapsed < 5 do
+			wait(0.1)
+			waitElapsed = waitElapsed + 0.1
+		end
+
+		if self:HasStorageSaveInProgress() then
+			log_warning("[ProgressManager] storage reset canceled because a save is still in progress")
+			return false
+		end
+
+		local errorCode = _DataStorageService:DeleteUserDataStorageAndWait(userId)
+		if _DataStorageErrorUtil == nil or _DataStorageErrorUtil:CanUseDefault(errorCode) == false then
+			if _DataStorageErrorUtil ~= nil then
+				_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			end
+			return false
+		end
+
+		self:ReloadAllStorageDataAfterReset(userId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearPendingStorageSaves()
+		-- 초기화 직전에 각 저장 모듈의 아직 시작하지 않은 최신 저장 요청을 폐기합니다.
+		if _ProgressStorage ~= nil then
+			_ProgressStorage.PendingProgressSaveUserId = ""
+			_ProgressStorage.PendingProgressSaveString = ""
+		end
+
+		if _CharacterStorage ~= nil then
+			_CharacterStorage.pendingCharactersUserId = ""
+			_CharacterStorage.pendingCharactersString = ""
+		end
+
+		if _CharacterCostumeStorage ~= nil then
+			_CharacterCostumeStorage.pendingCostumesUserId = ""
+			_CharacterCostumeStorage.pendingCostumesString = ""
+		end
+
+		if _RuntimeActorStorage ~= nil then
+			_RuntimeActorStorage.pendingRuntimeActorsUserId = ""
+			_RuntimeActorStorage.pendingRuntimeActorsString = ""
+		end
+
+		if _ActivityStorage ~= nil then
+			_ActivityStorage.pendingActivitiesUserId = ""
+			_ActivityStorage.pendingActivitiesString = ""
+		end
+
+		if _ItemStorage ~= nil then
+			_ItemStorage.pendingItemsUserId = ""
+			_ItemStorage.pendingItemsString = ""
+		end
+
+		if _ShopItemStorage ~= nil then
+			_ShopItemStorage.pendingShopItemsUserId = ""
+			_ShopItemStorage.pendingShopItemsString = ""
+		end
+
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HasStorageSaveInProgress()
+		-- 초기화 대상 저장 모듈 중 비동기 저장을 처리 중인 모듈이 있는지 반환합니다.
+		if _ProgressStorage ~= nil and _ProgressStorage.IsProgressSaveInProgress then
+			return true
+		end
+
+		if _CharacterStorage ~= nil and _CharacterStorage.isCharactersSaveInProgress then
+			return true
+		end
+
+		if _CharacterCostumeStorage ~= nil and _CharacterCostumeStorage.isCostumesSaveInProgress then
+			return true
+		end
+
+		if _RuntimeActorStorage ~= nil and _RuntimeActorStorage.isRuntimeActorsSaveInProgress then
+			return true
+		end
+
+		if _ActivityStorage ~= nil and _ActivityStorage.isActivitiesSaveInProgress then
+			return true
+		end
+
+		if _ItemStorage ~= nil and _ItemStorage.isItemsSaveInProgress then
+			return true
+		end
+
+		if _ShopItemStorage ~= nil and _ShopItemStorage.isShopItemsSaveInProgress then
+			return true
+		end
+
+		if _SoundStorage ~= nil and _SoundStorage.isSoundSettingsSaveInProgress then
+			return true
+		end
+
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ReloadAllStorageDataAfterReset(string userId)
+		-- 삭제된 전체 저장소를 기본 상태로 다시 로드해 각 런타임 캐시와 클라이언트를 갱신합니다.
+		self.currentUserId = userId
+		self:LoadProgressFromStorage()
+		self:PushProgressResetToClient(userId)
+
+		if _CharacterManager ~= nil then
+			_CharacterManager.currentUserId = userId
+			_CharacterManager:LoadCharacters()
+			if _CharacterManager:IsCharactersLoaded() then
+				_CharacterManager:PushCharactersToClient(userId)
+				_CharacterManager:PushSelectedCharacterToClient(userId)
+			end
+		end
+
+		if _CharacterCostumeManager ~= nil then
+			_CharacterCostumeManager.currentUserId = userId
+			_CharacterCostumeManager:Load()
+			if _CharacterCostumeManager:IsCostumesLoaded() then
+				_CharacterCostumeManager:PushCostumesToClient(userId)
+			end
+		end
+
+		if _RuntimeActorManager ~= nil then
+			_RuntimeActorManager.CurrentUserId = userId
+			_RuntimeActorManager:LoadRuntimeActorDataFromStorage(userId)
+			if _RuntimeActorManager.IsRuntimeActorDataLoaded then
+				_RuntimeActorManager:PushRuntimeActorsToClient(userId)
+			end
+		end
+
+		if _ActivityManager ~= nil then
+			_ActivityManager.currentUserId = userId
+			_ActivityManager:LoadActivities()
+			if _ActivityManager:IsActivitiesLoaded() then
+				_ActivityManager:PushActivitiesToClient(userId)
+			end
+		end
+
+		if _ItemManager ~= nil then
+			_ItemManager.currentUserId = userId
+			_ItemManager:LoadItems()
+			if _ItemManager:IsItemsLoaded() then
+				_ItemManager:PushItemsToClient(userId)
+			end
+		end
+
+		if _ShopItemManager ~= nil then
+			_ShopItemManager.currentUserId = userId
+			_ShopItemManager:LoadShopItems()
+			if _ShopItemManager:IsShopItemsLoaded() then
+				_ShopItemManager:PushShopItemsToClient(userId)
+			end
+		end
+
+		-- 이벤트 완료(일회성 이벤트 진행도) 캐시도 재구성. 스토리지는 DeleteUserDataStorageAndWait로 이미 비워졌으므로
+		-- 재로드하면 빈 목록이 되고, 서버·클라 캐시가 초기화되어 이벤트가 다시 발동 가능해진다.
+		if _EventCompletionManager ~= nil then
+			_EventCompletionManager.currentUserId = userId
+			_EventCompletionManager:LoadCompletions()
+			if _EventCompletionManager:IsCompletionsLoaded() then
+				_EventCompletionManager:PushCompletionsToClient(userId)
+			end
+		end
+
+		if _SoundManager ~= nil then
+			_SoundManager:LoadSoundSettingsFromStorage(userId)
+			_SoundManager:PushSoundSettingsToClient(userId)
+		end
+
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushProgressResetToClient(string forUserId)
+		-- 초기 진행 데이터를 맵 이동 없이 지정 클라이언트 캐시에 반영합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			return
+		end
+
+		self:SyncProgressAfterReset(self:CopyProgressData(self.tCurrentProgress), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncProgressAfterReset(table tProgressData)
+		-- 초기화된 진행 데이터를 타이틀 맵 이동 없이 클라이언트 로컬 캐시에 교체합니다.
+		if tProgressData == nil then
+			return
+		end
+
+		self.tCurrentProgress = tProgressData
+		self.tCurrentProgress.completedTutorials = self:ParseCompletedCsv(tProgressData.completedTutorials)
+		self:SendProgressChangedEvent()
+	end
+
+	@ExecSpace("Server")
+	method void RequestCompleteTutorial(string tutorialId)
+		-- 지정 튜토리얼 완료 상태를 서버 권위 진행 데이터에 반영하고 저장합니다. 클라(튜토리얼/프롤로그 종료)가 호출하므로 반드시 Server에서 실행되어 스토리지에 영속되어야 한다.
+		if tutorialId == nil or tutorialId == "" then
+			return
+		end
+
+		if self.tCurrentProgress == nil then
+			return
+		end
+
+		if self:IsTutorialDone(tutorialId) then
+			return
+		end
+
+		if type(self.tCurrentProgress.completedTutorials) ~= "table" then
+			self.tCurrentProgress.completedTutorials = {}
+		end
+		self.tCurrentProgress.completedTutorials[tutorialId] = true
+		self:PushProgressToClient(senderUserId)
+		self:SaveProgressToStorage()
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsTutorialDone(string tutorialId)
+		-- 서버 권위 데이터의 완료 집합(테이블)에 tutorialId가 있는지 확인합니다.
+		if self.tCurrentProgress == nil or tutorialId == nil or tutorialId == "" then
+			return false
+		end
+		
+		local done = self.tCurrentProgress.completedTutorials
+		return type(done) == "table" and done[tutorialId] == true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 싱글 플레이어가 서버에 입장하면 진행 데이터를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][ProgressManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadProgressFromStorage()
+
+		if self:IsProgressLoaded() then
+			self:PushProgressToClient(event.UserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadProgressFromStorage()
+		-- Storage에서 로드한 진행 데이터를 서버 권위 데이터로 보관합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ProgressManager] currentUserId is required")
+			self.isProgressLoaded = false
+			return
+		end
+
+		local tProgressData = _ProgressStorage:LoadProgressByUserId(self.currentUserId)
+		if tProgressData == nil then
+			log_warning("[ProgressManager] progressData is nil")
+			self.isProgressLoaded = false
+			return
+		end
+
+		self.tCurrentProgress = tProgressData
+		self.isProgressLoaded = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsProgressLoaded()
+		-- 서버 진행 데이터 로드 여부를 반환합니다.
+		return self.isProgressLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseProgress(string userId)
+		-- Request 입구에서 현재 유저와 진행 데이터 로드 완료 여부를 검증합니다.
+		if self:IsProgressLoaded() == false then
+			log_warning("[ProgressManager] request rejected because progress is not loaded")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ProgressManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[ProgressManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveProgressToStorage()
+		-- 서버 권위 진행 데이터를 Storage에 저장합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ProgressManager] currentUserId is required")
+			return
+		end
+
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return
+		end
+
+		_ProgressStorage:SaveProgressByUserIdAsync(self.currentUserId, self.tCurrentProgress)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveAllStorageData()
+		-- 진행 단계 전환 시 같은 시점에 유지되어야 하는 런타임 데이터를 Storage에 저장합니다.
+		-- 트랜잭션을 보장하지 않습니다. 추후 원자적 저장에 대한 리팩토링이 요구될 수 있습니다.
+		if _CharacterManager ~= nil then
+			_CharacterManager:SaveCharactersToStorage()
+		end
+
+		if _CharacterCostumeManager ~= nil then
+			_CharacterCostumeManager:SaveCostumesToStorage()
+		end
+
+		if _RuntimeActorManager ~= nil then
+			_RuntimeActorManager:SaveRuntimeActorDataToStorage()
+		end
+
+		self:SaveProgressToStorage()
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetProgress()
+		-- 서버 권위 진행 데이터의 복사본을 반환합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			return nil
+		end
+
+		return self:CopyProgressData(self.tCurrentProgress)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryConsumeNpcActionPoint(string userId)
+		-- NPC 이벤트 시작에 필요한 행동력 1을 서버에서 검증하고 한 번만 차감
+		if self:CanUseProgress(userId) == false or self.tCurrentProgress == nil then
+			return false
+		end
+
+		local currentActionPoint = self.tCurrentProgress.actionPoint or 0
+		if currentActionPoint < 1 then
+			log_warning("[ProgressManager] npc action point rejected userId=" .. tostring(userId)
+				.. " current=" .. tostring(currentActionPoint))
+			return false
+		end
+
+		self:ApplyActionPointDelta(-1)
+
+		self:PushProgressToClient(userId)
+		self:SaveProgressToStorage()
+		log("[ProgressManager] npc action point consumed userId=" .. tostring(userId)
+			.. " remaining=" .. tostring(self.tCurrentProgress.actionPoint or 0))
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RollbackNpcActionPoint(string userId)
+		-- 첫 NPC 이벤트 실행 실패로 소비가 성립하지 않은 행동력 1 복구
+		if self:CanUseProgress(userId) == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] npc action point rollback rejected userId=" .. tostring(userId))
+			return false
+		end
+
+		local currentActionPoint = self.tCurrentProgress.actionPoint or 0
+		if currentActionPoint >= self.maxActionPoint then
+			log_warning("[ProgressManager] npc action point rollback skipped userId=" .. tostring(userId)
+				.. " current=" .. tostring(currentActionPoint))
+			return false
+		end
+
+		self:ApplyActionPointDelta(1)
+		self:PushProgressToClient(userId)
+		self:SaveProgressToStorage()
+		log("[ProgressManager] npc action point rolled back userId=" .. tostring(userId)
+			.. " current=" .. tostring(self.tCurrentProgress.actionPoint or 0))
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateProgressPositionForStepTransition(integer previousStep, integer nextStep)
+		-- 진행 단계 전환에 맞는 저장 위치를 갱신합니다. 맵은 단계에서 파생하고 저장에는 좌표만 남깁니다.
+		if nextStep == _EProgressStep.Step_Weekend then
+			self:SetProgressPosition(self.downtownPositionX, self.downtownPositionY)
+			return
+		end
+
+		if previousStep == _EProgressStep.Step_Weekend and (nextStep == _EProgressStep.Step_Weekly or _EProgressStep:IsPerformanceStep(nextStep)) then
+			self:SetProgressPosition(self.studioPositionX, self.studioPositionY)
+			return
+		end
+
+		self:UpdateProgressPositionByUserId(self.currentUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateProgressPositionByUserId(string userId)
+		-- 서버에 존재하는 유저 엔티티의 현재 위치를 진행 데이터에 저장합니다.
+		if self.tCurrentProgress == nil or userId == nil or userId == "" then
+			return
+		end
+
+		local userEntity = _UserService:GetUserEntityByUserId(userId)
+		if userEntity == nil or isvalid(userEntity) == false or userEntity.TransformComponent == nil then
+			return
+		end
+
+		local position = userEntity.TransformComponent.WorldPosition
+		self:SetProgressPosition(position.x, position.y)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SetProgressPosition(number positionX, number positionY)
+		-- 진행 데이터에 저장할 현재 맵 좌표를 갱신합니다.
+		if self.tCurrentProgress == nil then
+			return
+		end
+
+		self.tCurrentProgress.positionX = positionX
+		self.tCurrentProgress.positionY = positionY
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyMoveToNextStep()
+		-- 현재 단계를 완료 처리하고 다음 단계로 이동합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+
+		local nextStep = self:GetNextStep(self.tCurrentProgress.eCurrentStep)
+		if self.tCurrentProgress.eCurrentStep == nextStep then
+			return true
+		end
+
+		local previousStep = self.tCurrentProgress.eCurrentStep
+		if nextStep == _EProgressStep.Step_Weekly then
+			if self:ApplyWeekDelta(1) == false then
+				return false
+			end
+
+			if self:IsCurrentGameGoalPerformanceDue() then
+				nextStep = _EProgressStep.Step_Performance
+			end
+		end
+
+		if previousStep == _EProgressStep.Step_Weekend and nextStep == _EProgressStep.Step_Weekly then
+			self:ApplyActionPoint(self.maxActionPoint)
+		end
+
+		self.tCurrentProgress.eCurrentStep = nextStep
+		self:UpdateProgressPositionForStepTransition(previousStep, nextStep)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer GetNextStep(integer currentStep)
+		-- 현재 단계 이후 이동할 다음 단계를 반환합니다.
+		if _EProgressStep:IsDemoEndStep(currentStep) then
+			return _EProgressStep.Step_DemoEnd
+		end
+
+		if currentStep == _EProgressStep.Step_Weekly then
+			return _EProgressStep.Step_TrainingCompleted
+		end
+
+		if currentStep == _EProgressStep.Step_TrainingCompleted then
+			return _EProgressStep.Step_Weekend
+		end
+
+		if currentStep == _EProgressStep.Step_Weekend then
+			return _EProgressStep.Step_Weekly
+		end
+
+		if _EProgressStep:IsPerformanceStep(currentStep) then
+			return _EProgressStep.Step_Weekly
+		end
+
+		return _EProgressStep.Step_Weekly
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsCurrentGameGoalPerformanceDue()
+		-- 현재 진행 월/주차가 현재 게임 목표의 공연 발생 시점인지 확인합니다.
+		if self.tCurrentProgress == nil or _GameGoalMaster == nil then
+			return false
+		end
+
+		local goal = _GameGoalMaster:GetGameGoal(self.tCurrentProgress.gameGoalId or "")
+		if goal == nil then
+			return false
+		end
+
+		return self.tCurrentProgress.currentMonth == goal.month
+			and self.tCurrentProgress.currentWeek == goal.week
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ApplyActionPoint(integer actionPoint)
+		-- 현재 행동력을 지정한 값으로 설정합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return
+		end
+
+		local nextActionPoint = math.floor(_MathUtil:Clamp(actionPoint, 0, self.maxActionPoint))
+		if self.tCurrentProgress.actionPoint == nextActionPoint then
+			return
+		end
+
+		self.tCurrentProgress.actionPoint = nextActionPoint
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ApplyActionPointDelta(integer amount)
+		-- 현재 행동력에 지정한 값을 더합니다. 음수 값은 차감으로 처리합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return
+		end
+
+		if amount == 0 then
+			return
+		end
+
+		self:ApplyActionPoint((self.tCurrentProgress.actionPoint or 0) + amount)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyCompleteWeekend()
+		-- 주말 외출 완료를 서버 권위 진행 상태에 반영합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+
+		if self.tCurrentProgress.eCurrentStep ~= _EProgressStep.Step_Weekend then
+			log_warning("[ProgressManager] current step is not weekend step=" .. tostring(self.tCurrentProgress.eCurrentStep))
+			return false
+		end
+
+		return self:ApplyMoveToNextStep()
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyWeekDelta(integer amount)
+		-- 현재 월/주차에 지정한 주차 변화를 적용합니다. Push와 Storage 저장은 호출자가 결정합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+
+		if amount == nil then
+			log_warning("[ProgressManager] week amount is nil")
+			return false
+		end
+
+		local currentMonth = math.floor(_MathUtil:ClampMin(self.tCurrentProgress.currentMonth or 1, 1))
+		local currentWeek = math.floor(_MathUtil:ClampMin(self.tCurrentProgress.currentWeek or 1, 1))
+		if currentWeek > 4 then
+			currentWeek = 4
+		end
+
+		local zeroBasedWeek = _MathUtil:ClampMin((currentMonth - 1) * 4 + currentWeek - 1 + amount, 0)
+		local nextMonth = math.floor(zeroBasedWeek / 4) + 1
+		local nextWeek = (zeroBasedWeek % 4) + 1
+		if self.tCurrentProgress.currentMonth == nextMonth and self.tCurrentProgress.currentWeek == nextWeek then
+			return true
+		end
+
+		self.tCurrentProgress.currentMonth = nextMonth
+		self.tCurrentProgress.currentWeek = nextWeek
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+		-- tDelta == ProgressStatDelta:ToPlainTable()
+	method boolean ApplyProgressStat(table tDelta)
+		-- 진행 데이터에 속한 스탯 변경량 한 건을 서버 권위 데이터에 적용합니다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+
+		if tDelta == nil then
+			log_warning("[ProgressManager] progress stat delta is nil")
+			return false
+		end
+
+		local actionPointDelta = _MathUtil:Round(tDelta.actionPoint or 0)
+		if actionPointDelta ~= 0 then
+			self:ApplyActionPointDelta(actionPointDelta)
+		end
+
+		local fandomDelta = _MathUtil:Round(tDelta.fandom or 0)
+		if fandomDelta ~= 0 then
+			local nextFandom = math.floor(_MathUtil:ClampMin((self.tCurrentProgress.fandom or 0) + fandomDelta, 0))
+			self.tCurrentProgress.fandom = nextFandom
+		end
+
+		local groupMesoDelta = _MathUtil:Round(tDelta.groupMeso or 0)
+		if groupMesoDelta ~= 0 then
+			local nextGroupMeso = math.floor(_MathUtil:ClampMin((self.tCurrentProgress.groupMeso or 0) + groupMesoDelta, 0))
+			self.tCurrentProgress.groupMeso = nextGroupMeso
+		end
+
+		local tempWorldCoinDelta = _MathUtil:Round(tDelta.tempWorldCoin or 0)
+		if tempWorldCoinDelta ~= 0 then
+			local nextTempWorldCoin = math.floor(_MathUtil:ClampMin((self.tCurrentProgress.tempWorldCoin or 0) + tempWorldCoinDelta, 0))
+			self.tCurrentProgress.tempWorldCoin = nextTempWorldCoin
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TrySpendTempWorldCoin(integer amount, string forUserId)
+		-- 서버 권위 tempWorldCoin에서 amount만큼 차감한다. 잔액이 부족하면 차감하지 않고 false를 반환한다. 성공 시 Push/저장까지 수행한다.
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			log_warning("[ProgressManager] CurrentProgress is nil")
+			return false
+		end
+
+		if amount == nil or amount <= 0 then
+			return false
+		end
+
+		local currentTempWorldCoin = self.tCurrentProgress.tempWorldCoin or 0
+		if currentTempWorldCoin < amount then
+			return false
+		end
+
+		local tDelta = {}
+		tDelta.tempWorldCoin = -amount
+		self:ApplyProgressStat(tDelta)
+		self:PushProgressToClient(forUserId)
+		self:SaveProgressToStorage()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryApplyGroupMesoTransaction(integer debit, integer credit, string forUserId)
+		-- 베팅 차감과 당첨 지급을 단일 서버 메서드에서 검증 후 반영
+		if self:CanUseProgress(forUserId) == false or self.tCurrentProgress == nil then
+			return false
+		end
+
+		if debit == nil or debit <= 0 or credit == nil or credit < 0 then
+			log_warning("[ProgressManager] invalid groupMeso transaction debit=" .. tostring(debit)
+				.. " credit=" .. tostring(credit))
+			return false
+		end
+
+		local currentGroupMeso = math.floor(self.tCurrentProgress.groupMeso or 0)
+		if currentGroupMeso < debit then
+			log_warning("[ProgressManager] insufficient groupMeso userId=" .. tostring(forUserId)
+				.. " current=" .. tostring(currentGroupMeso)
+				.. " debit=" .. tostring(debit))
+			return false
+		end
+
+		local nextGroupMeso = currentGroupMeso - debit + credit
+		self.tCurrentProgress.groupMeso = nextGroupMeso
+		self:PushProgressToClient(forUserId)
+		if nextGroupMeso ~= currentGroupMeso then
+			self:SaveProgressToStorage()
+		end
+
+		log("[ProgressManager] groupMeso transaction applied userId=" .. tostring(forUserId)
+			.. " debit=" .. tostring(debit)
+			.. " credit=" .. tostring(credit)
+			.. " balance=" .. tostring(nextGroupMeso))
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushProgressToClient(string forUserId)
+		-- 서버 권위 진행 데이터를 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		if self:IsProgressLoaded() == false or self.tCurrentProgress == nil then
+			return
+		end
+
+		local tProgressData = self:CopyProgressData(self.tCurrentProgress)
+		self:SyncProgress(tProgressData, forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncProgress(table tProgressData)
+		-- 서버에서 받은 진행 데이터를 클라이언트 로컬 캐시에 저장합니다.
+		local previousStep = self.tCurrentProgress ~= nil and self.tCurrentProgress.eCurrentStep or 0
+		self.tCurrentProgress = tProgressData
+		-- 전송은 CSV 문자열이므로 클라 로컬에선 완료 집합을 테이블로 복원해 조회를 단순화한다.
+		self.tCurrentProgress.completedTutorials = self:ParseCompletedCsv(tProgressData.completedTutorials)
+		self:CheckEnterMap(previousStep)
+		self:SendProgressChangedEvent()
+	end
+
+	method any ParseCompletedCsv(any csv)
+		-- CSV 문자열(또는 이미 테이블)을 완료 집합 테이블로 복원한다.
+		local set = {}
+		if type(csv) == "string" then
+			for id in string.gmatch(csv, "([^,]+)") do
+				set[id] = true
+			end
+		elseif type(csv) == "table" then
+			for id, done in pairs(csv) do
+				if done == true then
+					set[id] = true
+				end
+			end
+		end
+		return set
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CheckEnterMap(integer previousStep)
+		-- 클라이언트에 동기화된 진행 단계에 맞게 Downtown/Studio 맵 상태 복원
+		if self.tCurrentProgress == nil or self.tCurrentProgress.eCurrentStep == nil then
+			return
+		end
+
+		local currentStep = self.tCurrentProgress.eCurrentStep
+
+		if previousStep == 0 and self:IsCurrentMap(self.mainTitleMapId) == true then
+			return
+		end
+
+		-- 단계 변화가 없는 단순 데이터 동기화(팬덤/스탯 등 결과 적용 push)에서는 맵 이동을 하지 않는다. 같은 주말 단계 재진입으로 플레이어가 초기 스폰 좌표로 튕기는 문제 방지
+		if previousStep == currentStep then
+			return
+		end
+
+		if currentStep == _EProgressStep.Step_Weekend then
+			self:EnterDowntownMap()
+			return
+		end
+
+		if previousStep == 0 then
+			self:EnterStudioMap()
+			return
+		end
+
+		if previousStep == _EProgressStep.Step_Weekend and (currentStep == _EProgressStep.Step_Weekly or _EProgressStep:IsPerformanceStep(currentStep)) then
+			self:EnterStudioMap()
+			return
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCurrentMap(string mapName)
+		-- 현재 로컬 플레이어가 지정한 맵에 있는지 확인합니다.
+		if mapName == nil or mapName == "" then
+			return false
+		end
+
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return false
+		end
+
+		local currentMap = player.CurrentMap
+		if isvalid(currentMap) == false then
+			return false
+		end
+
+		return currentMap.Name == mapName
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestEnterCurrentProgressMap()
+		-- 메인 타이틀에서 게임을 시작할 때 현재 진행 상태에 맞는 맵으로 진입합니다.
+		local currentStep = 0
+		if self.tCurrentProgress ~= nil and self.tCurrentProgress.eCurrentStep ~= nil then
+			currentStep = self.tCurrentProgress.eCurrentStep
+		end
+
+		if currentStep == _EProgressStep.Step_Weekend then
+			self:EnterDowntownMap()
+			return
+		end
+
+		self:EnterStudioMap()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnterDowntownMap()
+		-- 저장되거나 변경된 진행 상태가 주말이면 저장된 좌표로 Downtown 진입
+		if self.tCurrentProgress == nil or self.tCurrentProgress.eCurrentStep ~= _EProgressStep.Step_Weekend then
+			return
+		end
+
+		if _DowntownEventContextManager == nil then
+			return
+		end
+		
+		local position = self:GetCurrentProgressPosition()
+		local targetMapName = _DowntownEventContextManager.DowntownMapId
+		if _MapTransitionHelper == nil then
+			_DowntownEventContextManager:EnterDowntownByPosition(position.x, position.y)
+			return
+		end
+
+		_MapTransitionHelper:RequestMoveToMap(targetMapName, function()
+			_DowntownEventContextManager:EnterDowntownByPosition(position.x, position.y)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnterStudioMap()
+		-- 주말에서 주간으로 돌아올 때 studio 맵으로 이동합니다.
+		local position = self:GetCurrentProgressPosition()
+
+		local player = _UserService.LocalPlayer
+		if player == nil or player.PlayerComponent == nil then
+			log_warning("[ProgressManager] LocalPlayer or PlayerComponent is nil")
+			return
+		end
+
+		if _MapTransitionHelper == nil then
+			player.PlayerComponent:MoveToMapPosition(self.studioMapId, position)
+			return
+		end
+
+		_MapTransitionHelper:RequestMoveToMap(self.studioMapId, function()
+			player.PlayerComponent:MoveToMapPosition(self.studioMapId, position)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetCurrentProgressPosition()
+		-- 동기화된 진행 데이터에 저장된 현재 맵 좌표를 반환합니다.
+		if self.tCurrentProgress == nil then
+			return Vector2(self.studioPositionX, self.studioPositionY)
+		end
+
+		return Vector2(self.tCurrentProgress.positionX or self.studioPositionX, self.tCurrentProgress.positionY or self.studioPositionY)
+	end
+
+	method any CopyProgressData(any tProgressData)
+		-- ProgressData 구조체를 RPC와 클라이언트 캐시에서 사용할 plain table로 변환합니다.
+		if tProgressData == nil then
+			return ProgressData():CreateEmptyPlainTable()
+		end
+
+		if tProgressData.ToPlainTable ~= nil then
+			return tProgressData:ToPlainTable()
+		end
+
+		if type(tProgressData) == "table" then
+			local tCopiedData = ProgressData():CreateEmptyPlainTable()
+			if tProgressData.gameGoalId ~= nil then
+				tCopiedData.gameGoalId = tProgressData.gameGoalId
+			end
+			if tProgressData.eCurrentStep ~= nil then
+				tCopiedData.eCurrentStep = tProgressData.eCurrentStep
+			end
+			if tProgressData.currentMonth ~= nil then
+				tCopiedData.currentMonth = tProgressData.currentMonth
+			end
+			if tProgressData.currentWeek ~= nil then
+				tCopiedData.currentWeek = tProgressData.currentWeek
+			end
+			if tProgressData.actionPoint ~= nil then
+				tCopiedData.actionPoint = tProgressData.actionPoint
+			end
+			if tProgressData.groupMeso ~= nil then
+				tCopiedData.groupMeso = tProgressData.groupMeso
+			end
+			if tProgressData.tempWorldCoin ~= nil then
+				tCopiedData.tempWorldCoin = tProgressData.tempWorldCoin
+			end
+			if tProgressData.fandom ~= nil then
+				tCopiedData.fandom = tProgressData.fandom
+			end
+			if tProgressData.positionX ~= nil then
+				tCopiedData.positionX = tProgressData.positionX
+			end
+			if tProgressData.positionY ~= nil then
+				tCopiedData.positionY = tProgressData.positionY
+			end
+			if tProgressData.completedTutorials ~= nil then
+				tCopiedData.completedTutorials = tProgressData.completedTutorials
+			end
+
+			return tCopiedData
+		end
+
+		return ProgressData():CreateEmptyPlainTable()
+	end
+
+end

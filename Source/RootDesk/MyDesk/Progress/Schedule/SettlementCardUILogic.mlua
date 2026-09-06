@@ -1,0 +1,540 @@
+@Logic
+script SettlementCardUILogic extends Logic
+
+	property Entity root = "72e7dc0e-f5ab-4fc3-ac62-4818e15c8dc5"
+
+	property Entity card1 = "f1a5b8a1-5be0-4a0e-aefd-501c5a78d001"
+
+	property Entity card2 = "6b574d24-deeb-45a9-8fbb-6a0c492a3327"
+
+	property Entity card3 = "2bb82fef-f421-4a9b-8741-4c0cc13b6111"
+
+	property Entity statDeltaArea1 = "ff9dba5c-d087-49a6-887f-e95c6ffe3c7d"
+
+	property Entity statDeltaArea2 = "a7d6cdcb-021e-49b5-8680-b7304de318b0"
+
+	property Entity statDeltaArea3 = "6689c897-f81c-4158-acab-c193265f0cca"
+
+	property Entity statDeltaTemplate1 = "ab7543cc-5641-4a85-a1f3-d07cce64818c"
+
+	property Entity statDeltaTemplate2 = "582445ff-d347-45dc-bc59-22d9ca35186f"
+
+	property Entity statDeltaTemplate3 = "73979c92-0956-4175-aaee-ab3690815431"
+
+	property TextGUIRendererComponent card1NameText = "9a03a70e-ca17-4080-a9e5-481ef2ff159b"
+
+	property TextGUIRendererComponent card2NameText = "8dc96516-10e5-4676-b42e-5e01400ea265"
+
+	property TextGUIRendererComponent card3NameText = "69b87884-7a14-4e82-9f2e-ea063755afec"
+
+	property SpriteGUIRendererComponent portrait1 = "801a921c-8461-4054-b9c7-15bba47a30ee"
+
+	property SpriteGUIRendererComponent portrait2 = "5dbbdd2f-5e0b-4884-9e2c-dfbd84834b37"
+
+	property SpriteGUIRendererComponent portrait3 = "15757e15-face-464b-a531-898db03b978a"
+
+	property SpriteGUIRendererComponent condition1 = "f4a0e60b-1374-4860-a627-396e9b2a9d6e"
+
+	property SpriteGUIRendererComponent condition2 = "ed873891-8be4-48fe-bef5-5c5404e1303a"
+
+	property SpriteGUIRendererComponent condition3 = "16f8bb40-ec34-4d06-bcfc-6eead62bedac"
+
+	property number CardCenterX = 75
+
+	property number CardSpacing = 335
+
+	property number CardCenterY = 0
+
+	property number StatDeltaSpacing = 35
+
+	property Color StatDeltaLabelColor = Color(0.380392164, 0.305882365, 0.329411775, 1)
+
+	property any tRuntimeStatDeltaItems = {}
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 결산 카드 UI를 시작 시 숨깁니다.
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open(table settlementCards)
+		-- 전달된 결산 카드 목록으로 UI를 갱신하고 표시합니다.
+		self:SetCards(settlementCards)
+		self:SetVisible(true)
+		_UIVisibilityNotifierLogic:SendFrom(self, "settlement", true)
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 결산 카드 UI를 비우고 숨깁니다.
+		self:SetCards(nil)
+		self:SetVisible(false)
+		_UIVisibilityNotifierLogic:SendFrom(self, "settlement", false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCards(table settlementCards)
+		-- 결산 카드 목록을 각 슬롯에 반영합니다.
+		local cardCount = self:GetSettlementCardCount(settlementCards)
+		self:ApplyCardLayout(cardCount)
+
+		for index = 1, 3 do
+			local card = settlementCards ~= nil and settlementCards[index] or nil
+			self:SetCard(index, card)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetSettlementCardCount(table settlementCards)
+		-- 표시 가능한 정산 카드 수를 최대 3장까지 계산합니다.
+		if settlementCards == nil then
+			return 0
+		end
+
+		local cardCount = 0
+		for index = 1, 3 do
+			if settlementCards[index] ~= nil then
+				cardCount += 1
+			end
+		end
+
+		return cardCount
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCardLayout(integer cardCount)
+		-- 정산 카드 개수에 따라 중앙 기준으로 1장/2장/3장 배치를 적용합니다.
+		for index = 1, 3 do
+			local cardEntity = self:GetCard(index)
+			if cardEntity ~= nil then
+				cardEntity.Enable = index <= cardCount
+			end
+		end
+
+		if cardCount == 1 then
+			self:SetCardPosition(1, self.CardCenterX)
+		elseif cardCount == 2 then
+			self:SetCardPosition(1, self.CardCenterX - self.CardSpacing * 0.5)
+			self:SetCardPosition(2, self.CardCenterX + self.CardSpacing * 0.5)
+		elseif cardCount >= 3 then
+			self:SetCardPosition(1, self.CardCenterX - self.CardSpacing)
+			self:SetCardPosition(2, self.CardCenterX)
+			self:SetCardPosition(3, self.CardCenterX + self.CardSpacing)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCardPosition(integer index, number x)
+		-- 지정한 카드 루트의 위치를 중앙 기준 배치값으로 갱신합니다.
+		local cardEntity = self:GetCard(index)
+		if cardEntity == nil or cardEntity.UITransformComponent == nil then
+			return
+		end
+
+		cardEntity.UITransformComponent.anchoredPosition = Vector2(x, self.CardCenterY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCard(integer index, any card)
+		-- 결산 카드 한 칸의 이름, 스탯 변화, 캐릭터 초상화를 갱신합니다.
+		local nameTextComponent = self:GetCardNameText(index)
+		local statDeltaArea = self:GetStatDeltaArea(index)
+		local statDeltaTemplate = self:GetStatDeltaTemplate(index)
+		local portraitComponent = self:GetPortrait(index)
+		local conditionComponent = self:GetCondition(index)
+		local characterId = card ~= nil and card.characterId or ""
+		local characterName = self:GetCardCharacterName(characterId)
+
+		self:SetText(nameTextComponent, characterName)
+		self:LogSettlementCardStats(index, card, characterName)
+		self:SetStatDeltas(index, statDeltaArea, statDeltaTemplate, card)
+		self:SetPortrait(portraitComponent, characterId)
+		self:SetConditionIcon(conditionComponent, characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void LogSettlementCardStats(integer cardIndex, any card, string characterName)
+		-- 디버그 확인용으로 결산 카드에 들어온 캐릭터별 스탯 변화량을 출력합니다.
+		if card == nil then
+			return
+		end
+
+		log("[SettlementCardUILogic] card=" .. tostring(cardIndex)
+			.. " characterId=" .. tostring(card.characterId or "")
+			.. " name=" .. tostring(characterName or "")
+			.. " vocal=" .. self:FormatStatDeltaNumber(card.vocal or 0)
+			.. " dance=" .. self:FormatStatDeltaNumber(card.dance or 0)
+			.. " visual=" .. self:FormatStatDeltaNumber(card.visual or 0)
+			.. " fandom=" .. self:FormatStatDeltaNumber(card.fandom or 0)
+			.. " fatigue=" .. self:FormatStatDeltaNumber(card.fatigue or 0))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetStatDeltas(integer cardIndex, Entity statDeltaArea, Entity statDeltaTemplate, any card)
+		-- 0이 아닌 스탯 변화만 StatDelta 템플릿을 기준으로 동적 배치합니다.
+		self:ClearRuntimeStatDeltas(cardIndex)
+
+		if statDeltaArea == nil or statDeltaTemplate == nil then
+			return
+		end
+
+		local parts = self:BuildSettlementStatDeltaParts(card)
+		local displayCount = #parts
+		if displayCount <= 0 then
+			statDeltaTemplate.Enable = false
+			return
+		end
+
+		statDeltaArea.Enable = true
+		local runtimeItems = {}
+		for index, part in ipairs(parts) do
+			local item = statDeltaTemplate
+			if index > 1 then
+				item = statDeltaTemplate:Clone("SettlementStatDelta_" .. tostring(cardIndex) .. "_" .. tostring(index))
+				if item ~= nil then
+					table.insert(runtimeItems, item)
+				end
+			end
+
+			self:SetStatDeltaItem(item, part, displayCount, index)
+		end
+
+		self.tRuntimeStatDeltaItems[tostring(cardIndex)] = runtimeItems
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearRuntimeStatDeltas(integer cardIndex)
+		-- 이전 갱신 때 만든 StatDelta 복제 엔티티를 제거합니다.
+		if self.tRuntimeStatDeltaItems == nil then
+			self.tRuntimeStatDeltaItems = {}
+			return
+		end
+
+		local key = tostring(cardIndex)
+		local runtimeItems = self.tRuntimeStatDeltaItems[key]
+		if runtimeItems ~= nil then
+			for _, item in ipairs(runtimeItems) do
+				if item ~= nil then
+					item:Destroy()
+				end
+			end
+		end
+
+		self.tRuntimeStatDeltaItems[key] = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildSettlementStatDeltaParts(any card)
+		-- 카드 데이터에서 0이 아닌 스탯 변화 항목만 표시 순서대로 구성합니다.
+		local parts = {}
+		if card == nil then
+			return parts
+		end
+
+		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("vocal", "보컬"), "vocal", card.vocal or 0)
+		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("dance", "댄스"), "dance", card.dance or 0)
+		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("visual", "비주얼"), "visual", card.visual or 0)
+		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("fandom", "팬덤"), "fandom", card.fandom or 0)
+		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("fatigue", "피로도"), "fatigue", card.fatigue or 0)
+
+		return parts
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddSettlementStatDeltaPart(table parts, string statName, string statKey, number value)
+		if value == nil or value == 0 then
+			return
+		end
+
+		table.insert(parts, {
+			statKey = statKey,
+			text = statName .. " : " .. self:BuildStatDeltaNumberRichText(statKey, value)
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetStatDeltaItem(Entity item, any part, integer displayCount, integer index)
+		if item == nil or part == nil then
+			return
+		end
+
+		item.Enable = true
+		if item.UITransformComponent ~= nil then
+			item.UITransformComponent.anchoredPosition = Vector2(0, self:GetStatDeltaOffsetY(displayCount, index))
+		end
+
+		local textEntity = item:GetChildByName("Text", false)
+		if textEntity ~= nil then
+			if textEntity.TextGUIRendererComponent ~= nil then
+				textEntity.TextGUIRendererComponent.IsRichText = true
+				textEntity.TextGUIRendererComponent.FontColor = self.StatDeltaLabelColor
+				textEntity.TextGUIRendererComponent.Text = part.text or ""
+			elseif textEntity.TextComponent ~= nil then
+				textEntity.TextComponent.IsRichText = true
+				textEntity.TextComponent.FontColor = self.StatDeltaLabelColor
+				textEntity.TextComponent.Text = part.text or ""
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetStatDeltaOffsetY(integer displayCount, integer index)
+		-- 배치 기준점은 기존 StatDelta 위치이며 짝수 개수는 기준점 위아래로 나눕니다.
+		local centerIndex = (displayCount + 1) * 0.5
+		return (centerIndex - index) * self.StatDeltaSpacing
+	end
+
+	@ExecSpace("ClientOnly")
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedStatName(string statKey, string fallbackText)
+		-- 스탯 키에 대응하는 현재 locale 이름 조회
+		if _ScheduleStatTextUtil ~= nil then
+			return _ScheduleStatTextUtil:GetLocalizedStatName(statKey, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	method string BuildStatDeltaNumberRichText(string statKey, number value)
+		if _ScheduleStatTextUtil ~= nil then
+			return _ScheduleStatTextUtil:BuildSignedNumberRichText(statKey, value)
+		end
+
+		return "<color=" .. self:GetStatDeltaColorHex(statKey, value) .. "><b>" .. self:FormatStatDeltaNumber(value) .. "</b></color>"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetStatDeltaColorHex(string statKey, number value)
+		if value == nil or value == 0 then
+			return "#FFFFFF"
+		end
+
+		if self:IsGoodStatDeltaChange(statKey, value) then
+			return "#00C72B"
+		end
+
+		return "#FF4D4D"
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsGoodStatDeltaChange(string statKey, number value)
+		if _ScheduleStatTextUtil ~= nil then
+			return _ScheduleStatTextUtil:IsGoodStatChange(statKey, value)
+		end
+
+		if statKey == "fatigue" then
+			return value < 0
+		end
+
+		return value > 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatStatDeltaNumber(number value)
+		if _ScheduleStatTextUtil ~= nil then
+			return _ScheduleStatTextUtil:FormatSignedNumber(value)
+		end
+
+		local safeValue = value or 0
+		if safeValue > 0 then
+			return "+" .. tostring(safeValue)
+		end
+
+		return tostring(safeValue)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCardCharacterName(string characterId)
+		-- 카드에 배정된 actorId 기준 표시 이름을 가져옵니다.
+		if characterId == nil or characterId == "" then
+			return ""
+		end
+
+		if _RuntimeActorManager == nil then
+			return characterId
+		end
+
+		return _RuntimeActorManager:ClientGetActorName(characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(TextGUIRendererComponent textComponent, string text)
+		-- 텍스트 컴포넌트가 존재할 때만 문자열을 갱신합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = text or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPortrait(SpriteGUIRendererComponent portraitComponent, string characterId)
+		-- 캐릭터 ID에 맞는 초상화 이미지를 카드에 적용합니다.
+		if portraitComponent == nil or portraitComponent.Entity == nil then
+			return
+		end
+
+		if characterId == nil or characterId == "" then
+			portraitComponent.ImageRUID = DataRef("")
+			portraitComponent.Entity.Enable = false
+			return
+		end
+
+		if _RuntimeActorManager == nil then
+			portraitComponent.ImageRUID = DataRef("")
+			portraitComponent.Entity.Enable = false
+			return
+		end
+
+		local portraitRuid = _RuntimeActorManager:ClientGetActorPortraitHorizontalRuid(characterId, "")
+		if portraitRuid == nil or portraitRuid == "" then
+			portraitComponent.ImageRUID = DataRef("")
+			portraitComponent.Entity.Enable = false
+			log_warning("[SettlementCardUILogic] settlement portrait not found characterId=" .. characterId)
+			return
+		end
+
+		portraitComponent.ImageRUID = DataRef(portraitRuid)
+		portraitComponent.Entity.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetConditionIcon(SpriteGUIRendererComponent conditionComponent, string characterId)
+		-- Applies the current character fatigue condition icon to the settlement card.
+		if conditionComponent == nil or conditionComponent.Entity == nil then
+			return
+		end
+
+		if characterId == nil or characterId == "" then
+			conditionComponent.ImageRUID = DataRef("")
+			conditionComponent.Entity.Enable = false
+			return
+		end
+
+		local character = self:GetCharacterData(characterId)
+		if character == nil then
+			conditionComponent.ImageRUID = DataRef("")
+			conditionComponent.Entity.Enable = false
+			return
+		end
+
+		local conditionRuid = self:GetConditionIconRuid(character.fatigue or 0)
+		if conditionRuid == nil or conditionRuid == "" then
+			conditionComponent.ImageRUID = DataRef("")
+			conditionComponent.Entity.Enable = false
+			return
+		end
+
+		conditionComponent.ImageRUID = DataRef(conditionRuid)
+		conditionComponent.Entity.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCharacterData(string characterId)
+		-- Returns the current client-side character data for the requested card character.
+		if characterId == nil or characterId == "" then
+			return nil
+		end
+
+		if _CharacterManager == nil then
+			return nil
+		end
+
+		return _CharacterManager:ClientGetCharacterById(characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetConditionIconRuid(number fatigue)
+		-- Resolves the ConditionMaster icon resource id for the given fatigue into an image RUID.
+		if _ConditionMaster == nil then
+			return ""
+		end
+
+		return _ConditionMaster:GetConditionIconRuidByFatigue(fatigue or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetCard(integer index)
+		-- 카드 번호에 해당하는 정산 카드 루트 엔티티를 반환합니다.
+		if index == 1 then
+			return self.card1
+		elseif index == 2 then
+			return self.card2
+		end
+
+		return self.card3
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetStatDeltaArea(integer index)
+		-- 카드 번호에 해당하는 스탯 변화 영역 엔티티를 반환합니다.
+		if index == 1 then
+			return self.statDeltaArea1
+		elseif index == 2 then
+			return self.statDeltaArea2
+		end
+
+		return self.statDeltaArea3
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetStatDeltaTemplate(integer index)
+		-- 카드 번호에 해당하는 StatDelta 템플릿 엔티티를 반환합니다.
+		if index == 1 then
+			return self.statDeltaTemplate1
+		elseif index == 2 then
+			return self.statDeltaTemplate2
+		end
+
+		return self.statDeltaTemplate3
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCardNameText(integer index)
+		-- 카드 번호에 해당하는 이름 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then
+			return self.card1NameText
+		elseif index == 2 then
+			return self.card2NameText
+		end
+
+		return self.card3NameText
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetPortrait(integer index)
+		-- 카드 번호에 해당하는 초상화 컴포넌트를 반환합니다.
+		if index == 1 then
+			return self.portrait1
+		elseif index == 2 then
+			return self.portrait2
+		end
+
+		return self.portrait3
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetCondition(integer index)
+		-- Returns the condition icon sprite component for the requested settlement card index.
+		if index == 1 then
+			return self.condition1
+		elseif index == 2 then
+			return self.condition2
+		end
+
+		return self.condition3
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisible(boolean isVisible)
+		-- 루트 엔티티가 지정되어 있으면 결산 카드 UI 표시 상태를 변경합니다.
+		if self.root == nil then
+			return
+		end
+
+		self.root.Enable = isVisible
+	end
+
+end

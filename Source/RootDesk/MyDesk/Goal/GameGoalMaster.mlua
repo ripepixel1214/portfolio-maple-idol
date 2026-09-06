@@ -1,0 +1,116 @@
+-- GameGoalTable을 로드하고 게임 목표 ID에 해당하는 목표 조건 데이터를 제공합니다.
+@Logic
+script GameGoalMaster extends Logic
+
+	property boolean IsGameGoalLoaded = false
+
+	property any tGameGoalById = {}
+
+	property any tGameGoalBySchedule = {}
+
+	property any tGameGoals = {}
+
+	method void OnBeginPlay()
+		-- 게임 목표 테이블 데이터를 로드합니다.
+		self:LoadGameGoal()
+	end
+
+	method void LoadGameGoal()
+		-- 게임 목표 테이블의 행을 읽고 gameGoalId 기준으로 캐싱합니다.
+		self.tGameGoalById = {}
+		self.tGameGoalBySchedule = {}
+		self.tGameGoals = {}
+		self.IsGameGoalLoaded = false
+		local loadedCount = 0
+
+		local dataSet = _DataService:GetTable("GameGoalTable")
+
+		if dataSet == nil then
+			log_warning("[GameGoalMaster] GameGoalTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local id = _DataTableUtil:SafeGetString(dataSet, rowIndex, "gameGoalId", "")
+
+			if id ~= "" then
+				local tGameGoal = GameGoalRow()
+				tGameGoal.id = id
+				local nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+				local descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
+				tGameGoal.name = ""
+				tGameGoal.description = ""
+				if _LocalizationLogic ~= nil then
+					tGameGoal.name = _LocalizationLogic:GetText(nameKey, "")
+					tGameGoal.description = _LocalizationLogic:GetText(descriptionKey, "")
+				end
+				tGameGoal.targetScore = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "targetScore", 0)
+				-- month/week는 해당 월/주차를 시작하기 직전에 공연이 발생한다는 의미입니다.
+				tGameGoal.month = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "month", 1)
+				tGameGoal.week = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "week", 1)
+
+				self.tGameGoalById[id] = tGameGoal
+				self.tGameGoalBySchedule[self:GetScheduleKey(tGameGoal.month, tGameGoal.week)] = tGameGoal
+				table.insert(self.tGameGoals, tGameGoal)
+				loadedCount = loadedCount + 1
+			end
+		end
+
+		table.sort(self.tGameGoals, function(leftGoal, rightGoal)
+			return self:CompareGameGoalSchedule(leftGoal, rightGoal)
+		end)
+
+		self.IsGameGoalLoaded = true
+	end
+
+	method any GetGameGoal(string id)
+		-- gameGoalId에 해당하는 게임 목표 row를 반환합니다.
+		if self.IsGameGoalLoaded == false then
+			self:LoadGameGoal()
+		end
+
+		local tGameGoal = self.tGameGoalById[id]
+		if tGameGoal ~= nil then
+			return tGameGoal
+		end
+
+		return self.tGameGoals[1]
+	end
+
+	method any GetGameGoalByMonthWeek(integer month, integer week)
+		-- month/week에 해당하는 게임 목표 row를 반환합니다.
+		if self.IsGameGoalLoaded == false then
+			self:LoadGameGoal()
+		end
+
+		return self.tGameGoalBySchedule[self:GetScheduleKey(month, week)]
+	end
+
+	method any GetGameGoals()
+		-- 월/주차 순서로 정렬된 전체 게임 목표 목록을 반환합니다.
+		if self.IsGameGoalLoaded == false then
+			self:LoadGameGoal()
+		end
+
+		return self.tGameGoals
+	end
+
+	method string GetScheduleKey(integer month, integer week)
+		-- 월/주차 조합을 캐시 키로 변환합니다.
+		return tostring(month or 0) .. ":" .. tostring(week or 0)
+	end
+
+	method boolean CompareGameGoalSchedule(any leftGoal, any rightGoal)
+		-- 게임 목표를 month, week, id 순서로 정렬합니다.
+		if leftGoal.month == rightGoal.month then
+			if leftGoal.week == rightGoal.week then
+				return leftGoal.id < rightGoal.id
+			end
+
+			return leftGoal.week < rightGoal.week
+		end
+
+		return leftGoal.month < rightGoal.month
+	end
+
+end

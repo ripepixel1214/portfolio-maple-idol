@@ -1,0 +1,34 @@
+@Struct
+script EventTriggerRow
+
+	property string id = ""
+
+	property string eventId = ""
+
+	property string activityType = ""
+
+	property string activityId = ""
+
+	property string npcId = ""
+
+	property number spawnX = 0
+
+	property number spawnY = 0
+
+	property string conditionGroupId = ""
+
+	property string countType = ""
+
+	property integer requiredCount = 0
+
+	property number chancePercent = 0
+
+	property string countWindow = ""
+
+	property string priority = ""
+
+	property integer priorityRank = 0
+
+	property boolean enabled = true
+
+end

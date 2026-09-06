@@ -1,0 +1,101 @@
+-- 카메라 화면의 월드 가시 범위와 경계 좌표 연산을 제공하는 공용 유틸입니다.
+@Logic
+script CameraBoundsUtil extends Logic
+
+	@ExecSpace("ClientOnly")
+	method any GetCurrentWorldPosBounds()
+		-- 현재 화면 네 모서리를 월드 좌표로 변환한 원본 가시 범위를 반환합니다.
+		if _UILogic == nil then
+			return nil
+		end
+
+		local screenWidth = _UILogic.ScreenWidth
+		local screenHeight = _UILogic.ScreenHeight
+		if screenWidth == nil or screenHeight == nil or screenWidth <= 0 or screenHeight <= 0 then
+			return nil
+		end
+
+		local corners = { Vector2(0, 0), Vector2(screenWidth, 0), Vector2(0, screenHeight), Vector2(screenWidth, screenHeight)}
+		local left = nil
+		local right = nil
+		local bottom = nil
+		local top = nil
+
+		for i = 1, #corners do
+			local worldPosition = _UILogic:ScreenToWorldPosition(corners[i])
+			if left == nil or worldPosition.x < left then left = worldPosition.x end
+			if right == nil or worldPosition.x > right then right = worldPosition.x end
+			if bottom == nil or worldPosition.y < bottom then bottom = worldPosition.y end
+			if top == nil or worldPosition.y > top then top = worldPosition.y end
+		end
+
+		if left == nil then
+			return nil
+		end
+
+		return { left = left, right = right, bottom = bottom, top = top}
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 GetBoundsSize(any bounds)
+		if bounds == nil then
+			return Vector2(0, 0)
+		end
+
+		return Vector2(bounds.right - bounds.left, bounds.top - bounds.bottom)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any InsetBounds(any bounds, number leftMargin, number rightMargin, number bottomMargin, number topMargin)
+		-- 경계 네 방향에 안쪽 여백을 적용하고 뒤집힌 축은 중앙 좌표로 축소합니다.
+		if bounds == nil then
+			return nil
+		end
+
+		local left = bounds.left + leftMargin
+		local right = bounds.right - rightMargin
+		local bottom = bounds.bottom + bottomMargin
+		local top = bounds.top - topMargin
+
+		if left > right then
+			local centerX = (left + right) / 2
+			left = centerX
+			right = centerX
+		end
+
+		if bottom > top then
+			local centerY = (bottom + top) / 2
+			bottom = centerY
+			top = centerY
+		end
+
+		return { left = left, right = right, bottom = bottom, top = top}
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 ClampPositionToBounds(Vector2 position, any bounds)
+		if bounds == nil then
+			return position
+		end
+
+		return Vector2(
+			_MathUtil:Clamp(position.x, bounds.left, bounds.right),
+			_MathUtil:Clamp(position.y, bounds.bottom, bounds.top)
+		)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsBoundsSizeWithinRatio(any bounds, Vector2 expectedSize, number toleranceRatio)
+		if bounds == nil then
+			return false
+		end
+
+		local actualSize = self:GetBoundsSize(bounds)
+		local ratio = math.max(toleranceRatio, 0)
+		local widthTolerance = math.abs(expectedSize.x) * ratio
+		local heightTolerance = math.abs(expectedSize.y) * ratio
+		return math.abs(actualSize.x - expectedSize.x) <= widthTolerance
+			and math.abs(actualSize.y - expectedSize.y) <= heightTolerance
+	end
+
+end

@@ -1,0 +1,72 @@
+-- StaticActorDialogTable을 로드하고 고정 NPC(actorId)별 평상시 대화 dialogId를 제공합니다.
+@Logic
+script StaticActorDialogMaster extends Logic
+
+	-- Dictionary<string, string> (actorId -> dialogId)
+	property any tDialogIdByActorId = {}
+
+	property boolean isCached = false
+
+	method void OnBeginPlay()
+		-- 시작 시 고정 NPC 평상시 대화 매핑을 캐싱합니다.
+		self.isCached = false
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- StaticActorDialogTable을 actorId 기준 dialogId 조회 맵으로 다시 구성합니다.
+		if self.isCached == true then
+			return
+		end
+
+		self.tDialogIdByActorId = {}
+
+		local dataSet = _DataService:GetTable("StaticActorDialogTable")
+		if dataSet == nil then
+			log_warning("[StaticActorDialogMaster] StaticActorDialogTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local actorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "actorId", "")
+			local dialogId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogId", "")
+			if actorId ~= "" and dialogId ~= "" then
+				self.tDialogIdByActorId[actorId] = dialogId
+			end
+		end
+
+		self.isCached = true
+		log("[StaticActorDialogMaster] loaded count=" .. tostring(self:GetCount()))
+	end
+
+	method void EnsureCached()
+		-- 다른 로직이 먼저 접근하면 필요한 캐시를 지연 초기화합니다.
+		self:CacheAll()
+	end
+
+	method string GetDialogId(string actorId)
+		-- actorId에 매핑된 평상시 대화 dialogId를 반환합니다. 없으면 빈 문자열.
+		self:CacheAll()
+		if actorId == nil or actorId == "" then
+			return ""
+		end
+
+		return self.tDialogIdByActorId[actorId] or ""
+	end
+
+	method boolean HasDialog(string actorId)
+		-- actorId에 평상시 대화가 매핑되어 있는지 반환합니다.
+		return self:GetDialogId(actorId) ~= ""
+	end
+
+	method integer GetCount()
+		-- 캐싱된 매핑 수를 계산합니다.
+		local count = 0
+		for _, _ in pairs(self.tDialogIdByActorId) do
+			count = count + 1
+		end
+
+		return count
+	end
+
+end

@@ -1,0 +1,580 @@
+@Logic
+script RuntimeActorManager extends Logic
+
+	property boolean IsRuntimeActorDataLoaded = false
+
+	-- 서버 권위 런타임 액터 표시 데이터 목록입니다.
+	property any tRuntimeActorDatas = {}
+
+	property any tRuntimeActorDataById = {}
+
+	property string CurrentUserId = ""
+
+	property any userEnterHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 서버 권위 액터 런타임 데이터를 준비해 전송하도록 이벤트만 연결합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 서버에서 연결한 유저 입장 이벤트를 정리합니다.
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendActorChangedEvent(string actorId)
+		-- 액터 런타임 표시 데이터가 변경되었음을 현재 실행 공간의 구독자에게 알립니다.
+		local actorChangedEvent = ActorChangedEvent()
+		actorChangedEvent.actorId = actorId
+		self:SendEvent(actorChangedEvent)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorName(string actorId)
+		-- 런타임 이름 오버라이드가 있으면 우선 사용하고 없으면 ActorMaster의 이름을 반환합니다.
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor ~= nil and tRuntimeActor.name ~= nil and tRuntimeActor.name ~= "" then
+			return tRuntimeActor.name
+		end
+
+		return _ActorMaster:GetActorName(actorId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetLocalizedActorName(string actorId)
+		-- 런타임 override 우선으로 현재 locale의 액터 이름을 반환
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor ~= nil and tRuntimeActor.name ~= nil and tRuntimeActor.name ~= "" then
+			return tRuntimeActor.name
+		end
+
+		local tActor = _ActorMaster:GetActor(actorId)
+		if tActor == nil then
+			return actorId or ""
+		end
+
+		local fallbackName = actorId or ""
+		if _LocalizationLogic ~= nil and tActor.nameKey ~= nil and tActor.nameKey ~= "" then
+			return _LocalizationLogic:GetText(tActor.nameKey, "")
+		end
+
+		return tActor.name or fallbackName
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorPortraitResourceId(string actorId)
+		-- 런타임 초상화 오버라이드가 있으면 우선 사용하고 없으면 ActorMaster의 초상화 리소스 ID를 반환합니다.
+		-- 현재는 초상화가 액터 테이블 기본 마스터값으로 픽스되고 있습니다. 추후 초상화 동적 변경이 구현되면 스토리지 연동으로 변경.
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor ~= nil and tRuntimeActor.portrait ~= nil and tRuntimeActor.portrait ~= "" then
+			return tRuntimeActor.portrait
+		end
+
+		return _ActorMaster:GetActorPortrait(actorId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorPortraitHorizontalResourceId(string actorId)
+		-- 런타임 가로형 초상화 오버라이드가 있으면 우선 사용하고 없으면 ActorMaster 기본값을 반환합니다.
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor ~= nil and tRuntimeActor.portraitHorizontal ~= nil and tRuntimeActor.portraitHorizontal ~= "" then
+			return tRuntimeActor.portraitHorizontal
+		end
+
+		local tActor = _ActorMaster:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+
+		return tActor.portraitHorizontal or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorPortraitFullBodyResourceId(string actorId)
+		-- 런타임 전신 초상화 오버라이드가 있으면 우선 사용하고 없으면 ActorMaster 기본값을 반환합니다.
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor ~= nil and tRuntimeActor.portraitFullBody ~= nil and tRuntimeActor.portraitFullBody ~= "" then
+			return tRuntimeActor.portraitFullBody
+		end
+
+		local tActor = _ActorMaster:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+
+		return tActor.portraitFullBody or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorPortraitRuid(string actorId, string portraitOverride)
+		-- 초상화 오버라이드 또는 액터 초상화 리소스 ID를 실제 RUID로 변환해 반환합니다.
+		-- 현재는 초상화가 액터 테이블 기본 마스터값으로 픽스되고 있습니다. 추후 초상화 동적 변경이 구현되면 스토리지 연동으로 변경.
+		if portraitOverride ~= nil and portraitOverride ~= "" then
+			return _ResourceMaster:ResolveResourceId(portraitOverride)
+		end
+
+		local portraitResourceId = self:ClientGetActorPortraitResourceId(actorId)
+		local portraitRuid = _ResourceMaster:ResolveResourceId(portraitResourceId)
+		if portraitRuid ~= nil and portraitRuid ~= "" then
+			return portraitRuid
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorPortraitHorizontalRuid(string actorId, string portraitOverride)
+		-- 가로형 초상화 리소스 아이디를 실제 RUID로 변환해 반환합니다.
+		if portraitOverride ~= nil and portraitOverride ~= "" then
+			return _ResourceMaster:ResolveResourceId(portraitOverride)
+		end
+
+		local portraitResourceId = self:ClientGetActorPortraitHorizontalResourceId(actorId)
+		local portraitRuid = _ResourceMaster:ResolveResourceId(portraitResourceId)
+		if portraitRuid ~= nil and portraitRuid ~= "" then
+			return portraitRuid
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorPortraitFullBodyRuid(string actorId, string portraitOverride)
+		-- 전신 초상화 리소스 아이디를 실제 RUID로 변환해 반환합니다.
+		if portraitOverride ~= nil and portraitOverride ~= "" then
+			return _ResourceMaster:ResolveResourceId(portraitOverride)
+		end
+
+		local portraitResourceId = self:ClientGetActorPortraitFullBodyResourceId(actorId)
+		local portraitRuid = _ResourceMaster:ResolveResourceId(portraitResourceId)
+		if portraitRuid ~= nil and portraitRuid ~= "" then
+			return portraitRuid
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ClientGetActorAvatar(string actorId)
+		-- 런타임 아바타 오버라이드가 있으면 우선 사용하고 없으면 ActorMaster의 아바타 리소스 ID를 반환합니다.
+		-- 현재는 아바타가 에디터상에서 픽스되고 있습니다. 추후 코디 기능이 구현되면 스토리지 연동으로 변경.
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor ~= nil and tRuntimeActor.avatar ~= nil and tRuntimeActor.avatar ~= "" then
+			return tRuntimeActor.avatar
+		end
+
+		return _ActorMaster:GetActorAvatar(actorId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer ClientGetActorCount()
+		-- 액터 마스터에 등록된 액터 수를 반환합니다.
+		return _ActorMaster:GetActorCount()
+	end
+
+	@ExecSpace("Server")
+	method void RequestSaveRuntimeActorDataToStorage()
+		-- 클라이언트가 현재 서버 권위 런타임 액터 표시 데이터 저장을 요청합니다.
+		self:SaveRuntimeActorDataToStorage()
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetActorName(string actorId, string name)
+		-- 클라이언트가 액터 런타임 표시 이름 변경을 서버에 요청합니다.
+		local isSet = self:SetActorName(actorId, name)
+		if isSet then
+			self:PushRuntimeActorToClient(actorId, senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetActorPortraitResourceId(string actorId, string portraitResourceId)
+		-- 클라이언트가 액터 런타임 초상화 리소스 ID 변경을 서버에 요청합니다.
+		local isSet = self:SetActorPortraitResourceId(actorId, portraitResourceId)
+		if isSet then
+			self:PushRuntimeActorToClient(actorId, senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetActorPortraitHorizontalResourceId(string actorId, string portraitResourceId)
+		-- 클라이언트가 서버 권위 가로형 초상화 오버라이드 변경을 요청합니다.
+		local isSet = self:SetActorPortraitHorizontalResourceId(actorId, portraitResourceId)
+		if isSet then
+			self:PushRuntimeActorToClient(actorId, senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetActorPortraitFullBodyResourceId(string actorId, string portraitResourceId)
+		-- 클라이언트가 서버 권위 전신 초상화 오버라이드 변경을 요청합니다.
+		local isSet = self:SetActorPortraitFullBodyResourceId(actorId, portraitResourceId)
+		if isSet then
+			self:PushRuntimeActorToClient(actorId, senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 싱글 플레이어가 서버에 입장하면 준비된 액터 런타임 캐시를 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+
+		self.CurrentUserId = event.UserId
+		self:LoadRuntimeActorDataFromStorage(event.UserId)
+		self:PushRuntimeActorsToClient(event.UserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadRuntimeActorDataFromStorage(string userId)
+		-- 저장소에서 로드한 액터 런타임 표시 데이터를 서버 권위 캐시로 보관합니다.
+		local tRuntimeActorDatas = _RuntimeActorStorage:LoadRuntimeActors(userId)
+		if tRuntimeActorDatas == nil then
+			self.IsRuntimeActorDataLoaded = false
+			return
+		end
+
+		self.tRuntimeActorDatas = {}
+		self.tRuntimeActorDataById = {}
+
+		for _, tRuntimeActor in ipairs(tRuntimeActorDatas) do
+			self:AddRuntimeActorData(tRuntimeActor)
+		end
+
+		self.IsRuntimeActorDataLoaded = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveRuntimeActorDataToStorage()
+		-- 서버 권위 액터 런타임 표시 데이터를 Storage에 저장합니다.
+		if self.IsRuntimeActorDataLoaded == false then
+			return
+		end
+
+		if self.CurrentUserId == nil or self.CurrentUserId == "" then
+			log_warning("[RuntimeActorManager] currentUserId is required")
+			return
+		end
+
+		_RuntimeActorStorage:SaveRuntimeActorsAsync(self.CurrentUserId, self.tRuntimeActorDatas)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ClearRuntimeActorData(string actorId)
+		-- 특정 액터의 서버 권위 런타임 표시 데이터를 제거합니다.
+		if self.IsRuntimeActorDataLoaded == false then
+			return false
+		end
+
+		if actorId == nil or actorId == "" then
+			return false
+		end
+
+		if self.tRuntimeActorDataById[actorId] == nil then
+			return true
+		end
+
+		self.tRuntimeActorDataById[actorId] = nil
+		for index, tRuntimeActor in ipairs(self.tRuntimeActorDatas) do
+			if tRuntimeActor ~= nil and tRuntimeActor.actorId == actorId then
+				table.remove(self.tRuntimeActorDatas, index)
+				break
+			end
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetActorName(string actorId, string name)
+		-- 특정 액터의 서버 권위 런타임 이름 오버라이드만 변경합니다.
+		local tRuntimeActor = self:GetRuntimeActorData(actorId)
+		if tRuntimeActor == nil then
+			return false
+		end
+
+		tRuntimeActor.name = name or ""
+		return self:ApplyRuntimeActorData(tRuntimeActor)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetActorPortraitResourceId(string actorId, string portraitResourceId)
+		-- 특정 액터의 서버 권위 런타임 초상화 리소스 ID 오버라이드만 변경합니다.
+		local tRuntimeActor = self:GetRuntimeActorData(actorId)
+		if tRuntimeActor == nil then
+			return false
+		end
+
+		tRuntimeActor.portrait = portraitResourceId or ""
+		return self:ApplyRuntimeActorData(tRuntimeActor)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetActorPortraitHorizontalResourceId(string actorId, string portraitResourceId)
+		-- 특정 액터의 서버 권위 가로형 초상화 오버라이드만 변경합니다.
+		local tRuntimeActor = self:GetRuntimeActorData(actorId)
+		if tRuntimeActor == nil then
+			return false
+		end
+
+		tRuntimeActor.portraitHorizontal = portraitResourceId or ""
+		return self:ApplyRuntimeActorData(tRuntimeActor)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetActorPortraitFullBodyResourceId(string actorId, string portraitResourceId)
+		-- 특정 액터의 서버 권위 전신 초상화 오버라이드만 변경합니다.
+		local tRuntimeActor = self:GetRuntimeActorData(actorId)
+		if tRuntimeActor == nil then
+			return false
+		end
+
+		tRuntimeActor.portraitFullBody = portraitResourceId or ""
+		return self:ApplyRuntimeActorData(tRuntimeActor)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetRuntimeActorData(string actorId)
+		-- 현재 서버 캐시에 저장된 런타임 표시 데이터를 한 필드 갱신용 plain table로 복사합니다.
+		if self.IsRuntimeActorDataLoaded == false then
+			return nil
+		end
+
+		local tActor = _ActorMaster:GetActor(actorId)
+		if tActor == nil then
+			log_warning("[RuntimeActorManager] actor not found actorId=" .. tostring(actorId))
+			return nil
+		end
+
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor == nil then
+			return self:CreateRuntimeActorData(actorId, "", "", "", "", "")
+		end
+
+		return self:CopyRuntimeActorData(tRuntimeActor)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyRuntimeActorData(any tRuntimeActor)
+		-- 정규화된 액터 런타임 표시 데이터를 서버 권위 캐시에 저장하거나 비어 있으면 제거합니다.
+		tRuntimeActor = self:NormalizeRuntimeActorData(tRuntimeActor)
+		if self:IsEmptyRuntimeActorData(tRuntimeActor) then
+			self:ClearRuntimeActorData(tRuntimeActor ~= nil and tRuntimeActor.actorId or "")
+			return true
+		end
+
+		self:AddRuntimeActorData(tRuntimeActor)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddRuntimeActorData(any tRuntimeActor)
+		-- 검증된 액터 런타임 표시 데이터 한 건을 서버 권위 캐시에 추가하거나 교체합니다.
+		if tRuntimeActor ~= nil and tRuntimeActor.ToPlainTable == nil then
+			tRuntimeActor = RuntimeActorData():FromPlainTable(tRuntimeActor)
+		end
+
+		if tRuntimeActor == nil or tRuntimeActor.actorId == nil or tRuntimeActor.actorId == "" then
+			return
+		end
+
+		if self.tRuntimeActorDataById[tRuntimeActor.actorId] == nil then
+			table.insert(self.tRuntimeActorDatas, tRuntimeActor)
+		else
+			for index, cachedActor in ipairs(self.tRuntimeActorDatas) do
+				if cachedActor.actorId == tRuntimeActor.actorId then
+					self.tRuntimeActorDatas[index] = tRuntimeActor
+					break
+				end
+			end
+		end
+
+		self.tRuntimeActorDataById[tRuntimeActor.actorId] = tRuntimeActor
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorData(string actorId, string name, string portrait, string portraitHorizontal, string portraitFullBody, string avatar)
+		-- 액터 마스터 기본값과 다른 필드만 저장할 런타임 액터 표시 데이터를 만듭니다.
+		local tRuntimeActor = RuntimeActorData()
+		tRuntimeActor.actorId = actorId or ""
+		tRuntimeActor.name = name or ""
+		tRuntimeActor.portrait = portrait or ""
+		tRuntimeActor.portraitHorizontal = portraitHorizontal or ""
+		tRuntimeActor.portraitFullBody = portraitFullBody or ""
+		tRuntimeActor.avatar = avatar or ""
+
+		return self:NormalizeRuntimeActorData(tRuntimeActor)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any NormalizeRuntimeActorData(any tRuntimeActor)
+		-- 액터 마스터 기본값과 같은 런타임 표시 필드는 저장하지 않도록 빈 값으로 정규화합니다.
+		if tRuntimeActor == nil then
+			return nil
+		end
+
+		local tActor = _ActorMaster:GetActor(tRuntimeActor.actorId)
+		if tActor ~= nil then
+			if tActor.name ~= nil and tActor.name ~= "" and tRuntimeActor.name == tActor.name then
+				tRuntimeActor.name = ""
+			end
+			if tRuntimeActor.portrait == (tActor.portrait or "") then
+				tRuntimeActor.portrait = ""
+			end
+			if tRuntimeActor.portraitHorizontal == (tActor.portraitHorizontal or "") then
+				tRuntimeActor.portraitHorizontal = ""
+			end
+			if tRuntimeActor.portraitFullBody == (tActor.portraitFullBody or "") then
+				tRuntimeActor.portraitFullBody = ""
+			end
+			if tRuntimeActor.avatar == (tActor.avatar or "") then
+				tRuntimeActor.avatar = ""
+			end
+		end
+
+		return tRuntimeActor
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsEmptyRuntimeActorData(any tRuntimeActor)
+		-- 액터 id 외에 저장할 런타임 오버라이드 값이 없는지 반환합니다.
+		if tRuntimeActor == nil then
+			return true
+		end
+
+		if tRuntimeActor.IsEmpty ~= nil then
+			return tRuntimeActor:IsEmpty()
+		end
+
+		return RuntimeActorData():FromPlainTable(tRuntimeActor):IsEmpty()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushRuntimeActorsToClient(string forUserId)
+		-- 서버 권위 액터 런타임 표시 데이터 전체를 지정한 클라이언트 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		if self.IsRuntimeActorDataLoaded == false then
+			return
+		end
+
+		self:SyncRuntimeActors(self:CreateRuntimeActorPlainTableList(), forUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushRuntimeActorToClient(string actorId, string forUserId)
+		-- 서버 권위 액터 런타임 표시 데이터 한 건을 지정한 클라이언트 로컬 캐시에 전송합니다.
+		if actorId == nil or actorId == "" or forUserId == nil or forUserId == "" then
+			return
+		end
+
+		if self.IsRuntimeActorDataLoaded == false then
+			return
+		end
+
+		local tRuntimeActor = self.tRuntimeActorDataById[actorId]
+		if tRuntimeActor == nil then
+			self:SyncRuntimeActorRemoved(actorId, forUserId)
+			return
+		end
+
+		self:SyncRuntimeActor(tRuntimeActor:ToPlainTable(), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncRuntimeActors(table tRuntimeActorDatas)
+		-- 서버에서 받은 액터 런타임 표시 데이터 전체를 클라이언트 로컬 캐시에 저장합니다.
+		self.tRuntimeActorDatas = {}
+		self.tRuntimeActorDataById = {}
+
+		for _, tRuntimeActorPlainTable in ipairs(tRuntimeActorDatas) do
+			local tRuntimeActor = RuntimeActorData():FromPlainTable(tRuntimeActorPlainTable)
+			if tRuntimeActor ~= nil and tRuntimeActor.actorId ~= nil and tRuntimeActor.actorId ~= "" then
+				table.insert(self.tRuntimeActorDatas, tRuntimeActor)
+				self.tRuntimeActorDataById[tRuntimeActor.actorId] = tRuntimeActor
+			end
+		end
+
+		self:SendActorChangedEvent("")
+	end
+
+	@ExecSpace("Client")
+	method void SyncRuntimeActor(table tRuntimeActorPlainTable)
+		-- 서버에서 받은 액터 런타임 표시 데이터 한 건을 클라이언트 로컬 캐시에 저장합니다.
+		local tRuntimeActor = RuntimeActorData():FromPlainTable(tRuntimeActorPlainTable)
+		if tRuntimeActor == nil or tRuntimeActor.actorId == nil or tRuntimeActor.actorId == "" then
+			return
+		end
+
+		if self.tRuntimeActorDataById[tRuntimeActor.actorId] == nil then
+			table.insert(self.tRuntimeActorDatas, tRuntimeActor)
+		else
+			for index, cachedActor in ipairs(self.tRuntimeActorDatas) do
+				if cachedActor.actorId == tRuntimeActor.actorId then
+					self.tRuntimeActorDatas[index] = tRuntimeActor
+					break
+				end
+			end
+		end
+
+		self.tRuntimeActorDataById[tRuntimeActor.actorId] = tRuntimeActor
+		self:SendActorChangedEvent(tRuntimeActor.actorId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncRuntimeActorRemoved(string actorId)
+		-- 서버에서 제거된 액터 런타임 표시 데이터 한 건을 클라이언트 로컬 캐시에서 제거합니다.
+		if actorId == nil or actorId == "" then
+			return
+		end
+
+		self.tRuntimeActorDataById[actorId] = nil
+		for index, tRuntimeActor in ipairs(self.tRuntimeActorDatas) do
+			if tRuntimeActor ~= nil and tRuntimeActor.actorId == actorId then
+				table.remove(self.tRuntimeActorDatas, index)
+				break
+			end
+		end
+
+		self:SendActorChangedEvent(actorId)
+	end
+
+	method any CopyRuntimeActorData(any tRuntimeActor)
+		-- 액터 런타임 표시 데이터 한 건을 RuntimeActorData로 복사합니다.
+		if tRuntimeActor == nil then
+			return RuntimeActorData()
+		end
+
+		return RuntimeActorData():FromPlainTable(tRuntimeActor)
+	end
+
+	method any CreateRuntimeActorPlainTableList()
+		-- 액터 런타임 표시 데이터 목록 전체를 plain table 배열로 변환합니다.
+		local tPlainTables = {}
+		for _, tRuntimeActor in ipairs(self.tRuntimeActorDatas) do
+			if tRuntimeActor ~= nil and tRuntimeActor.ToPlainTable ~= nil then
+				table.insert(tPlainTables, tRuntimeActor:ToPlainTable())
+			end
+		end
+
+		return tPlainTables
+	end
+
+end

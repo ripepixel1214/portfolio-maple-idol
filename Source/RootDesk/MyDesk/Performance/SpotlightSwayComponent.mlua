@@ -1,0 +1,106 @@
+---@description "스포트라이트 오버레이의 Spotlight 자식들을 상시 좌우로 회전 스윙시키는 컴포넌트. 좌/우 빔은 서로 반대 방향으로 쓸어준다."
+@Component
+script SpotlightSwayComponent extends Component
+
+	-- 스윙 최대 각도(도). 기준 각도에서 ±이 각도만큼 왕복
+	@Description("스윙 최대 각도(도)")
+	property number swayAngle = 15
+
+	-- 스윙 한 주기 시간(초)
+	@Description("스윙 한 주기 시간(초)")
+	property number swayDuration = 2.6
+
+	-- 상시 스윙 사용 여부. false면 정지
+	@Description("상시 스윙 사용")
+	property boolean autoSway = true
+
+	-- 각 빔의 기준(중심) 회전각(도). L=baseTilt(중심 -45), R=-baseTilt(중심 +45). swayAngle과 합쳐 L −30~−60 / R 30~60로 왕복
+	@Description("빔 기준 중심 회전각(도)")
+	property number baseTilt = -45
+
+	-- 수집한 빔 자식 목록 (최초 OnUpdate에서 1회 수집)
+	@HideFromInspector
+	property any beams = nil
+
+	-- 빔별 기준 회전각(도) 캐시. CollectBeams에서 채운다
+	@HideFromInspector
+	property any baseAngles = nil
+
+	-- 빔별 스윙 방향 부호(L=+1, R=-1). 좌우가 서로 반대로 쓸리도록
+	@HideFromInspector
+	property any swaySigns = nil
+
+	-- 상시 스윙 누적 시계(초)
+	@HideFromInspector
+	property number timer = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 켜져 있는 동안 빔들의 회전각을 기준각 ± 사인 진동으로 갱신 (좌우 반대 부호)
+		if self.beams == nil then
+			self:CollectBeams()
+		end
+		if #self.beams == 0 then
+			return
+		end
+		if self.autoSway == false or self.swayDuration <= 0 then
+			return
+		end
+
+		self.timer = self.timer + delta
+		local phase = math.sin((self.timer / self.swayDuration) * 2 * math.pi)
+
+		for i, beam in ipairs(self.beams) do
+			if isvalid(beam) then
+				local transform = beam.UITransformComponent
+				if isvalid(transform) then
+					local sign = self.swaySigns[i]
+					local angle = self.baseAngles[i] + self.swayAngle * phase * sign
+					transform.UIRotation = Vector3(0, 0, angle)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 정리 시 다음 표시를 위해 상태 초기화 (기준각도 다시 수집하도록 비운다)
+		self.beams = nil
+		self.baseAngles = nil
+		self.swaySigns = nil
+		self.timer = 0
+	end
+
+	method void CollectBeams()
+		-- 이름에 'Spotlight'가 포함된 직속 자식들을 수집하고, 각 빔의 기준 회전각과 스윙 방향 부호를 캐시한다
+		self.beams = {}
+		self.baseAngles = {}
+		self.swaySigns = {}
+		local children = self.Entity.Children
+		if children == nil then
+			return
+		end
+
+		for _, child in ipairs(children:ToTable()) do
+			if isvalid(child) and string.find(child.Name, "Spotlight") ~= nil then
+				table.insert(self.beams, child)
+
+				-- 스윙/기울기 방향 부호: 이름 끝 'L'=+1, 'R'=-1. 그 외는 순번 교대
+				local sign = 1
+				local side = string.upper(string.sub(child.Name, -1))
+				if side == "R" then
+					sign = -1
+				elseif side == "L" then
+					sign = 1
+				elseif (#self.beams) % 2 == 0 then
+					sign = -1
+				end
+				table.insert(self.swaySigns, sign)
+
+				-- 기준 기울기: 좌우가 서로 반대 부호로 안쪽을 향하도록 baseTilt에 부호 적용
+				table.insert(self.baseAngles, self.baseTilt * sign)
+			end
+		end
+	end
+
+end

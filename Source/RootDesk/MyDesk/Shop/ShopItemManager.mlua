@@ -1,0 +1,368 @@
+-- 유저가 상점에서 구매해 보유 중인 치장 아이템 목록을 관리한다(런타임 캐시 + 서버 권위 + 구매 처리).
+@Logic
+script ShopItemManager extends Logic
+
+	property boolean isShopItemOwnershipLoaded = false
+
+	-- ownedShopItemIds: { shopItemId:string, shopItemId:string, ... }
+	property any ownedShopItemIds = {}
+
+	-- ownedShopItemIdSet: { [shopItemId:string] = true }
+	property any ownedShopItemIdSet = {}
+
+	property string currentUserId = ""
+
+	property any userEnterHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 서버 권위 상점 소유 목록을 로드하고 클라이언트에 동기화합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 서버 종료 시점에 유저 입장 이벤트 핸들러를 정리합니다.
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientHasShopItem(string shopItemId)
+		-- 클라이언트 로컬 캐시의 상점 아이템 보유 여부를 반환합니다.
+		if shopItemId == nil or shopItemId == "" then
+			return false
+		end
+
+		return self.ownedShopItemIdSet[shopItemId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetOwnedShopItemIds()
+		-- 클라이언트 로컬 캐시의 보유 상점 아이템 id 목록 복사본을 반환합니다.
+		return self:CopyStringList(self.ownedShopItemIds)
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestPurchaseItems(table shopItemIds)
+		-- 클라이언트 요청으로 지정한 상점 아이템들을 한 번에 구매합니다.
+		if self:CanUseShopItems(senderUserId) == false then
+			return false
+		end
+
+		return self:PurchaseItemsWithCommit(shopItemIds, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 유저가 서버에 입장하면 상점 소유 데이터를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][ShopItemManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadShopItems()
+
+		if self:IsShopItemsLoaded() then
+			self:PushShopItemsToClient(event.UserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadShopItems()
+		-- Storage에서 보유 상점 아이템 id 목록을 읽어 서버 권위 캐시로 보관합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ShopItemManager] currentUserId is required")
+			self.isShopItemOwnershipLoaded = false
+			return
+		end
+
+		local loadedShopItemIds = {}
+		if _ShopItemStorage ~= nil then
+			loadedShopItemIds = _ShopItemStorage:LoadShopItems(self.currentUserId)
+			if loadedShopItemIds == nil then
+				log_warning("[ShopItemManager] shop item ids are nil")
+				self.isShopItemOwnershipLoaded = false
+				return
+			end
+		end
+
+		self:RegisterOwnedShopItems(loadedShopItemIds)
+		self.isShopItemOwnershipLoaded = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsShopItemsLoaded()
+		-- 서버 상점 소유 데이터 로드 여부를 반환합니다.
+		return self.isShopItemOwnershipLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseShopItems(string userId)
+		-- Request 입구에서 현재 유저와 상점 소유 데이터 로드 상태를 검증합니다.
+		if self:IsShopItemsLoaded() == false then
+			log_warning("[ShopItemManager] request rejected because shop items are not loaded")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ShopItemManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[ShopItemManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ServerHasShopItem(string shopItemId)
+		-- 서버 권위 캐시에 지정한 상점 아이템을 보유하고 있는지 반환합니다.
+		if self:IsShopItemsLoaded() == false then
+			return false
+		end
+
+		if shopItemId == nil or shopItemId == "" then
+			return false
+		end
+
+		return self.ownedShopItemIdSet[shopItemId] == true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetOwnedShopItemIds()
+		-- 서버 권위 보유 상점 아이템 id 목록 복사본을 반환합니다.
+		if self:IsShopItemsLoaded() == false then
+			return {}
+		end
+
+		return self:CopyStringList(self.ownedShopItemIds)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean PurchaseItemsWithCommit(any shopItemIds, string forUserId)
+		-- 구매 가능한 항목만 골라 총액을 tempWorldCoin으로 결제하고, 보유 목록에 반영·저장·동기화합니다.
+		local tPurchaseTargets = self:CollectPurchasableShopItemIds(shopItemIds)
+		if #tPurchaseTargets <= 0 then
+			return false
+		end
+
+		local totalPrice = self:GetTotalPrice(tPurchaseTargets)
+		if totalPrice <= 0 then
+			return false
+		end
+
+		-- 재화 차감은 ProgressManager가 담당한다. 잔액 부족이면 구매를 취소한다.
+		if _ProgressManager == nil then
+			log_warning("[ShopItemManager] ProgressManager is nil")
+			return false
+		end
+
+		if _ProgressManager:TrySpendTempWorldCoin(totalPrice, forUserId) == false then
+			return false
+		end
+
+		local tNewContentEntries = {}
+		for _, shopItemId in ipairs(tPurchaseTargets) do
+			self:AddOwnedShopItem(shopItemId)
+			local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+			if tShopItem ~= nil then
+				table.insert(tNewContentEntries, {
+					domain = "costume",
+					category = tShopItem.category or "",
+					contentId = shopItemId
+				})
+			end
+		end
+
+		self:SaveShopItemsToStorage()
+		if _NewContentManager ~= nil then
+			_NewContentManager:MarkNewContentEntries(tNewContentEntries, forUserId)
+		end
+		if forUserId ~= nil and forUserId ~= "" then
+			self:PushShopItemsToClient(forUserId)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CollectPurchasableShopItemIds(any shopItemIds)
+		-- 마스터에 존재하고, worldCoin 결제이며, 아직 보유하지 않은 유효 항목만 중복 없이 추립니다.
+		local tTargets = {}
+		local tSeen = {}
+
+		if shopItemIds == nil or type(shopItemIds) ~= "table" or _ShopItemMaster == nil then
+			return tTargets
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			if shopItemId ~= nil and shopItemId ~= "" and tSeen[shopItemId] ~= true then
+				local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+				local isWorldCoin = tShopItem ~= nil and (tShopItem.coinType or "") == "worldCoin"
+				local isOwned = self.ownedShopItemIdSet[shopItemId] == true
+				if isWorldCoin and isOwned == false then
+					tSeen[shopItemId] = true
+					table.insert(tTargets, shopItemId)
+				end
+			end
+		end
+
+		return tTargets
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer GetTotalPrice(any shopItemIds)
+		-- 지정한 상점 아이템 id들의 price 합계를 반환합니다.
+		local total = 0
+		if shopItemIds == nil or type(shopItemIds) ~= "table" or _ShopItemMaster == nil then
+			return total
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+			if tShopItem ~= nil then
+				total = total + (tShopItem.price or 0)
+			end
+		end
+
+		return total
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddOwnedShopItem(string shopItemId)
+		-- 유효한 상점 아이템을 서버 권위 보유 목록에 추가합니다(캐시만 변경, 저장은 호출자가 결정).
+		if shopItemId == nil or shopItemId == "" then
+			return
+		end
+
+		if _ShopItemMaster ~= nil and _ShopItemMaster:GetShopItemById(shopItemId) == nil then
+			log_warning("[ShopItemManager] purchase item not found shopItemId=" .. tostring(shopItemId))
+			return
+		end
+
+		if self.ownedShopItemIdSet[shopItemId] == true then
+			return
+		end
+
+		table.insert(self.ownedShopItemIds, shopItemId)
+		self.ownedShopItemIdSet[shopItemId] = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveShopItemsToStorage()
+		-- 서버 권위 상점 소유 목록을 Storage에 저장합니다.
+		if _ShopItemStorage == nil then
+			return
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ShopItemManager] currentUserId is required")
+			return
+		end
+
+		if self:IsShopItemsLoaded() == false then
+			log_warning("[ShopItemManager] shop items are not loaded")
+			return
+		end
+
+		_ShopItemStorage:SaveShopItemsAsync(self.currentUserId, self:CopyStringList(self.ownedShopItemIds))
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterOwnedShopItems(any shopItemIds)
+		-- 로드한 보유 상점 아이템 id 목록을 서버 권위 캐시에 등록합니다.
+		self.ownedShopItemIds = {}
+		self.ownedShopItemIdSet = {}
+
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			self:AddOwnedShopItemIdIfValid(shopItemId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddOwnedShopItemIdIfValid(string shopItemId)
+		-- 중복 없이 유효한 shopItemId만 보유 목록에 추가합니다.
+		if shopItemId == nil or shopItemId == "" then
+			return
+		end
+
+		if _ShopItemMaster ~= nil and _ShopItemMaster:GetShopItemById(shopItemId) == nil then
+			log_warning("[ShopItemManager] ignored unknown saved shopItemId=" .. tostring(shopItemId))
+			return
+		end
+
+		if self.ownedShopItemIdSet[shopItemId] == true then
+			return
+		end
+
+		table.insert(self.ownedShopItemIds, shopItemId)
+		self.ownedShopItemIdSet[shopItemId] = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushShopItemsToClient(string forUserId)
+		-- 서버 권위 상점 소유 목록을 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		self:SyncShopItems(self:CopyStringList(self.ownedShopItemIds), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncShopItems(table shopItemIds)
+		-- 서버에서 받은 상점 소유 목록을 클라이언트 로컬 캐시에 반영하고 UI에 변경을 알립니다.
+		self:RegisterOwnedShopItemsClientOnly(shopItemIds)
+		self:SendEvent(ShopItemChangedEvent())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RegisterOwnedShopItemsClientOnly(any shopItemIds)
+		-- 클라이언트 로컬 보유 상점 아이템 캐시를 교체합니다.
+		self.ownedShopItemIds = {}
+		self.ownedShopItemIdSet = {}
+
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			if shopItemId ~= nil and shopItemId ~= "" and self.ownedShopItemIdSet[shopItemId] ~= true then
+				table.insert(self.ownedShopItemIds, shopItemId)
+				self.ownedShopItemIdSet[shopItemId] = true
+			end
+		end
+	end
+
+	method any CopyStringList(any source)
+		-- 문자열 배열 복사본을 만듭니다.
+		local copied = {}
+		if source == nil or type(source) ~= "table" then
+			return copied
+		end
+
+		for _, value in ipairs(source) do
+			if value ~= nil and value ~= "" then
+				table.insert(copied, value)
+			end
+		end
+
+		return copied
+	end
+
+end

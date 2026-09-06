@@ -1,0 +1,6 @@
+@Event
+script DialogClosedEvent extends EventType
+
+	property string dialogId = ""
+
+end

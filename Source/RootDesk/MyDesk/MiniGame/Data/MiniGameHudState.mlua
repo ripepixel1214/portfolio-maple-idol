@@ -1,0 +1,11 @@
+@Struct
+script MiniGameHudState
+
+	property number progress = 0
+	property number timeRemaining = 0
+	property boolean showTimer = false
+	property number gaugeRatio = 0
+	property boolean useGauge = false
+	property string displayText = ""
+
+end

@@ -1,0 +1,183 @@
+@Logic
+script AvatarActionStateUtil extends Logic
+
+	@ExecSpace("ClientOnly")
+	method any GetBodyActionState(string actionStateName)
+		-- 문자열 액션 상태 이름을 아바타 바디 액션 열거형으로 변환합니다.
+		actionStateName = self:NormalizeActionStateName(actionStateName)
+
+		if actionStateName == "idle" or actionStateName == "stand" then
+			return MapleAvatarBodyActionState.Stand
+		end
+
+		if actionStateName == "walk" then
+			return MapleAvatarBodyActionState.Walk
+		end
+
+		if actionStateName == "attack" then
+			return MapleAvatarBodyActionState.Attack
+		end
+
+		if actionStateName == "alert" then
+			return MapleAvatarBodyActionState.Alert
+		end
+
+		if actionStateName == "crouch" then
+			return MapleAvatarBodyActionState.Crouch
+		end
+
+		if actionStateName == "fall" then
+			return MapleAvatarBodyActionState.Fall
+		end
+
+		if actionStateName == "sit" then
+			return MapleAvatarBodyActionState.Sit
+		end
+
+		if actionStateName == "rope" then
+			return MapleAvatarBodyActionState.Rope
+		end
+
+		if actionStateName == "ladder" then
+			return MapleAvatarBodyActionState.Ladder
+		end
+
+		if actionStateName == "dead" then
+			return MapleAvatarBodyActionState.Dead
+		end
+
+		if actionStateName == "blink" then
+			return MapleAvatarBodyActionState.Blink
+		end
+
+		if actionStateName == "fly" then
+			return MapleAvatarBodyActionState.Fly
+		end
+
+		if actionStateName == "heal" then
+			return MapleAvatarBodyActionState.Heal
+		end
+
+		if actionStateName == "hit" then
+			return MapleAvatarBodyActionState.Hit
+		end
+
+		return MapleAvatarBodyActionState.Invalid
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetEmotionType(string emotionName)
+		-- 문자열 표정 이름을 아바타 표정 열거형으로 변환합니다.
+		emotionName = self:NormalizeActionStateName(emotionName)
+
+		if emotionName == "default" then
+			return EmotionalType.Default
+		end
+
+		if emotionName == "hit" then
+			return EmotionalType.Hit
+		end
+
+		if emotionName == "smile" then
+			return EmotionalType.Smile
+		end
+
+		if emotionName == "troubled" then
+			return EmotionalType.Troubled
+		end
+
+		if emotionName == "cry" then
+			return EmotionalType.Cry
+		end
+
+		if emotionName == "angry" then
+			return EmotionalType.Angry
+		end
+
+		if emotionName == "bewildered" then
+			return EmotionalType.Bewildered
+		end
+
+		if emotionName == "stunned" then
+			return EmotionalType.Stunned
+		end
+
+		if emotionName == "vomit" then
+			return EmotionalType.Vomit
+		end
+
+		if emotionName == "oops" then
+			return EmotionalType.Oops
+		end
+
+		if emotionName == "cheers" then
+			return EmotionalType.Cheers
+		end
+
+		if emotionName == "chu" then
+			return EmotionalType.Chu
+		end
+
+		if emotionName == "wink" then
+			return EmotionalType.Wink
+		end
+
+		if emotionName == "pain" then
+			return EmotionalType.Pain
+		end
+
+		if emotionName == "glitter" then
+			return EmotionalType.Glitter
+		end
+
+		if emotionName == "despair" then
+			return EmotionalType.Despair
+		end
+
+		if emotionName == "love" then
+			return EmotionalType.Love
+		end
+
+		if emotionName == "shine" then
+			return EmotionalType.Shine
+		end
+
+		if emotionName == "blaze" then
+			return EmotionalType.Blaze
+		end
+
+		if emotionName == "hum" then
+			return EmotionalType.Hum
+		end
+
+		if emotionName == "bowing" then
+			return EmotionalType.Bowing
+		end
+
+		if emotionName == "hot" then
+			return EmotionalType.Hot
+		end
+
+		if emotionName == "dam" then
+			return EmotionalType.Dam
+		end
+
+		if emotionName == "qblue" then
+			return EmotionalType.qBlue
+		end
+
+		return EmotionalType.Invalid
+	end
+
+	@ExecSpace("ClientOnly")
+	method string NormalizeActionStateName(string actionStateName)
+		-- 에디터에 입력된 문자열을 비교 가능한 형태로 보정합니다.
+		if actionStateName == nil then
+			return ""
+		end
+
+		local normalizedName, replaceCount = string.gsub(actionStateName, "^%s*(.-)%s*$", "%1")
+		return string.lower(normalizedName)
+	end
+
+end

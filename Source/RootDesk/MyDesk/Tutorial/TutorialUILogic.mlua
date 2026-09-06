@@ -1,0 +1,1254 @@
+@Logic
+script TutorialUILogic extends Logic
+
+	property Entity tutorialRoot = "70c8d3ce-e204-47df-8a15-57cbba97ca58"
+
+	property Entity dimLayer = "576845bb-433f-4a68-8cd1-b9373f5e20f8"
+
+	property Entity dimmerTemplate = "f3112dc3-77f2-4377-9101-5767d66e61e4"
+
+	property ButtonComponent tapCatcher = "96014e7c-2a93-4a4a-8aa7-65ec621154bb"
+
+	property Entity dialogueArea = "d47a6199-1c2a-4644-a58a-16af55b057f4"
+
+	property SpriteGUIRendererComponent portrait = "18679669-155c-476a-ba10-0c561c4556f1"
+
+	property TextGUIRendererComponent bubbleText = "0e2e8f28-9819-49c5-8bc7-0eb10c3f7d15"
+
+	-- 대화 출력 완료 인디케이터(역삼각형). 텍스트가 모두 출력되면 표시해 넘길 수 있음을 알림
+	property Entity endIndicator = "c290c1d0-bb62-4666-bc85-dc7af5b0684c"
+
+	-- 한 글자 출력 간 딜레이(초). 플레이어가 대화를 넘기려면 최소 이 페이스의 출력을 기다려야 함
+	property number typingDelay = 0.03
+
+	-- 타이핑(한 글자씩 출력) 진행 상태
+	property boolean isTyping = false
+
+	property integer typingTimerId = 0
+
+	property number typingLastTime = 0
+
+	property number typingElapsed = 0
+
+	-- 준비된 출력 항목(문자/리치태그) 목록과 현재 공개 위치
+	property any typingItems = {}
+
+	property integer typingRevealIdx = 1
+
+	-- 현재까지 출력된 조각들과 열려 있는 리치 태그 목록(부분 텍스트를 유효하게 유지)
+	property any typingOutputParts = {}
+
+	property any typingActiveTags = {}
+
+	-- 대화창(박스) 클릭 버튼. 대화 제어(일괄출력/탭 진행)를 담당
+	property ButtonComponent dialogBoxButton = "a878d7b4-5bdf-4f2d-b857-10baeebe2af3"
+
+	property any dialogBoxClickHandler = nil
+
+	-- 타이핑 완료 후 진행 방식. "tap"=대화창 클릭 진행, "target"=강조 클릭 진행, "event"=이벤트 진행, "none"=타이핑 중(진행 잠금)
+	property string advanceMode = "none"
+
+	-- 이번 스텝의 강조/진행 정보(타이핑 완료 후 활성화에 사용)
+	property any pendingHighlights = {}
+
+	property string pendingAdvanceEventId = ""
+
+	-- 강조 추적(매 프레임 dim 재계산) 활성 여부. 레이아웃 정착/스크롤/해상도 변경을 추적
+	property boolean isFollowingHighlights = false
+
+	-- 현재 강조가 상호작용 가능한 상태인지(타이핑 완료 후 true). 차단막 포함 여부 결정
+	property boolean activeInteractive = false
+
+	-- 직전에 적용한 dim 레이아웃 서명(변화 없으면 재적용 skip해 부하 최소화)
+	property string lastAppliedSignature = ""
+
+	property any tapCatcherClickHandler = nil
+
+	property boolean isRunning = false
+
+	property integer stepIndex = 0
+
+	property any tSteps = {}
+
+	property any tDimTiles = {}
+
+	--- 스프라이트 리로드 깜빡임 방지용 portrait 캐싱
+	property string currentPortrait = ""
+
+	-- 미리 생성해 둘 dim 타일 개수(전환 중 타일 생성 깜빡임 방지)
+	property integer tilePoolWarmCount = 24
+
+	property boolean isMapTransitionBlockerVisible = false
+
+	property integer mapTransitionBlockerTimerId = 0
+
+	property number mapTransitionBlockerTimeout = 5
+
+	-- 월드 엔티티(UI 아님, 예: 도시 NPC) 강조 시 사용할 강조 영역 반경/오프셋(월드 유닛). 강조 상자는 엔티티 월드 좌표 기준으로 만든다.
+	property number worldHighlightHalfWidth = 0.6
+
+	property number worldHighlightHalfHeight = 0.45
+
+	property number worldHighlightYOffset = 0.3
+
+	-- 강조 클릭 진행 구독 목록({ entity, eventHandler }). clickable=true인 강조는 전부 진행 대상이므로 어느 것을 눌러도 다음 스텝으로 넘어감
+	property any tGuideTargetHandlers = {}
+
+	property any guideEventHandler = nil
+
+	property string guideEventUiId = ""
+
+	property any highlightTimerId = nil
+
+	-- 현재 진행 중인 튜토리얼 시나리오 id
+	property string currentTutorialId = ""
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 튜토리얼 UI를 숨긴 상태로 초기화하고 입력을 연결합니다. 타이틀 등에서 자동으로 뜨지 않습니다.
+		-- 말풍선이 리치 텍스트(<color>/<b> 등)를 렌더링하도록 보장
+		if self.bubbleText ~= nil then
+			self.bubbleText.IsRichText = true
+		end
+		self:HideTutorial()
+		self:ConnectTapCatcher()
+		self:ConnectDialogBoxButton()
+		-- 전체화면 탭 캐처는 더 이상 진행에 쓰지 않는다(대화창 박스 클릭으로 대체). 항상 비활성
+		self:SetTapCatcherEnabled(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 이벤트 연결과 dim 타일을 정리합니다.
+		self:StopMapTransitionBlockerTimeout()
+		self:DisconnectTapCatcher()
+		self:DisconnectDialogBoxButton()
+		self:DisconnectGuideTarget()
+		self:DisconnectGuideEvent()
+		self:ClearHighlightTimer()
+		self:StopTypingTimer()
+		self.isFollowingHighlights = false
+		self:ClearDimTiles()
+		-- 튜토리얼 진행 중 종료된 경우에도 이동 잠금이 남지 않도록 방어적으로 해제한다.
+		if _NpcInteractionGateLogic ~= nil then
+			_NpcInteractionGateLogic:Unhold("tutorial")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 강조 추적 중에는 매 프레임 대상 rect로 dim을 재계산해 갱신한다(레이아웃 정착/스크롤/해상도 변경 추적). 변화가 없으면 RefreshHighlightVisual 내부에서 skip
+		if self.isRunning == false or self.isFollowingHighlights == false then
+			return
+		end
+		self:RefreshHighlightVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectTapCatcher()
+		-- 전체화면 탭 캐처 버튼 클릭을 연결합니다(나레이션 스텝 진행용).
+		if self.tapCatcher == nil or self.tapCatcher.Entity == nil then
+			log_warning("[Tutorial] tapCatcher is nil")
+			return
+		end
+		self.tapCatcherClickHandler = self.tapCatcher.Entity:ConnectEvent(ButtonClickEvent, self.OnTapCatcherClicked)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectTapCatcher()
+		-- 탭 캐처 버튼 클릭 연결을 해제합니다.
+		if self.tapCatcher ~= nil and self.tapCatcher.Entity ~= nil and self.tapCatcherClickHandler ~= nil then
+			self.tapCatcher.Entity:DisconnectEvent(ButtonClickEvent, self.tapCatcherClickHandler)
+		end
+		self.tapCatcherClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectDialogBoxButton()
+		-- 대화창(박스) 버튼 클릭을 연결합니다(대화 제어: 일괄출력/탭 진행).
+		if self.dialogBoxButton == nil or self.dialogBoxButton.Entity == nil then
+			log_warning("[Tutorial] dialogBoxButton is nil")
+			return
+		end
+		self.dialogBoxClickHandler = self.dialogBoxButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDialogBoxClicked)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectDialogBoxButton()
+		-- 대화창 박스 버튼 클릭 연결을 해제합니다.
+		if self.dialogBoxButton ~= nil and self.dialogBoxButton.Entity ~= nil and self.dialogBoxClickHandler ~= nil then
+			self.dialogBoxButton.Entity:DisconnectEvent(ButtonClickEvent, self.dialogBoxClickHandler)
+		end
+		self.dialogBoxClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDialogBoxClicked()
+		-- 대화창 클릭: 타이핑 중이면 즉시 일괄출력만, 완료 후에는 탭 진행 스텝(normal/전부 clickable=false)만 다음으로 넘긴다. 강조/이벤트 스텝은 강조·이벤트로 진행
+		if self.isRunning == false then
+			return
+		end
+		if self.isTyping == true then
+			self:CompleteTyping()
+			return
+		end
+		if self.advanceMode == "tap" then
+			self:GoToStep(self.stepIndex + 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean StartTutorial(string tutorialId)
+		-- 지정 시나리오의 튜토리얼을 시작하고 첫 스텝을 표시합니다. 실제 시작하면 true, 시작하지 못하면 false를 반환합니다(호출자=TutorialManager가 상태를 관리).
+		if self.isRunning == true then
+			return false
+		end
+		if tutorialId == nil or tutorialId == "" then
+			log_warning("[Tutorial] tutorialId is empty")
+			return false
+		end
+		if _TutorialStepMaster == nil then
+			log_warning("[Tutorial] _TutorialStepMaster is nil")
+			return false
+		end
+		self.tSteps = _TutorialStepMaster:GetSteps(tutorialId)
+		if self.tSteps == nil or #self.tSteps == 0 then
+			log_warning("[Tutorial] steps are nil for " .. tostring(tutorialId))
+			return false
+		end
+		self.isRunning = true
+		self.currentTutorialId = tutorialId
+		self.stepIndex = 0
+		self.currentPortrait = ""
+		self.isMapTransitionBlockerVisible = false
+		self:StopMapTransitionBlockerTimeout()
+		if self.dialogueArea ~= nil then
+			self.dialogueArea.Enable = true
+		end
+		-- 튜토리얼 진행 중 플레이어 이동(키보드 입력)을 잠근다. UI 버튼 클릭/탭은 영향받지 않는다.
+		if _NpcInteractionGateLogic ~= nil then
+			_NpcInteractionGateLogic:Hold("tutorial")
+		end
+		if self.tutorialRoot ~= nil then
+			self.tutorialRoot.Enable = true
+		end
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "tutorial", true)
+		end
+		self:EnsureTilePool(self.tilePoolWarmCount)
+		self:GoToStep(1)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void GoToStep(integer index)
+		-- 지정 인덱스 스텝으로 이동합니다. 범위를 벗어나면 종료합니다.
+		if index > #self.tSteps then
+			self:FinishTutorial()
+			return
+		end
+		self.stepIndex = index
+		local step = self.tSteps[index]
+		self:ShowStep(step)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowStep(any step)
+		-- 현재 스텝의 초상화/말풍선/위치/반전을 적용하고 진행 입력을 설정합니다.
+		self:ApplyPortrait(step.portrait)
+		-- 출력 시작 전 인디케이터를 숨긴다. 타이핑이 끝나면 FinishTyping에서 표시
+		self:HideEndIndicator()
+		self:ApplyText(step.text)
+		self:ApplyDialoguePlacement(step.charPos, step.flip)
+		self:ClearHighlightTimer()
+		-- 타이핑 중에는 강조를 모두 차단(비상호작용)으로 표시. 매 프레임(OnUpdate) 대상을 따라가며 dim을 갱신하고, 실제 진행 방식은 타이핑 완료(FinishTyping) 후 ActivateAdvance에서 활성화
+		self:DisconnectGuideTarget()
+		self:DisconnectGuideEvent()
+		self:ShowHighlights(step.highlights or {}, step.advanceEventId or "", false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearHighlightTimer()
+		-- 대기 중인 강조 계산 지연 타이머를 취소합니다.
+		if self.highlightTimerId ~= nil then
+			_TimerService:ClearTimer(self.highlightTimerId)
+			self.highlightTimerId = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyPortrait(string portrait)
+		-- 표정 리소스 아이디를 실제 RUID로 변환해 초상화 스프라이트에 적용합니다. 같은 표정이면 재적용을 생략해 스프라이트 리로드 깜빡임을 막습니다.
+		if self.portrait == nil then
+			return
+		end
+		if portrait == self.currentPortrait then
+			return
+		end
+		self.currentPortrait = portrait
+		local ruid = ""
+		if portrait ~= nil and portrait ~= "" and _ResourceMaster ~= nil then
+			ruid = _ResourceMaster:ResolveResourceId(portrait)
+		end
+		self.portrait.ImageRUID = DataRef(ruid)
+		self.portrait.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyText(string text)
+		-- 말풍선 텍스트를 한 글자씩 타이핑으로 출력합니다.
+		if self.bubbleText == nil then
+			return
+		end
+		self:StartTyping(text or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowEndIndicator()
+		-- 출력 완료 인디케이터(역삼각형)를 표시
+		if self.endIndicator ~= nil then
+			self.endIndicator.Enable = true
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideEndIndicator()
+		-- 출력 완료 인디케이터(역삼각형)를 숨김
+		if self.endIndicator ~= nil then
+			self.endIndicator.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartTyping(string text)
+		-- 리치 텍스트를 한 글자씩 출력하는 타이핑을 시작한다. 리치 태그(<color>/<b> 등)는 시간 소모 없이 즉시 반영
+		self:StopTypingTimer()
+		self.typingItems = {}
+		self.typingRevealIdx = 1
+		self.typingOutputParts = {}
+		self.typingActiveTags = {}
+		self.typingElapsed = 0
+		self:BuildTypingItems(text or "")
+		self:SetBubbleTextRaw("")
+		self.isTyping = true
+		self.typingLastTime = _UtilLogic.ElapsedSeconds
+		self.typingTimerId = _TimerService:SetTimerRepeat(function() self:OnTypingTick() end, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopTypingTimer()
+		-- 진행 중인 타이핑 타이머를 중지
+		if self.typingTimerId > 0 then
+			_TimerService:ClearTimer(self.typingTimerId)
+			self.typingTimerId = 0
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTypingTick()
+		-- 경과 시간을 누적해 typingDelay마다 다음 글자를 공개한다.
+		if self.isTyping == false then
+			return
+		end
+		local now = _UtilLogic.ElapsedSeconds
+		local delta = now - self.typingLastTime
+		self.typingLastTime = now
+		self.typingElapsed = self.typingElapsed + delta
+
+		local delay = self.typingDelay
+
+		while self.typingElapsed >= delay and self.isTyping == true do
+			self.typingElapsed = self.typingElapsed - delay
+			self:RevealNextTyping()
+			if self.isTyping == false then
+				return
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RevealNextTyping()
+		-- 표시되지 않는 리치 태그는 건너뛰고 다음 표시 문자를 공개한다.
+		while self.typingRevealIdx <= #self.typingItems do
+			local item = self.typingItems[self.typingRevealIdx]
+			self.typingRevealIdx = self.typingRevealIdx + 1
+			local revealed = self:ApplyTypingItem(item)
+			if revealed == true then
+				self:UpdateBubbleText()
+				return
+			end
+		end
+		self:FinishTyping()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ApplyTypingItem(any item)
+		-- 준비된 항목 하나를 적용하고, 실제 표시 단위(글자)가 출력됐는지 반환한다.
+		if item == nil then
+			return false
+		end
+		if item.kind == "char" then
+			table.insert(self.typingOutputParts, item.text)
+			return true
+		end
+		if item.kind == "richOpen" then
+			table.insert(self.typingOutputParts, item.text)
+			table.insert(self.typingActiveTags, { name = item.name, closeText = item.closeText })
+			return false
+		end
+		if item.kind == "richClose" then
+			self:RemoveActiveTypingTag(item.name)
+			table.insert(self.typingOutputParts, item.text)
+			return false
+		end
+		if item.kind == "richSelf" then
+			table.insert(self.typingOutputParts, item.text)
+			return true
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteTyping()
+		-- 남은 내용을 즉시 전부 표시한다(타이핑 중 클릭 시).
+		if self.isTyping == false then
+			return
+		end
+		self:StopTypingTimer()
+		while self.typingRevealIdx <= #self.typingItems do
+			local item = self.typingItems[self.typingRevealIdx]
+			self.typingRevealIdx = self.typingRevealIdx + 1
+			self:ApplyTypingItem(item)
+		end
+		self:UpdateBubbleText()
+		self:FinishTyping()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishTyping()
+		-- 현재 줄 출력을 완료하고 인디케이터 표시 후 실제 진행 방식을 활성화한다.
+		if self.isTyping == false then
+			return
+		end
+		self:StopTypingTimer()
+		self.isTyping = false
+		self.typingElapsed = 0
+		self:UpdateBubbleText()
+		self:ShowEndIndicator()
+		self:ActivateAdvance()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ActivateAdvance()
+		-- 타이핑 완료 후 현재 스텝의 진행 방식을 활성화한다(강조 클릭 가능 + 진행 연결). 이후 대화창 탭/강조 클릭/이벤트로 진행 가능
+		self:ClearHighlightTimer()
+		self:ShowHighlights(self.pendingHighlights or {}, self.pendingAdvanceEventId or "", true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsTyping()
+		-- 현재 타이핑 중인지 반환
+		return self.isTyping
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BuildTypingItems(string text)
+		-- 리치 텍스트 문자열을 표시 문자와 보존할 태그 항목으로 분리한다.
+		if text == nil or text == "" then
+			return
+		end
+		local index = 1
+		local length = string.len(text)
+		while index <= length do
+			local openIdx, _ = string.find(text, "<", index, true)
+			if openIdx == nil then
+				self:AddTypingChars(string.sub(text, index))
+				break
+			end
+			if openIdx > index then
+				self:AddTypingChars(string.sub(text, index, openIdx - 1))
+			end
+			local closeIdx, _ = string.find(text, ">", openIdx + 1, true)
+			if closeIdx == nil then
+				self:AddTypingChars(string.sub(text, openIdx))
+				break
+			end
+			self:AddTypingTag(string.sub(text, openIdx, closeIdx))
+			index = closeIdx + 1
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddTypingChars(string text)
+		-- 유니코드 코드포인트 하나를 표시 단위 하나로 추가
+		if text == nil or text == "" then
+			return
+		end
+		for _, code in utf8.codes(text) do
+			table.insert(self.typingItems, { kind = "char", text = utf8.char(code) })
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddTypingTag(string tagText)
+		-- 리치 텍스트 태그를 보이지 않는 스타일 태그 또는 표시되는 스프라이트 단위로 추가
+		local name = self:ExtractTypingTagName(tagText)
+		if name == "sprite" then
+			table.insert(self.typingItems, { kind = "richSelf", text = tagText })
+			return
+		end
+		if self:IsClosingTypingTag(tagText) == true then
+			table.insert(self.typingItems, { kind = "richClose", name = name, text = tagText })
+			return
+		end
+		table.insert(self.typingItems, { kind = "richOpen", name = name, text = tagText, closeText = self:BuildCloseTypingTag(name) })
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsClosingTypingTag(string tagText)
+		-- 태그가 닫는 태그인지 반환
+		if tagText == nil or string.len(tagText) < 3 then
+			return false
+		end
+		return string.sub(tagText, 2, 2) == "/"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ExtractTypingTagName(string tagText)
+		-- 리치 텍스트 태그 이름을 소문자로 추출
+		if tagText == nil or string.len(tagText) < 3 then
+			return ""
+		end
+		local body = string.sub(tagText, 2, string.len(tagText) - 1)
+		if string.sub(body, 1, 1) == "/" then
+			body = string.sub(body, 2)
+		end
+		body = string.match(body, "^%s*(.-)%s*$") or ""
+		local nameEnd = string.len(body)
+		for i = 1, string.len(body) do
+			local ch = string.sub(body, i, i)
+			if ch == " " or ch == "\t" or ch == "=" or ch == "/" then
+				nameEnd = i - 1
+				break
+			end
+		end
+		if nameEnd <= 0 then
+			return ""
+		end
+		return string.lower(string.sub(body, 1, nameEnd))
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildCloseTypingTag(string name)
+		-- 태그 이름에 맞는 닫는 태그 문자열 생성
+		if name == nil or name == "" then
+			return ""
+		end
+		return "</" .. name .. ">"
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RemoveActiveTypingTag(string name)
+		-- 열린 태그 중 가장 최근의 동일 태그를 제거
+		for i = #self.typingActiveTags, 1, -1 do
+			if self.typingActiveTags[i].name == name then
+				table.remove(self.typingActiveTags, i)
+				return
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildTypingText()
+		-- 현재까지 출력한 조각에 열린 태그를 임시로 닫아 유효한 리치 텍스트 문자열을 만든다.
+		local text = table.concat(self.typingOutputParts, "")
+		for i = #self.typingActiveTags, 1, -1 do
+			local closeText = self.typingActiveTags[i].closeText
+			if closeText ~= nil and closeText ~= "" then
+				text = text .. closeText
+			end
+		end
+		return text
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateBubbleText()
+		-- 현재 타이핑 상태를 말풍선에 반영
+		self:SetBubbleTextRaw(self:BuildTypingText())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBubbleTextRaw(string text)
+		-- 말풍선 TextGUIRendererComponent에 문자열을 직접 설정
+		if self.bubbleText == nil then
+			return
+		end
+		self.bubbleText.Text = text or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDialoguePlacement(Vector2 charPos, boolean flip)
+		-- 대화 영역 위치(charPos)와 좌우 반전(flip)을 적용합니다. 텍스트는 역보정해 판독을 유지합니다.
+		if self.dialogueArea == nil or self.dialogueArea.UITransformComponent == nil then
+			return
+		end
+		local pos = charPos
+		if pos == nil then
+			pos = Vector2(0, -140)
+		end
+		self.dialogueArea.UITransformComponent.anchoredPosition = pos
+		
+		local scaleX = 1
+		if flip == true then
+			scaleX = -1
+		end
+		self.dialogueArea.UITransformComponent.UIScale = Vector3(scaleX, 1, 1)
+		if self.bubbleText ~= nil and self.bubbleText.Entity ~= nil and self.bubbleText.Entity.UITransformComponent ~= nil then
+			self.bubbleText.Entity.UITransformComponent.UIScale = Vector3(scaleX, 1, 1)
+		end
+		-- 대화창 반전 시 인디케이터가 좌하단으로 딸려가지 않도록 앵커/피벗을 반대 모서리로 미러링해 시각상 오른쪽 하단을 유지
+		self:ApplyEndIndicatorPlacement(flip == true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyEndIndicatorPlacement(boolean flip)
+		-- 인디케이터는 대화창(부모) 반전을 그대로 상속받으므로, 반전 시 반대 모서리 앵커+콘텐츠 역보정으로 시각상 오른쪽 하단에 고정
+		if self.endIndicator == nil or self.endIndicator.UITransformComponent == nil then
+			return
+		end
+		local it = self.endIndicator.UITransformComponent
+		if flip == true then
+			-- 부모 반전으로 박스 좌측 모서리가 시각상 우측이 됨 → 좌하단 앵커/피벗으로 이동, UIScale로 콘텐츠 역미러
+			it.AnchorsMin = Vector2(0, 0)
+			it.AnchorsMax = Vector2(0, 0)
+			it.Pivot = Vector2(1, 0)
+			it.anchoredPosition = Vector2(15, 15)
+			it.UIScale = Vector3(-1, 1, 1)
+		else
+			-- 기본: 저작 상태(우하단 앵커/피벗) 복원
+			it.AnchorsMin = Vector2(1, 0)
+			it.AnchorsMax = Vector2(1, 0)
+			it.Pivot = Vector2(1, 0)
+			it.anchoredPosition = Vector2(-15, 15)
+			it.UIScale = Vector3(1, 1, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTapCatcherEnabled(boolean isEnabled)
+		-- 탭 캐처(전체화면 버튼) 활성 여부를 설정합니다.
+		if self.tapCatcher ~= nil and self.tapCatcher.Entity ~= nil then
+			self.tapCatcher.Entity.Enable = isEnabled
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTapCatcherClicked()
+		-- 화면 탭으로 다음 스텝으로 진행합니다(나레이션 스텝). 타이핑 중이면 먼저 즉시 완성만 하고 진행하지 않는다.
+		if self.isRunning == false then
+			return
+		end
+		if self.isTyping == true then
+			self:CompleteTyping()
+			return
+		end
+		self:GoToStep(self.stepIndex + 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishTutorial()
+		-- 시나리오를 끝까지 렌더링한 뒤 UI를 숨기고, 완료 처리는 TutorialManager에 위임한다(완료 소유권 단일화).
+		self.isRunning = false
+		local finishedId = self.currentTutorialId
+		self.currentTutorialId = ""
+		self:DisconnectGuideTarget()
+		self:DisconnectGuideEvent()
+		self:ClearHighlightTimer()
+		self:ClearDimTiles()
+		self:HideTutorial()
+		-- 튜토리얼 종료 시 플레이어 이동 잠금을 해제한다.
+		if _NpcInteractionGateLogic ~= nil then
+			_NpcInteractionGateLogic:Unhold("tutorial")
+		end
+		if _TutorialManager ~= nil then
+			_TutorialManager:OnScenarioFinished(finishedId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideTutorial()
+		-- 튜토리얼 루트를 비활성화해 화면에서 숨깁니다.
+		self:StopTypingTimer()
+		self.isTyping = false
+		self.isFollowingHighlights = false
+		self:HideEndIndicator()
+		if self.tutorialRoot ~= nil then
+			self.tutorialRoot.Enable = false
+		end
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "tutorial", false)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowHighlights(any highlights, string advanceEventId, boolean interactive)
+		-- 강조 상태를 설정하고 즉시 1회 적용한다. 이후 매 프레임(OnUpdate → RefreshHighlightVisual)이 대상을 따라간다. interactive=false(타이핑 중)면 모든 강조를 차단막으로 덮어 클릭을 막고 진행도 연결하지 않는다(대화창 클릭만 일괄출력). interactive=true(타이핑 완료)면 clickable 강조를 열고 진행(강조 클릭/이벤트/탭)을 연결한다.
+		self:DisconnectGuideTarget()
+		self:DisconnectGuideEvent()
+		self.pendingHighlights = highlights or {}
+		self.pendingAdvanceEventId = advanceEventId or ""
+		self.activeInteractive = interactive == true
+		self.isFollowingHighlights = true
+		-- 상태가 바뀌었으니 다음 적용을 강제(서명 초기화)
+		self.lastAppliedSignature = ""
+		self:RefreshHighlightVisual()
+
+		-- 전체화면 탭 캐처는 사용하지 않는다(대화창 박스 클릭으로 대체)
+		self:SetTapCatcherEnabled(false)
+
+		if interactive ~= true then
+			-- 타이핑 중: 진행 방식을 잠근다(대화창 클릭 시 CompleteTyping만)
+			self.advanceMode = "none"
+			return
+		end
+
+		-- 진행 우선순위: 지정 이벤트(예: 스케줄 오픈) > 클릭 대상 > 대화창 탭
+		local hasEvent = advanceEventId ~= nil and advanceEventId ~= ""
+		if hasEvent == true then
+			self:ConnectGuideEvent(advanceEventId)
+			self.advanceMode = "event"
+		else
+			local tAdvanceEntities = self:ResolveClickableEntities(self.pendingHighlights)
+			if #tAdvanceEntities > 0 then
+				self:ConnectGuideTargets(tAdvanceEntities)
+				self.advanceMode = "target"
+			else
+				self.advanceMode = "tap"
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshHighlightVisual()
+		-- 활성 강조의 현재 rect로 dim/차단막을 재계산해 적용한다(매 프레임 호출). 변화가 없으면 skip해 부하를 줄인다.
+		local bounds = self:GetDimBounds()
+		if bounds == nil then
+			return
+		end
+		local rects = {}
+		local blockerRects = {}
+		local highlights = self.pendingHighlights
+		if highlights ~= nil then
+			for i = 1, #highlights do
+				local highlight = highlights[i]
+				local entity = self:ResolveHighlightEntity(highlight)
+				local rect = self:GetHighlightRect(entity)
+				if rect ~= nil then
+					table.insert(rects, rect)
+					-- interactive이고 clickable인 강조만 클릭 허용(차단막 제외). 그 외는 차단막으로 클릭 차단
+					if self.activeInteractive == true and highlight.clickable == true then
+						-- 열어둠(차단막 없음)
+					else
+						table.insert(blockerRects, rect)
+					end
+				end
+			end
+		end
+		-- 변화 감지: 경계/상호작용/각 rect/차단 개수가 같으면 재적용 skip
+		local signature = self:BuildHighlightSignature(bounds, rects, blockerRects)
+		if signature == self.lastAppliedSignature then
+			return
+		end
+		self.lastAppliedSignature = signature
+		-- 표시할 사각형 목록: dim 타일(불투명) 다음에 차단막(투명 raycast). 파괴 없이 풀을 재사용해 갱신(깜빡임 방지)
+		local tiles = self:ComputeDimTiles(rects, bounds)
+		local quads = {}
+		for i = 1, #tiles do
+			table.insert(quads, { cx = tiles[i].cx, cy = tiles[i].cy, w = tiles[i].w, h = tiles[i].h, blocker = false })
+		end
+		for i = 1, #blockerRects do
+			local r = blockerRects[i]
+			table.insert(quads, { cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2, w = r.right - r.left, h = r.top - r.bottom, blocker = true })
+		end
+		self:ApplyTilePool(quads)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildHighlightSignature(any bounds, any rects, any blockerRects)
+		-- dim 레이아웃 재적용 여부를 판단할 서명(경계 + 상호작용 + 각 rect + 차단 개수)
+		local s = tostring(math.floor(bounds.left)) .. "," .. tostring(math.floor(bounds.right)) .. "," .. tostring(math.floor(bounds.bottom)) .. "," .. tostring(math.floor(bounds.top)) .. "|"
+		if self.activeInteractive == true then
+			s = s .. "i1|"
+		else
+			s = s .. "i0|"
+		end
+		for i = 1, #rects do
+			local r = rects[i]
+			s = s .. tostring(math.floor(r.left)) .. "," .. tostring(math.floor(r.right)) .. "," .. tostring(math.floor(r.bottom)) .. "," .. tostring(math.floor(r.top)) .. ";"
+		end
+		s = s .. "b" .. tostring(#blockerRects)
+		return s
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ResolveClickableEntities(any highlights)
+		-- 강조 목록에서 clickable=true인 대상의 엔티티를 모두 반환(진행 연결용). 안내가 가리키는 버튼이 목록의 몇 번째든 눌러서 진행할 수 있어야 함
+		local tEntities = {}
+		if highlights == nil then
+			return tEntities
+		end
+		for i = 1, #highlights do
+			local highlight = highlights[i]
+			if highlight.clickable == true then
+				local entity = self:ResolveHighlightEntity(highlight)
+				if entity ~= nil then
+					table.insert(tEntities, entity)
+				end
+			end
+		end
+		return tEntities
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetDimBounds()
+		-- 실제 화면 픽셀 크기(_UILogic.ScreenWidth/Height)의 네 꼭짓점을 ScreenToLocalUIPosition으로 dimLayer 로컬로 변환해 가시 경계를 구한다. 실제 해상도/전체화면을 직접 반영하며, 강조 rect(ToLocalPoint)와 동일한 dimLayer 로컬(중심 원점) 공간이라 타일 배치가 정합.
+		if self.dimLayer == nil or self.dimLayer.UITransformComponent == nil then
+			return nil
+		end
+		if _UILogic == nil then
+			return nil
+		end
+		local dimTransform = self.dimLayer.UITransformComponent
+		local sw = _UILogic.ScreenWidth
+		local sh = _UILogic.ScreenHeight
+		if sw == nil or sh == nil or sw <= 0 or sh <= 0 then
+			return nil
+		end
+		local tScreenCorners = {
+			Vector2(0, 0),
+			Vector2(sw, 0),
+			Vector2(0, sh),
+			Vector2(sw, sh),
+		}
+		local minX = nil
+		local maxX = nil
+		local minY = nil
+		local maxY = nil
+		for i = 1, #tScreenCorners do
+			local localPoint = _UILogic:ScreenToLocalUIPosition(tScreenCorners[i], dimTransform)
+			if minX == nil or localPoint.x < minX then minX = localPoint.x end
+			if maxX == nil or localPoint.x > maxX then maxX = localPoint.x end
+			if minY == nil or localPoint.y < minY then minY = localPoint.y end
+			if maxY == nil or localPoint.y > maxY then maxY = localPoint.y end
+		end
+		if minX == nil then
+			return nil
+		end
+		return { left = minX, right = maxX, bottom = minY, top = maxY }
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ResolveHighlightEntity(any highlight)
+		-- highlight의 targetId(정적 엔티티 UUID) 또는 activityId(동적 옵션카드)로 대상 엔티티를 조회합니다.
+		if highlight == nil then
+			return nil
+		end
+		if highlight.activityId ~= nil and highlight.activityId ~= "" then
+			if _ScheduleUILogic ~= nil then
+				return _ScheduleUILogic:GetOptionEntityByActivityId(highlight.activityId)
+			end
+			return nil
+		end
+		if highlight.targetId ~= nil and highlight.targetId ~= "" then
+			return _EntityService:GetEntity(highlight.targetId)
+		end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectGuideTargets(any entities)
+		-- 강조된 클릭 대상 전부의 클릭을 구독해 어느 것을 눌러도 다음 스텝으로 진행합니다.
+		self:DisconnectGuideTarget()
+		if entities == nil then
+			return
+		end
+		for i = 1, #entities do
+			local entity = entities[i]
+			if entity ~= nil then
+				local eventHandler = entity:ConnectEvent(ButtonClickEvent, self.OnGuideTargetClicked)
+				table.insert(self.tGuideTargetHandlers, { entity = entity, eventHandler = eventHandler })
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectGuideTarget()
+		-- 강조 클릭 대상 구독을 모두 해제합니다.
+		if self.tGuideTargetHandlers ~= nil then
+			for i = 1, #self.tGuideTargetHandlers do
+				local item = self.tGuideTargetHandlers[i]
+				if item.entity ~= nil and item.eventHandler ~= nil and isvalid(item.entity) then
+					item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+				end
+			end
+		end
+		self.tGuideTargetHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnGuideTargetClicked()
+		-- 강조된 버튼 클릭 시 다음 스텝으로 진행합니다. 타이핑 중에는 진행하지 않는다(방어적; 타이핑 중엔 연결되지 않음).
+		if self.isRunning == false then
+			return
+		end
+		if self.isTyping == true then
+			return
+		end
+		local shouldLockDowntownReturnButton = self.currentTutorialId == "weekend_intro" and self.stepIndex == #self.tSteps
+		self:GoToStep(self.stepIndex + 1)
+
+		if shouldLockDowntownReturnButton == true then
+			self:ShowMapTransitionBlocker()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowMapTransitionBlocker()
+		-- 외출 클릭 직후 전체 화면 디머를 즉시 표시해 도시 튜토리얼 시작 전 입력을 차단합니다.
+		self.isMapTransitionBlockerVisible = true
+		self.pendingHighlights = {}
+		self.pendingAdvanceEventId = ""
+		self.activeInteractive = false
+		self.isFollowingHighlights = false
+		self.lastAppliedSignature = ""
+
+		if self.tutorialRoot ~= nil then
+			self.tutorialRoot.Enable = true
+		end
+		if self.dialogueArea ~= nil then
+			self.dialogueArea.Enable = false
+		end
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "tutorial", true)
+		end
+
+		self:EnsureTilePool(self.tilePoolWarmCount)
+		self:RefreshHighlightVisual()
+		self:StartMapTransitionBlockerTimeout()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartMapTransitionBlockerTimeout()
+		self:StopMapTransitionBlockerTimeout()
+		if _TimerService == nil then
+			return
+		end
+
+		self.mapTransitionBlockerTimerId = _TimerService:SetTimerOnce(function()
+			self.mapTransitionBlockerTimerId = 0
+			if self.isMapTransitionBlockerVisible == true and self.isRunning == false then
+				log_warning("[Tutorial] map transition blocker timed out")
+				self:HideMapTransitionBlocker()
+			end
+		end, self.mapTransitionBlockerTimeout)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopMapTransitionBlockerTimeout()
+		if self.mapTransitionBlockerTimerId > 0 and _TimerService ~= nil then
+			_TimerService:ClearTimer(self.mapTransitionBlockerTimerId)
+		end
+		self.mapTransitionBlockerTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideMapTransitionBlocker()
+		self:StopMapTransitionBlockerTimeout()
+		self.isMapTransitionBlockerVisible = false
+		self:ClearDimTiles()
+		if self.tutorialRoot ~= nil then
+			self.tutorialRoot.Enable = false
+		end
+		if self.dialogueArea ~= nil then
+			self.dialogueArea.Enable = true
+		end
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "tutorial", false)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectGuideEvent(string uiId)
+		-- 지정 UI 가시성 이벤트(예: 스케줄 오픈)를 구독해 다음 스텝으로 진행합니다.
+		self:DisconnectGuideEvent()
+		self.guideEventUiId = uiId
+		if _ScheduleUILogic ~= nil then
+			self.guideEventHandler = _ScheduleUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnGuideVisibilityChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectGuideEvent()
+		-- UI 가시성 이벤트 구독을 해제합니다.
+		if self.guideEventHandler ~= nil and _ScheduleUILogic ~= nil then
+			_ScheduleUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.guideEventHandler)
+		end
+		self.guideEventHandler = nil
+		self.guideEventUiId = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnGuideVisibilityChanged(any visibilityEvent)
+		-- 구독한 UI가 열리면 다음 스텝으로 진행합니다(예: 스케줄 오픈 → 옵션카드 강조). 타이핑 중에는 진행하지 않는다(방어적).
+		if self.isRunning == false then
+			return
+		end
+		if self.isTyping == true then
+			return
+		end
+		local uiId = visibilityEvent.uiId or ""
+		if uiId == "" or uiId ~= self.guideEventUiId then
+			return
+		end
+		if visibilityEvent.isOpen == true then
+			self:GoToStep(self.stepIndex + 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnsureTilePool(integer count)
+		-- 타일 풀을 미리 생성해 크기 0으로 숨겨 둡니다. 스텝 전환 중 새 타일 생성(1프레임 늦은 렌더로 인한 깜빡임)을 없앱니다.
+		if self.dimmerTemplate == nil then
+			return
+		end
+		for i = 1, count do
+			local tile = self.tDimTiles[i]
+			if tile == nil or isvalid(tile) == false then
+				tile = self.dimmerTemplate:Clone("DimTile_" .. tostring(i))
+				tile.Enable = true
+				if tile.UITransformComponent ~= nil then
+					tile.UITransformComponent.RectSize = Vector2(0, 0)
+				end
+				self.tDimTiles[i] = tile
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyTilePool(any quads)
+		-- 타일 풀을 재사용해 quads(불투명 dim / 투명 차단막)를 표시합니다. 부족하면 생성, 남으면 크기 0으로 숨겨 재사용 — 파괴/재생성 없이 갱신해 깜빡임을 없앱니다.
+		if self.dimmerTemplate == nil then
+			return
+		end
+		local dimColor = Color(0, 0, 0, 0.6)
+		if self.dimmerTemplate.SpriteGUIRendererComponent ~= nil then
+			dimColor = self.dimmerTemplate.SpriteGUIRendererComponent.Color
+		end
+		-- 기존 타일을 파괴하지 않고 위치/크기/색만 갱신(반드시 새 레이아웃을 먼저 배치)
+		for i = 1, #quads do
+			local quad = quads[i]
+			local tile = self.tDimTiles[i]
+			if tile == nil or isvalid(tile) == false then
+				tile = self.dimmerTemplate:Clone("DimTile_" .. tostring(i))
+				self.tDimTiles[i] = tile
+			end
+			tile.Enable = true
+			local tileTransform = tile.UITransformComponent
+			tileTransform.RectSize = Vector2(quad.w, quad.h)
+			tileTransform.anchoredPosition = Vector2(quad.cx, quad.cy)
+			if tile.SpriteGUIRendererComponent ~= nil then
+				if quad.blocker == true then
+					tile.SpriteGUIRendererComponent.Color = Color(0, 0, 0, 0)
+				else
+					tile.SpriteGUIRendererComponent.Color = dimColor
+				end
+			end
+		end
+		-- 남는 타일은 파괴하지 않고 크기 0으로 숨긴다(파괴-재생성 churn과 재생성 시 1프레임 렌더 지연 깜빡임 방지, 다음 스텝에서 재사용)
+		for i = #quads + 1, #self.tDimTiles do
+			local tile = self.tDimTiles[i]
+			if isvalid(tile) and tile.UITransformComponent ~= nil then
+				tile.UITransformComponent.RectSize = Vector2(0, 0)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetLocalRect(UITransformComponent targetTransform)
+		-- 대상 UI의 로컬 코너를 "게임 월드 → 화면 → dimLayer 로컬" 순서로 변환해 반환한다.
+		-- (주의) 예전의 GetWorldCorners→dim:ToLocalPoint 직접 변환은 플레이 뷰포트가 기준 해상도와 다르면 값이 드리프트(축소/이동)해 강조가 어긋났다(빌드/씬 최대화/다른 창 크기). LocalUIToWorldPosition→WorldToScreenPosition→ScreenToLocalUIPosition은 엔진 표준 화면 변환을 거쳐 뷰포트/해상도/캔버스와 무관하게 대상의 실제 위치에 맞춘다(경계 GetDimBounds와 동일한 화면 기준).
+		if _UILogic == nil or self.dimLayer == nil or self.dimLayer.UITransformComponent == nil then
+			return nil
+		end
+		local dimTransform = self.dimLayer.UITransformComponent
+		local size = targetTransform.RectSize
+		local pivot = targetTransform.Pivot
+		local w = size.x
+		local h = size.y
+		-- 대상 로컬 좌표계(피벗 기준)의 네 코너
+		local tLocalCorners = {
+			Vector2(-pivot.x * w, -pivot.y * h),
+			Vector2((1 - pivot.x) * w, -pivot.y * h),
+			Vector2(-pivot.x * w, (1 - pivot.y) * h),
+			Vector2((1 - pivot.x) * w, (1 - pivot.y) * h),
+		}
+		local minX = nil
+		local maxX = nil
+		local minY = nil
+		local maxY = nil
+		for i = 1, #tLocalCorners do
+			local world = _UILogic:LocalUIToWorldPosition(tLocalCorners[i], targetTransform)
+			local screen = _UILogic:WorldToScreenPosition(world)
+			local localPoint = _UILogic:ScreenToLocalUIPosition(screen, dimTransform)
+			if minX == nil or localPoint.x < minX then minX = localPoint.x end
+			if maxX == nil or localPoint.x > maxX then maxX = localPoint.x end
+			if minY == nil or localPoint.y < minY then minY = localPoint.y end
+			if maxY == nil or localPoint.y > maxY then maxY = localPoint.y end
+		end
+		if minX == nil then
+			return nil
+		end
+		return { left = minX, right = maxX, bottom = minY, top = maxY }
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetHighlightRect(any entity)
+		-- 강조 대상의 사각형(dimLayer 로컬 좌표)을 반환한다. UI 엔티티는 기존 GetLocalRect, 월드 엔티티는 월드 좌표를 투영해 동일 형식으로 만든다. 대상이 없거나 좌표를 구할 수 없으면 nil.
+		if entity == nil then
+			return nil
+		end
+		if entity.UITransformComponent ~= nil then
+			return self:GetLocalRect(entity.UITransformComponent)
+		end
+		if entity.TransformComponent ~= nil then
+			return self:GetWorldEntityLocalRect(entity)
+		end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetWorldEntityLocalRect(any entity)
+		-- 월드 엔티티(도시 NPC 등)의 강조 영역(월드 좌표 ± 반경)을 화면 좌표로 투영한 뒤 dimLayer 로컬 좌표로 변환해 GetLocalRect와 동일한 rect를 만든다. 카메라가 정지된 튜토리얼 중에만 사용하므로 1회 계산으로 충분하다.
+		if self.dimLayer == nil or self.dimLayer.UITransformComponent == nil then
+			return nil
+		end
+		if _UILogic == nil then
+			return nil
+		end
+		local worldPos = entity.TransformComponent.WorldPosition
+		local centerX = worldPos.x
+		local centerY = worldPos.y + self.worldHighlightYOffset
+		local hw = self.worldHighlightHalfWidth
+		local hh = self.worldHighlightHalfHeight
+		local dimTransform = self.dimLayer.UITransformComponent
+
+		local tWorldCorners = {
+			Vector2(centerX - hw, centerY - hh),
+			Vector2(centerX + hw, centerY - hh),
+			Vector2(centerX - hw, centerY + hh),
+			Vector2(centerX + hw, centerY + hh),
+		}
+
+		local minX = nil
+		local maxX = nil
+		local minY = nil
+		local maxY = nil
+		for i = 1, #tWorldCorners do
+			local screenPos = _UILogic:WorldToScreenPosition(tWorldCorners[i])
+			local localPoint = _UILogic:ScreenToLocalUIPosition(screenPos, dimTransform)
+			if minX == nil or localPoint.x < minX then minX = localPoint.x end
+			if maxX == nil or localPoint.x > maxX then maxX = localPoint.x end
+			if minY == nil or localPoint.y < minY then minY = localPoint.y end
+			if maxY == nil or localPoint.y > maxY then maxY = localPoint.y end
+		end
+		return { left = minX, right = maxX, bottom = minY, top = maxY }
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ComputeDimTiles(any rects, any bounds)
+		-- 강조 사각형들의 여집합을 가로 밴드로 분할해 dim 타일(중심/크기) 목록을 계산합니다. 화면 경계는 하드코딩하지 않고 dimLayer의 실제 로컬 경계(bounds)를 사용해 해상도/전체화면 변경에 견고하게 대응.
+		local screenLeft = bounds.left
+		local screenRight = bounds.right
+		local screenTop = bounds.top
+		local screenBottom = bounds.bottom
+		local pad = 8
+
+		local yEdges = { screenTop, screenBottom }
+		for i = 1, #rects do
+			table.insert(yEdges, math.min(screenTop, rects[i].top + pad))
+			table.insert(yEdges, math.max(screenBottom, rects[i].bottom - pad))
+		end
+		table.sort(yEdges, function(a, b) return a > b end)
+
+		local tiles = {}
+		for i = 1, #yEdges - 1 do
+			local bandTop = yEdges[i]
+			local bandBottom = yEdges[i + 1]
+			if bandTop - bandBottom > 0.5 then
+				local intervals = {}
+				for r = 1, #rects do
+					local rect = rects[r]
+					local rectTop = math.min(screenTop, rect.top + pad)
+					local rectBottom = math.max(screenBottom, rect.bottom - pad)
+					if rectTop >= bandTop - 0.5 and rectBottom <= bandBottom + 0.5 then
+						local left = math.max(screenLeft, rect.left - pad)
+						local right = math.min(screenRight, rect.right + pad)
+						if right > left then
+							table.insert(intervals, { l = left, r = right })
+						end
+					end
+				end
+				table.sort(intervals, function(a, b) return a.l < b.l end)
+				local merged = {}
+				for k = 1, #intervals do
+					local iv = intervals[k]
+					if #merged > 0 and iv.l <= merged[#merged].r then
+						if iv.r > merged[#merged].r then
+							merged[#merged].r = iv.r
+						end
+					else
+						table.insert(merged, { l = iv.l, r = iv.r })
+					end
+				end
+				local cursor = screenLeft
+				for k = 1, #merged do
+					local iv = merged[k]
+					if iv.l > cursor + 0.5 then
+						self:AppendTile(tiles, cursor, iv.l, bandTop, bandBottom)
+					end
+					if iv.r > cursor then
+						cursor = iv.r
+					end
+				end
+				if cursor < screenRight - 0.5 then
+					self:AppendTile(tiles, cursor, screenRight, bandTop, bandBottom)
+				end
+			end
+		end
+		return tiles
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AppendTile(any tiles, number xLeft, number xRight, number yTop, number yBottom)
+		-- 타일 하나(중심 좌표/크기)를 목록에 추가합니다.
+		table.insert(tiles, {
+			cx = (xLeft + xRight) / 2,
+			cy = (yTop + yBottom) / 2,
+			w = xRight - xLeft,
+			h = yTop - yBottom,
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearDimTiles()
+		-- 이전에 생성한 dim 타일 클론을 모두 제거합니다.
+		for i = 1, #self.tDimTiles do
+			local tile = self.tDimTiles[i]
+			if isvalid(tile) then
+				tile:Destroy()
+			end
+		end
+		self.tDimTiles = {}
+	end
+
+end

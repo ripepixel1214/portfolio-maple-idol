@@ -1,0 +1,81 @@
+@Struct
+script ProgressData
+
+	property string gameGoalId = "perf_01"
+
+	property integer eCurrentStep = 1
+
+	property integer currentMonth = 1
+
+	property integer currentWeek = 1
+
+	property integer actionPoint = 0
+
+	property integer groupMeso = 500
+
+	-- 베타 기간 임시 월드 코인(실결제 월드코인 대체). 저장/로드 대상 포함.
+	property integer tempWorldCoin = 1000
+
+	property integer fandom = 0
+
+	property number positionX = 0
+
+	property number positionY = 0
+
+	-- 완료한 튜토리얼 시나리오 집합(id -> true). 인메모리는 테이블, 저장/전송 시에만 CSV로 인코딩(TableToString이 중첩 테이블 미지원).
+	property any completedTutorials = {}
+
+	method any ToPlainTable()
+		-- RPC 전달과 클라이언트 캐시 저장에 사용할 plain table 복사본을 반환합니다.
+		local tData = {}
+		tData.gameGoalId = self.gameGoalId
+		tData.eCurrentStep = self.eCurrentStep
+		tData.currentMonth = self.currentMonth
+		tData.currentWeek = self.currentWeek
+		tData.actionPoint = self.actionPoint
+		tData.groupMeso = self.groupMeso
+		tData.tempWorldCoin = self.tempWorldCoin
+		tData.fandom = self.fandom
+		tData.positionX = self.positionX
+		tData.positionY = self.positionY
+		tData.completedTutorials = self:CompletedToCsv()
+
+		return tData
+	end
+
+	method any CreateEmptyPlainTable()
+		-- 유효하지 않은 빈 ProgressData plain table을 반환합니다.
+		local tData = ProgressData()
+		return tData:ToPlainTable()
+	end
+
+	method string ToLogString(string label)
+		-- 주요 진행 데이터 값을 로그 출력용 문자열로 반환합니다.
+		local stepName = _EProgressStep:GetName(self.eCurrentStep)
+		return tostring(label)
+			.. " month=" .. tostring(self.currentMonth)
+			.. " week=" .. tostring(self.currentWeek)
+			.. " actionPoint=" .. tostring(self.actionPoint)
+			.. " fandom=" .. tostring(self.fandom)
+			.. " groupMeso=" .. tostring(self.groupMeso)
+			.. " tempWorldCoin=" .. tostring(self.tempWorldCoin)
+			.. " step=" .. stepName
+			.. " position=(" .. tostring(self.positionX) .. "," .. tostring(self.positionY) .. ")"
+			.. " tutorials=[" .. self:CompletedToCsv() .. "]"
+	end
+
+	method string CompletedToCsv()
+		-- 완료 시나리오 집합(테이블)을 저장/전송용 콤마 CSV 문자열로 인코딩합니다.
+		if type(self.completedTutorials) ~= "table" then
+			return ""
+		end
+		local parts = {}
+		for id, done in pairs(self.completedTutorials) do
+			if done == true then
+				table.insert(parts, id)
+			end
+		end
+		return table.concat(parts, ",")
+	end
+
+end

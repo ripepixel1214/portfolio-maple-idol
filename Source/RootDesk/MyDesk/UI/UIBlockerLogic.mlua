@@ -1,0 +1,59 @@
+@Logic
+@ExecSpace("ClientOnly")
+script UIBlockerLogic extends Logic
+
+	property any tHiddenReasonByKey = {}
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:RefreshVisibleState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisible(string reasonKey, boolean isVisible)
+		-- 호출자와 UI 표시 상태를 설정합니다. 요청 중 하나라도 false visible이 false가 남아있다면 공통 UI를 숨깁니다.
+		if reasonKey == nil or reasonKey == "" then
+			return
+		end
+
+		if self.tHiddenReasonByKey == nil then
+			self.tHiddenReasonByKey = {}
+		end
+
+		if isVisible == true then
+			self.tHiddenReasonByKey[reasonKey] = nil
+		else
+			self.tHiddenReasonByKey[reasonKey] = true
+		end
+
+		self:RefreshVisibleState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsVisible()
+		if self.tHiddenReasonByKey == nil then
+			return true
+		end
+
+		for _reasonKey, _isHidden in pairs(self.tHiddenReasonByKey) do
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshVisibleState()
+		-- 숨김 사유가 하나라도 남아 있으면 공통 HUD 계열 UI를 숨깁니다.
+		local isVisible = self:IsVisible()
+
+		if _DefaultUILogic ~= nil then
+			_DefaultUILogic:SetVisibleRoot(isVisible)
+		end
+
+		if _SmartPhoneUILogic ~= nil then
+			_SmartPhoneUILogic:SetVisibleRoot(isVisible)
+		end
+	end
+
+end

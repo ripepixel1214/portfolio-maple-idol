@@ -1,0 +1,1821 @@
+@Logic
+script ScheduleUILogic extends Logic
+
+	property Entity root = "b75a4b55-415a-470e-8f05-d79524f0b3bd"
+	property TextGUIRendererComponent monthText = "a3a7e744-3712-4fd6-b8a8-56eecec98576"
+	property SpriteGUIRendererComponent monthPerformanceSprite = "a3a7e744-3712-4fd6-b8a8-56eecec98576"
+	property TextGUIRendererComponent weekText = "fdf7f8e7-05ea-444c-b46c-13df038769e5"
+	property TextGUIRendererComponent goalText = "e1ddcf90-da32-44eb-8fd6-16fa697553c3"
+	property TextGUIRendererComponent emptyMessageText = "d0b45d64-4c25-4823-9cd1-5cb4e9733286"
+	property ButtonComponent tabActivityButton = "9754b340-0ef7-4e35-838e-1a59011ffae9"
+	property SpriteGUIRendererComponent tabActivityBg = "9754b340-0ef7-4e35-838e-1a59011ffae9"
+	property ButtonComponent tabPerformanceButton = "21366a52-0dc5-4b56-ac3e-326671eda113"
+	property SpriteGUIRendererComponent tabPerformanceBg = "21366a52-0dc5-4b56-ac3e-326671eda113"
+	property ButtonComponent tabRestButton = "f8257d53-0e14-476e-a7aa-510a996a3ab2"
+	property SpriteGUIRendererComponent tabRestBg = "f8257d53-0e14-476e-a7aa-510a996a3ab2"
+	property ButtonComponent stageButton = "bc0f9422-dd1b-4e44-88fa-cce78eb77d3b"
+	property Entity schedulePanel = "a16337c5-8210-4713-83b1-fc845df69e4a"
+	property Entity stagePanel = "15111e8d-2c92-4013-b7d8-acabfbdd0956"
+	property Entity stageBlock = "2ddf8a4a-439e-4d25-aa2f-d95da110bd3f"
+	property TextGUIRendererComponent stageGoalNameText = "c3a6d377-3522-4ee2-a26b-dcd8efc439a6"
+	property TextGUIRendererComponent stageGoalTargetText = "23bd46da-66a1-4a50-8aff-bfbb83c23468"
+	property TextGUIRendererComponent stageGoalDescriptionText = "c5f1fc72-c897-4e00-b39b-ebf777d607bf"
+	property Entity activityList = "601346f5-aab7-4136-b284-7a3dc31dd15a"
+	property Entity stageList = "e22160ef-919e-4098-be93-451eb0a95ff4"
+	property Entity stageActivity = "de05b39e-747b-4657-a3c1-2f2d6ba93f73"
+	property ButtonComponent stageSlotButton1 = "4ae85534-7634-43ed-a797-63d680ff010f"
+	property ButtonComponent stageSlotButton2 = "51f48b99-2605-4675-a690-729898135b0e"
+	property ButtonComponent stageSlotButton3 = "fcdabf73-f2f3-4f3d-a5ca-eddce5f2d21c"
+	property SpriteGUIRendererComponent stagePortrait1 = "617ad306-ce3c-4222-9eac-74459a00e9b1"
+	property SpriteGUIRendererComponent stagePortrait2 = "532ebdc0-7b88-4070-a38b-d2a006037246"
+	property SpriteGUIRendererComponent stagePortrait3 = "44380886-184f-459b-a9a1-f1986317c325"
+	property number stagePostItDefaultY = -159
+	property number stagePostItPerformanceY = 73.5
+	property SpriteGUIRendererComponent optionPanelBg = "00184a48-7539-4de4-bf61-c95912f7e840"
+	property Entity activityCategoryHeader = "e3f6ea9e-e597-4d58-a332-197d8f0bc15b"
+	property Entity performanceCategoryHeader = "6050800c-76e4-4a3d-b29c-c93a063c6383"
+	property Entity restCategoryHeader = "13ed60e9-c3ea-43d2-abf6-d65007625e14"
+	property Entity optionTemplate = "99528d29-c516-413e-a439-1a39082eab30"
+	property SpriteGUIRendererComponent optionTemplateBg = "99528d29-c516-413e-a439-1a39082eab30"
+	property ButtonComponent startButton = "6f81cb0e-2275-4e88-95b7-5efba82547dc"
+	property SpriteGUIRendererComponent startButtonBg = "6f81cb0e-2275-4e88-95b7-5efba82547dc"
+	property TextGUIRendererComponent startButtonText = "6f81cb0e-2275-4e88-95b7-5efba82547dc"
+	property Entity startButtonHoverImage = "d2c3a370-350d-432b-abb0-c94e82d20c15"
+	property ButtonComponent closeButton = "633f6b14-e116-4019-8e57-c83b1bff8130"
+	property ButtonComponent characterButton1 = "fb5a4e57-846f-4c68-b7d7-e9c335f8a006"
+	property ButtonComponent characterButton2 = "6efc2dc8-3f84-43f8-82d6-de54f3aef099"
+	property ButtonComponent characterButton3 = "3c2c14f3-d0a1-4e6a-9136-9c0cd149235b"
+	property SpriteGUIRendererComponent characterPortrait1 = "ea444c6d-707f-4cfd-b23d-5505750f30ff"
+	property SpriteGUIRendererComponent characterPortrait2 = "1a7e8366-d6e2-4bc2-92f3-fd7fb5563c82"
+	property SpriteGUIRendererComponent characterPortrait3 = "cee1930f-699a-4ae8-8766-b02c6b7e2596"
+	property SpriteGUIRendererComponent characterConditionIcon1 = "230e888d-477e-4ae4-8680-355c05ed8342"
+	property SpriteGUIRendererComponent characterConditionIcon2 = "c4f0ef06-cf9d-413c-b573-ab7b8c0fe1b7"
+	property SpriteGUIRendererComponent characterConditionIcon3 = "12c8e5e9-5d22-404c-b085-da7785ae2cf5"
+	property TextGUIRendererComponent characterNameText1 = "f361944b-308a-4416-b677-814dd54ecfa9"
+	property TextGUIRendererComponent characterNameText2 = "e570449c-ff5b-41b4-90dc-45c9ce27d8ac"
+	property TextGUIRendererComponent characterNameText3 = "238e69d5-1cfd-4805-8f78-272df35afd32"
+	property TextGUIRendererComponent characterVocalText1 = "ea473205-62f3-45ed-8c8f-bec189483419"
+	property TextGUIRendererComponent characterVocalText2 = "aab434dc-2619-44a1-a061-238fb0202f0f"
+	property TextGUIRendererComponent characterVocalText3 = "95e6555d-73d6-47b3-a69c-db9ab3f1215c"
+	property TextGUIRendererComponent characterDanceText1 = "37fa49ab-29dd-4090-a6cb-aa3ebeb832f0"
+	property TextGUIRendererComponent characterDanceText2 = "2181043c-404b-4f4f-9afc-a927979cd57a"
+	property TextGUIRendererComponent characterDanceText3 = "bb4119c9-c71f-4338-8dae-0c6cced432f0"
+	property TextGUIRendererComponent characterVisualText1 = "e46b3d21-4afa-43fe-b787-59bb8cbfec66"
+	property TextGUIRendererComponent characterVisualText2 = "0f40dc86-1069-4bad-9c60-0efbf427f1bf"
+	property TextGUIRendererComponent characterVisualText3 = "2511381f-2666-4d6b-8d08-8485e41566f1"
+	property TextGUIRendererComponent characterConditionText1 = "83fbd447-7b7d-4c0a-a556-4d2b66682b51"
+	property TextGUIRendererComponent characterConditionText2 = "43767844-2ed7-4325-9e3b-b0f3f0042908"
+	property TextGUIRendererComponent characterConditionText3 = "e85aecce-58d2-430b-9cfa-476356bbf180"
+	property ButtonComponent activitySlotButton1 = "7f403515-1d45-4c24-842b-18e834ed76af"
+	property ButtonComponent activitySlotButton2 = "e443bc46-1ff0-4dd8-a75c-c6ce92900c0d"
+	property ButtonComponent activitySlotButton3 = "265b07b9-59df-4700-9893-0e9825a6a7f8"
+	property ButtonComponent activitySlotButton4 = "66824eca-8cc5-439c-aecf-a4c30daabae3"
+	property ButtonComponent activitySlotButton5 = "28c7cbda-4858-48b3-87ea-a0afbd123734"
+	property SpriteGUIRendererComponent activitySlotIcon1 = "7f403515-1d45-4c24-842b-18e834ed76af"
+	property SpriteGUIRendererComponent activitySlotIcon2 = "e443bc46-1ff0-4dd8-a75c-c6ce92900c0d"
+	property SpriteGUIRendererComponent activitySlotIcon3 = "265b07b9-59df-4700-9893-0e9825a6a7f8"
+	property SpriteGUIRendererComponent activitySlotIcon4 = "66824eca-8cc5-439c-aecf-a4c30daabae3"
+	property SpriteGUIRendererComponent activitySlotIcon5 = "28c7cbda-4858-48b3-87ea-a0afbd123734"
+	property SpriteGUIRendererComponent defaultTrainingSlotIcon1 = "f955ed8b-b3c3-48dd-9237-c62902052f17"
+	property SpriteGUIRendererComponent defaultTrainingSlotIcon2 = "8f627e29-e69f-43b0-83c4-790f25cbc138"
+	property SpriteGUIRendererComponent defaultTrainingSlotIcon3 = "5de520ed-d73a-4582-9752-837f5a48d783"
+	property SpriteGUIRendererComponent defaultTrainingSlotIcon4 = "36994536-cc1c-4ae4-a5c4-144a02db1846"
+	property SpriteGUIRendererComponent defaultTrainingSlotIcon5 = "161449e0-30f2-41ae-b071-c60f0dbc6e89"
+	property ButtonComponent characterSlotButton1 = "f7b24e3c-bfa2-40fb-b70e-dd6d2b46c45d"
+	property ButtonComponent characterSlotButton2 = "ca175bb8-e47f-4f17-9b66-dd88871c3737"
+	property ButtonComponent characterSlotButton3 = "97aacc9a-c9e0-461d-8b4e-1b5ae70136c6"
+	property ButtonComponent characterSlotButton4 = "f96701ea-50ff-4000-be44-f5810e0f762d"
+	property ButtonComponent characterSlotButton5 = "96d6456f-1a99-41aa-9ecb-6df6b38699be"
+	property SpriteGUIRendererComponent characterSlotIcon1 = "f7b24e3c-bfa2-40fb-b70e-dd6d2b46c45d"
+	property SpriteGUIRendererComponent characterSlotIcon2 = "ca175bb8-e47f-4f17-9b66-dd88871c3737"
+	property SpriteGUIRendererComponent characterSlotIcon3 = "97aacc9a-c9e0-461d-8b4e-1b5ae70136c6"
+	property SpriteGUIRendererComponent characterSlotIcon4 = "f96701ea-50ff-4000-be44-f5810e0f762d"
+	property SpriteGUIRendererComponent characterSlotIcon5 = "96d6456f-1a99-41aa-9ecb-6df6b38699be"
+	property SpriteGUIRendererComponent defaultCharacterSlotIcon1 = "4e056993-5b52-4543-9aa6-77ed77a53ab5"
+	property SpriteGUIRendererComponent defaultCharacterSlotIcon2 = "31e38da9-8366-4545-9767-2c246813dfab"
+	property SpriteGUIRendererComponent defaultCharacterSlotIcon3 = "b8280da8-6877-4405-9cff-2015df68e313"
+	property SpriteGUIRendererComponent defaultCharacterSlotIcon4 = "de0f2dbf-ba0b-4174-9a03-f56eecdd2e72"
+	property SpriteGUIRendererComponent defaultCharacterSlotIcon5 = "00e7d1f8-d04b-4da5-ad41-665dbacadd2d"
+	property string SelectedTabKey = "training"
+	property string activePostItKey = ""
+	property string PlaceholderResourceId = "schedule_placeholderIcon"
+	property string PlaceholderRuid = "67d9ae562627455e8b0f6bc6037f6911"
+	property string WeekTextTemplate = ""
+	property string UI_MONTH_KEY = "ui.schedule.month"
+	property string UI_GOAL_TARGET_KEY = "ui.schedule.goal.target"
+	property string UI_GOAL_NONE_KEY = "ui.schedule.goal.none"
+	property string UI_EMPTY_ACTIVITY_KEY = "ui.schedule.empty_activity"
+	property string UI_WEEK_TITLE_KEY = "ui.schedule.week_title"
+	property string UI_GOAL_COUNTDOWN_KEY = "ui.schedule.goal_countdown"
+	property string UI_PERFORMANCE_WEEK_TITLE_KEY = "ui.schedule.performance_week_title"
+
+	property string UI_PERFORMANCE_NAME_KEY = "ui.common.performance"
+	property any tCharacters = {}
+	property any tActivities = {}
+	property any tSelectedCharacterIds = {}
+	property any tSelectedStageCharacterIds = {}
+	property any tSelectedActivityIds = {}
+	property any tOptionItems = {}
+	property any tClickHandlers = {}
+	property any startButtonStateChangedHandler = nil
+	property any characterChangedHandler = nil
+	property any progressChangedHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 스케줄 편성 UI를 초기화하고 디버그 단축키로 열 수 있도록 닫아둡니다.
+		self:ResetSelections()
+		self:PrepareScrollLayouts()
+		self:HideOptionTemplate()
+		self:ConnectStaticButtons()
+		if _CharacterManager ~= nil then
+			self.characterChangedHandler = _CharacterManager:ConnectEvent(CharacterChangedEvent, self.OnCharacterChanged)
+		end
+		if _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareScrollLayouts()
+		-- 세로 스크롤 리스트의 가로 콘텐츠 폭이 뷰포트를 넘지 않도록 보정합니다.
+		if self.root == nil then
+			return
+		end
+
+		local activityList = self.root:GetChildByName("ActivityList", true)
+		if activityList == nil or activityList.ScrollLayoutGroupComponent == nil then
+			return
+		end
+
+		activityList.ScrollLayoutGroupComponent.CellSize = Vector2(386, 148)
+		activityList.ScrollLayoutGroupComponent.Padding = RectOffset(20, 19, 20, 20)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 연결한 버튼 이벤트와 동적 선택지 아이템을 정리합니다.
+		self:DisconnectStaticButtons()
+		self:ClearOptionItems()
+		if self.characterChangedHandler ~= nil and _CharacterManager ~= nil then
+			_CharacterManager:DisconnectEvent(CharacterChangedEvent, self.characterChangedHandler)
+			self.characterChangedHandler = nil
+		end
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+			self.progressChangedHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		-- 최신 진행도, 캐릭터, 선택지 데이터를 읽어와 스케줄 편성 UI를 표시합니다.
+		if self.root ~= nil then
+			self.root.Enable = true
+		end
+		_UIVisibilityNotifierLogic:SendFrom(self, "schedule", true)
+
+		self:RefreshProgress()
+		self:RefreshCharacters()
+		self:RefreshPanelModeByProgressStep()
+		self:RefreshSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCharacterChanged(any characterChangedEvent)
+		-- 열린 상태에서 캐릭터 캐시가 갱신되면 스케줄 편성 화면을 다시 그립니다.
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+		
+		self:RefreshCharacters()
+		self:RefreshSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 열린 상태에서 진행 캐시가 갱신되면 진행 표시를 다시 그립니다.
+		if self.root == nil or self.root.Enable == false then
+			return
+		end
+		
+		self:RefreshProgress()
+		self:RefreshPanelModeByProgressStep()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 현재 스케줄 편성 선택 상태를 비우고 UI를 숨깁니다.
+		self:ResetSelections()
+		self:RefreshSlots()
+		self:RefreshStartButton()
+		self:Hide()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Hide()
+		-- 현재 선택 상태는 유지하고 스케줄 편성 UI만 숨깁니다.
+		if self.root ~= nil then
+			self.root.Enable = false
+		end
+		_UIVisibilityNotifierLogic:SendFrom(self, "schedule", false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCloseButtonClicked()
+		-- 창 닫기 버튼은 선택 상태를 비우지 않고 UI만 숨깁니다.
+		self:Hide()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetSelections()
+		-- 5일 편성 슬롯의 캐릭터와 활동 선택 상태를 모두 비웁니다.
+		self.tSelectedCharacterIds = {}
+		self.tSelectedStageCharacterIds = {}
+		self.tSelectedActivityIds = {}
+		for day = 1, 5 do
+			self.tSelectedCharacterIds[day] = ""
+			self.tSelectedActivityIds[day] = ""
+		end
+
+		for index = 1, 3 do
+			self.tSelectedStageCharacterIds[index] = ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshProgress()
+		-- ProgressManager와 GameGoalMaster에서 월, 주차, 다음 공연 예정 문구를 읽어 표시합니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		local month = 1
+		local week = 1
+		local goalTextValue = self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+		local currentGoal = nil
+		local isPerformanceStep = false
+
+		if progress ~= nil then
+			isPerformanceStep = progress.eCurrentStep == _EProgressStep.Step_Performance
+			if progress.currentMonth ~= nil and progress.currentMonth > 0 then
+				month = math.floor(progress.currentMonth)
+			end
+
+			if progress.currentWeek ~= nil and progress.currentWeek > 0 then
+				week = math.floor(progress.currentWeek)
+			end
+
+			if _GameGoalMaster ~= nil then
+				local goal = _GameGoalMaster:GetGameGoal(progress.gameGoalId)
+				if goal ~= nil then
+					currentGoal = goal
+					if isPerformanceStep == true then
+						goalTextValue = self:GetGoalNameText(goal)
+					else
+						goalTextValue = self:BuildGoalScheduleText(month, week, goal)
+					end
+				end
+			end
+		end
+
+		self:SetText(self.monthText, self:FormatLocalized(self.UI_MONTH_KEY, "", month, nil, nil))
+		self:RefreshMonthTextMode(isPerformanceStep)
+		if isPerformanceStep == true then
+			self:SetPerformanceWeekText()
+		else
+			self:SetWeekText(week)
+		end
+		self:SetText(self.goalText, goalTextValue)
+		self:RefreshStageGoal(currentGoal)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshStageGoal(any goal)
+		-- 현재 공연 목표 정보를 스테이지 목록에 표시합니다.
+		if goal == nil then
+			self:SetText(self.stageGoalNameText, "")
+			self:SetText(self.stageGoalTargetText, "")
+			self:SetTextGUI(self.stageGoalDescriptionText, "")
+			return
+		end
+
+		self:SetText(self.stageGoalNameText, self:NormalizeQuotedText(goal.name or ""))
+		self:SetText(self.stageGoalTargetText, self:FormatLocalized(self.UI_GOAL_TARGET_KEY, "", self:FormatIntegerWithComma(goal.targetScore or 0), nil, nil))
+		self:SetTextGUI(self.stageGoalDescriptionText, self:NormalizeQuotedText(goal.description or ""))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshMonthTextMode(boolean isPerformanceStep)
+		-- 공연 단계에서는 MonthText의 스프라이트를 표시하고, 일반 단계에서는 텍스트를 표시합니다.
+		if self.monthPerformanceSprite ~= nil then
+			self.monthPerformanceSprite.Enable = isPerformanceStep
+		end
+
+		if self.monthText ~= nil then
+			self.monthText.Enable = isPerformanceStep == false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildGoalScheduleText(integer currentMonth, integer currentWeek, any goal)
+		-- 다음 공연까지 남은 주차와 공연명을 스케줄 UI 목표 문구로 변환합니다.
+		if goal == nil then
+			return self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+		end
+
+		local goalName = goal.name or ""
+		if goalName == "" then
+			goalName = self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+		end
+
+		local remainWeek = self:GetRemainWeeksUntilGoal(currentMonth, currentWeek, goal.month or 1, goal.week or 1)
+		return self:FormatLocalized(self.UI_GOAL_COUNTDOWN_KEY, "", remainWeek, goalName, nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedText(string key, string fallbackText)
+		-- 현재 locale의 UI 문구를 조회합니다.
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:GetText(key, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatLocalized(string key, string fallbackText, any value1, any value2, any value3)
+		-- 현재 locale의 UI 템플릿에 값을 반영합니다.
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:Format(key, fallbackText, value1, value2, value3, "")
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildStatValueText(string statKey, number value)
+		-- 스케줄 아이돌 카드의 locale별 스탯 이름과 값을 조합합니다.
+		local statName = _ScheduleStatTextUtil ~= nil and _ScheduleStatTextUtil:GetLocalizedStatName(statKey, statKey) or statKey
+		return statName .. " : " .. tostring(math.floor(value or 0))
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetGoalNameText(any goal)
+		-- 공연 단계에서 목표 문구 대신 공연명만 반환합니다.
+		if goal == nil or goal.name == nil or goal.name == "" then
+			return self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+		end
+
+		return goal.name
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetRemainWeeksUntilGoal(integer currentMonth, integer currentWeek, integer goalMonth, integer goalWeek)
+		-- 현재 월/주차에서 공연 발생 직전 주차까지 남은 주 수를 계산합니다.
+		local currentIndex = self:GetAbsoluteWeekIndex(currentMonth, currentWeek)
+		local goalIndex = self:GetAbsoluteWeekIndex(goalMonth, goalWeek)
+		return math.floor(_MathUtil:ClampMin(goalIndex - currentIndex, 0))
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetAbsoluteWeekIndex(integer month, integer week)
+		-- 월/주차를 비교 가능한 0 기반 절대 주차 인덱스로 변환합니다.
+		local safeMonth = math.floor(_MathUtil:ClampMin(month or 1, 1))
+		local safeWeek = math.floor(_MathUtil:Clamp(week or 1, 1, 4))
+		return (safeMonth - 1) * 4 + safeWeek - 1
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCharacters()
+		-- CharacterManager에서 받은 순서대로 최대 3명의 캐릭터 카드를 표시합니다.
+		self.tCharacters = {}
+		if _CharacterManager ~= nil then
+			self.tCharacters = _CharacterManager:ClientGetActiveCharacters()
+		end
+
+		for index = 1, 3 do
+			self:SetCharacterCard(index, self.tCharacters[index])
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCharacterCard(integer index, any character)
+		-- 캐릭터 카드 한 칸의 초상화, 스탯, 컨디션 표시를 갱신합니다.
+		local button = self:GetCharacterButton(index)
+		local portrait = self:GetCharacterPortrait(index)
+		local conditionIcon = self:GetCharacterConditionIcon(index)
+		local nameText = self:GetCharacterNameText(index)
+		local vocalText = self:GetCharacterVocalText(index)
+		local danceText = self:GetCharacterDanceText(index)
+		local visualText = self:GetCharacterVisualText(index)
+		local conditionText = self:GetCharacterConditionText(index)
+
+		if character == nil then
+			if button ~= nil then button.Entity.Enable = false end
+			self:SetText(nameText, "")
+			self:SetText(vocalText, "")
+			self:SetText(danceText, "")
+			self:SetText(visualText, "")
+			self:SetText(conditionText, "")
+			self:SetImage(portrait, self:GetPlaceholderRuid(), false)
+			self:SetImage(conditionIcon, self:GetPlaceholderRuid(), false)
+			return
+		end
+
+		if button ~= nil then button.Entity.Enable = true end
+
+		self:SetText(nameText, _RuntimeActorManager:ClientGetActorName(character.id))
+		self:SetText(vocalText, self:BuildStatValueText("vocal", character.vocal or 0))
+		self:SetText(danceText, self:BuildStatValueText("dance", character.dance or 0))
+		self:SetText(visualText, self:BuildStatValueText("visual", character.visual or 0))
+		self:SetText(conditionText, self:BuildStatValueText("fatigue", character.fatigue or 0))
+
+		self:SetImage(portrait, self:GetCharacterPortraitRuid(character.id), true)
+		self:SetImage(conditionIcon, self:GetConditionIconRuid(character.fatigue or 0), true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectTab(string tabKey)
+		-- 우측 탭을 전환하고 선택된 종류의 활동 목록을 다시 표시합니다.
+		if tabKey ~= "training" and tabKey ~= "performance" and tabKey ~= "rest" then
+			tabKey = "training"
+		end
+
+		self:RefreshPostItLayout(false)
+		self:ShowSchedulePanel()
+		self.activePostItKey = tabKey
+		self.SelectedTabKey = tabKey
+		self:RefreshTabVisuals()
+		self:RefreshOptions()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPostItTabClicked(string tabKey)
+		-- 이미 선택된 포스트잇이면 다시 갱신하지 않습니다.
+		if self.activePostItKey == tabKey then
+			return
+		end
+
+		self:SelectTab(tabKey)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshPanelModeByProgressStep()
+		-- 진행 단계에 맞춰 스케줄 패널과 스테이지 패널의 초기 표시 상태를 갱신합니다.
+		if self:IsPerformanceProgressStep() == true then
+			self:RefreshPostItLayout(true)
+			self.activePostItKey = "stage"
+			self:ShowStagePanel()
+			return
+		end
+
+		self:SelectTab(self.SelectedTabKey)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsPerformanceProgressStep()
+		-- 현재 진행 단계가 공연 단계인지 확인합니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		if progress == nil or progress.eCurrentStep == nil then
+			return false
+		end
+
+		return progress.eCurrentStep == _EProgressStep.Step_Performance
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshPostItLayout(boolean isPerformanceStep)
+		-- 공연 단계에서는 스테이지 포스트잇만 첫 번째 위치에 표시합니다.
+		self:SetPostItButtonVisible(self.tabActivityButton, isPerformanceStep == false)
+		self:SetPostItButtonVisible(self.tabPerformanceButton, isPerformanceStep == false)
+		self:SetPostItButtonVisible(self.tabRestButton, isPerformanceStep == false)
+		self:SetPostItButtonVisible(self.stageButton, true)
+		self:SetEntityEnable(self.stageBlock, isPerformanceStep == false)
+
+		if isPerformanceStep == true then
+			self:SetStagePostItPositionY(self.stagePostItPerformanceY)
+		else
+			self:SetStagePostItPositionY(self.stagePostItDefaultY)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPostItButtonVisible(ButtonComponent button, boolean isVisible)
+		-- 포스트잇 버튼 엔티티의 표시 상태를 갱신합니다.
+		if button == nil or button.Entity == nil then
+			return
+		end
+
+		button.Entity.Enable = isVisible
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetStagePostItPositionY(number y)
+		-- 스테이지 포스트잇을 지정한 세로 위치로 이동합니다.
+		if self.stageButton == nil or self.stageButton.Entity == nil or self.stageButton.Entity.UITransformComponent == nil then
+			return
+		end
+
+		local position = self.stageButton.Entity.UITransformComponent.anchoredPosition
+		self.stageButton.Entity.UITransformComponent.anchoredPosition = Vector2(position.x, y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStageButtonClicked()
+		-- 공연 포스트잇을 선택하면 스테이지 패널을 표시합니다.
+		if self.activePostItKey == "stage" then
+			return
+		end
+
+		self:RefreshPostItLayout(false)
+		self.activePostItKey = "stage"
+		self:ShowStagePanel()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowSchedulePanel()
+		-- 일정 편성 패널을 표시하고 스테이지 패널을 숨깁니다.
+		if self.schedulePanel ~= nil then
+			self.schedulePanel.Enable = true
+		end
+
+		if self.stagePanel ~= nil then
+			self.stagePanel.Enable = false
+		end
+
+		self:SetEntityEnable(self.activityList, true)
+		self:SetEntityEnable(self.stageList, false)
+		self:SetEntityEnable(self.stageActivity, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowStagePanel()
+		-- 스테이지 패널을 표시하고 일정 편성 패널을 숨깁니다.
+		if self.schedulePanel ~= nil then
+			self.schedulePanel.Enable = false
+		end
+
+		if self.stagePanel ~= nil then
+			self.stagePanel.Enable = true
+		end
+
+		self:SetEntityEnable(self.activityList, false)
+		self:SetEntityEnable(self.stageList, true)
+		self:SetEntityEnable(self.stageActivity, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityEnable(Entity entity, boolean isEnable)
+		-- 대상 엔티티가 존재할 때만 표시 상태를 갱신합니다.
+		if entity == nil then
+			return
+		end
+
+		entity.Enable = isEnable
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshTabVisuals()
+		-- 현재 선택된 탭에 맞는 카테고리 영역의 표시 상태를 갱신합니다.
+		self:RefreshCategoryVisuals()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTabColor(SpriteGUIRendererComponent bg, boolean isSelected)
+		-- 탭 배경색은 에디터에서 직접 설정한 값을 사용합니다.
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCategoryVisuals()
+		-- 선택된 카테고리에 맞는 헤더만 표시합니다.
+		if self.activityCategoryHeader ~= nil then
+			self.activityCategoryHeader.Enable = self.SelectedTabKey == "training"
+		end
+
+		if self.performanceCategoryHeader ~= nil then
+			self.performanceCategoryHeader.Enable = self.SelectedTabKey == "performance"
+		end
+
+		if self.restCategoryHeader ~= nil then
+			self.restCategoryHeader.Enable = self.SelectedTabKey == "rest"
+		end
+
+		if self.optionTemplateBg ~= nil then
+			self:SetCategoryCardBackground(self.optionTemplateBg, self.SelectedTabKey)
+		end
+
+		if self.optionPanelBg ~= nil then
+			self.optionPanelBg.Color = Color(0.35, 0.28, 0.32, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshOptions()
+		-- 선택된 탭에 맞는 활동 카드 목록을 구성합니다.
+		self:ClearOptionItems()
+		self:HideOptionTemplate()
+		self.tActivities = self:GetCurrentOptionRows()
+
+		if self.tActivities == nil or #self.tActivities <= 0 then
+			if self.emptyMessageText ~= nil then
+				self.emptyMessageText.Entity.Enable = true
+				self.emptyMessageText.Text = self:GetLocalizedText(self.UI_EMPTY_ACTIVITY_KEY, "")
+			end
+			return
+		end
+
+		if self.emptyMessageText ~= nil then
+			self.emptyMessageText.Entity.Enable = false
+		end
+
+		for index, activity in ipairs(self.tActivities) do
+			self:AddOptionItem(index, activity)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetCurrentOptionRows()
+		-- 현재 탭에 표시할 활동 row 목록을 반환합니다.
+		local rows = {}
+		local normalizedType = string.lower(self.SelectedTabKey or "")
+		local activities = {}
+		if _ActivityManager ~= nil then
+			activities = _ActivityManager:ClientGetUnlockedActivities()
+		elseif _ActivityMaster ~= nil then
+			activities = _ActivityMaster:GetAllActivities()
+		end
+
+		for _, activity in ipairs(activities) do
+			local activityType = activity.type or "training"
+			activityType = string.lower(activityType)
+			if activityType == normalizedType then
+				table.insert(rows, activity)
+			end
+		end
+
+		return rows
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetOptionId(any activity)
+		-- 활동 row에서 편성에 저장할 고유 ID를 가져옵니다.
+		if activity == nil then
+			return ""
+		end
+
+		local id = activity.id
+		if id == nil or id == "" then
+			id = activity.activityId
+		end
+
+		return id or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetOptionEntityByActivityId(string activityId)
+		-- 지정 활동 ID에 해당하는 동적 옵션 카드 엔티티를 반환합니다(없으면 nil). 튜토리얼 강조용.
+		if activityId == nil or activityId == "" then
+			return nil
+		end
+		for index, activity in ipairs(self.tActivities) do
+			if self:GetOptionId(activity) == activityId then
+				local item = self.tOptionItems[index]
+				if item ~= nil then
+					return item.entity
+				end
+			end
+		end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetOptionType(any activity)
+		-- 활동 row의 타입을 반환하고 없으면 현재 선택된 탭을 사용합니다.
+		if activity ~= nil and activity.type ~= nil and activity.type ~= "" then
+			return string.lower(activity.type)
+		end
+
+		return self.SelectedTabKey
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetOptionDisplayName(any activity)
+		-- 활동 row에서 카드에 표시할 이름을 가져옵니다.
+		if activity == nil then
+			return ""
+		end
+
+		local name = activity.name
+		if name == nil or name == "" then
+			name = activity.description
+		end
+
+		return self:NormalizeQuotedText(name)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddOptionItem(integer index, any activity)
+		-- 활동 row 하나를 클릭 가능한 카드로 복제해 표시합니다.
+		if self.optionTemplate == nil or activity == nil then
+			return
+		end
+
+		self:HideOptionTemplate()
+
+		local item = self.optionTemplate:Clone("ScheduleOption_" .. tostring(index))
+		if item == nil then
+			return
+		end
+
+		item.Enable = true
+		self:SetOptionItem(item, activity)
+
+		local capturedActivityId = self:GetOptionId(activity)
+		local clickHandler = item:ConnectEvent(ButtonClickEvent, function(event)
+			self:OnOptionClicked(capturedActivityId)
+		end)
+
+		table.insert(self.tOptionItems, { entity = item, clickEventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideOptionTemplate()
+		if self.optionTemplate ~= nil then
+			self.optionTemplate.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetOptionItem(Entity item, any activity)
+		-- 활동 카드의 아이콘, 이름, 스탯 증감 텍스트를 표시합니다.
+		self:ApplyOptionItemTheme(item, self:GetOptionType(activity))
+
+		local iconEntity = item:GetChildByName("Icon", false)
+		local titleEntity = item:GetChildByName("Title", false)
+
+		if iconEntity ~= nil and iconEntity.SpriteGUIRendererComponent ~= nil then
+			self:SetImage(iconEntity.SpriteGUIRendererComponent, self:ResolveResourceRuid(activity.iconResource), true)
+		end
+
+		if titleEntity ~= nil then
+			if titleEntity.TextGUIRendererComponent ~= nil then
+				titleEntity.TextGUIRendererComponent.Text = self:GetOptionDisplayName(activity)
+			elseif titleEntity.TextComponent ~= nil then
+				titleEntity.TextComponent.Text = self:GetOptionDisplayName(activity)
+			end
+		end
+
+		self:SetOptionStatItems(item, activity)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyOptionItemTheme(Entity item, string activityType)
+		-- 복제된 활동 카드에 카테고리별 배경 이미지를 적용합니다.
+		if item == nil or item.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		self:SetCategoryCardBackground(item.SpriteGUIRendererComponent, activityType)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCategoryCardBackground(SpriteGUIRendererComponent renderer, string tabKey)
+		-- 카테고리 색 곱 대신 전용 카드 배경 RUID를 사용합니다.
+		if renderer == nil then
+			return
+		end
+
+		renderer.ImageRUID = DataRef(self:GetCategoryCardRuid(tabKey))
+		renderer.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCategoryCardRuid(string tabKey)
+		-- 트레이닝, 스테이지, 휴식 순서의 활동 카드 배경 RUID를 반환합니다.
+		if tabKey == "performance" then
+			return "6f0a819cd92d4f1ab4f56680377fae56"
+		elseif tabKey == "rest" then
+			return "8b4426708f064f9d8a685402670bcfb5"
+		end
+
+		return "9e5e3acc9ea9477da9b5edb69dc9a5b8"
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearOptionItems()
+		-- 동적으로 만든 활동 카드와 이벤트 연결을 모두 제거합니다.
+		for _, item in ipairs(self.tOptionItems) do
+			if item.entity ~= nil and item.clickEventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.clickEventHandler)
+			end
+
+			if item.entity ~= nil then
+				item.entity:Destroy()
+			end
+		end
+
+		self.tOptionItems = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCharacterCardClicked(integer index)
+		-- 캐릭터 카드를 누르면 왼쪽부터 비어 있는 캐릭터 슬롯에 편성합니다.
+		local character = self.tCharacters[index]
+		if character == nil then
+			return
+		end
+
+		if self.activePostItKey == "stage" then
+			if self:IsPerformanceProgressStep() == false then
+				return
+			end
+
+			self:OnStageCharacterSelected(character.id)
+			return
+		end
+
+		local slotIndex = self:FindFirstEmptySlot(self.tSelectedCharacterIds)
+		if slotIndex <= 0 then
+			return
+		end
+
+		self.tSelectedCharacterIds[slotIndex] = character.id
+		self:RefreshSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnOptionClicked(string activityId)
+		-- 활동 카드를 누르면 왼쪽부터 비어 있는 활동 슬롯에 편성합니다.
+		if activityId == nil or activityId == "" then
+			return
+		end
+
+		local slotIndex = self:FindFirstEmptySlot(self.tSelectedActivityIds)
+		if slotIndex <= 0 then
+			return
+		end
+
+		self.tSelectedActivityIds[slotIndex] = activityId
+		self:RefreshSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnActivitySlotClicked(integer day)
+		-- 활동 슬롯을 누르면 해당 요일의 활동 편성을 제거합니다.
+		self.tSelectedActivityIds[day] = ""
+		self:RefreshSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCharacterSlotClicked(integer day)
+		-- 캐릭터 슬롯을 누르면 해당 요일의 캐릭터 편성을 제거합니다.
+		self.tSelectedCharacterIds[day] = ""
+		self:RefreshSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStageCharacterSelected(string characterId)
+		-- 스테이지 패널의 빈 슬롯에 캐릭터를 배치합니다.
+		if self:IsPerformanceProgressStep() == false then
+			return
+		end
+
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		if self:IsStageCharacterSelected(characterId) == true then
+			return
+		end
+
+		local slotIndex = self:FindFirstEmptyStageSlot()
+		if slotIndex <= 0 then
+			return
+		end
+
+		self.tSelectedStageCharacterIds[slotIndex] = characterId
+		self:RefreshStageSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStageSlotClicked(integer index)
+		-- 스테이지 슬롯을 누르면 해당 캐릭터 배치를 제거합니다.
+		if self:IsPerformanceProgressStep() == false then
+			return
+		end
+
+		self.tSelectedStageCharacterIds[index] = ""
+		self:RefreshStageSlots()
+		self:RefreshStartButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsStageCharacterSelected(string characterId)
+		-- 스테이지 패널에 이미 선택된 캐릭터인지 확인합니다.
+		if characterId == nil or characterId == "" then
+			return false
+		end
+
+		for index = 1, 3 do
+			if self.tSelectedStageCharacterIds[index] == characterId then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer FindFirstEmptyStageSlot()
+		-- 스테이지 패널의 3칸 중 가장 왼쪽 빈 슬롯을 찾습니다.
+		for index = 1, 3 do
+			if self.tSelectedStageCharacterIds[index] == nil or self.tSelectedStageCharacterIds[index] == "" then
+				return index
+			end
+		end
+
+		return 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer FindFirstEmptySlot(table slots)
+		-- 5칸 중 가장 왼쪽의 빈 슬롯 번호를 찾습니다.
+		for day = 1, 5 do
+			if slots[day] == nil or slots[day] == "" then
+				return day
+			end
+		end
+
+		return 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSlots()
+		-- 요일별 활동 슬롯과 캐릭터 슬롯 아이콘을 현재 편성 데이터로 갱신합니다.
+		for day = 1, 5 do
+			local activityId = self.tSelectedActivityIds[day] or ""
+			local characterId = self.tSelectedCharacterIds[day] or ""
+
+			self:RefreshActivitySlot(day, activityId)
+			self:RefreshCharacterSlot(day, characterId)
+		end
+
+		self:RefreshStageSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshStageSlots()
+		-- 스테이지 패널에 선택된 캐릭터의 세로 초상화를 표시합니다.
+		for index = 1, 3 do
+			local characterId = self.tSelectedStageCharacterIds[index] or ""
+			local portrait = self:GetStagePortrait(index)
+			local isFilled = characterId ~= nil and characterId ~= ""
+			self:SetImage(portrait, self:GetCharacterVerticalPortraitRuid(characterId), isFilled)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshActivitySlot(integer day, string activityId)
+		-- 활동 편성 여부에 따라 TrainingSlot 이미지와 DefaultTrainingSlot 이미지를 전환합니다.
+		local isFilled = activityId ~= nil and activityId ~= ""
+		local trainingSlot = self:GetActivitySlotIcon(day)
+		local defaultSlot = self:GetDefaultTrainingSlotIcon(day)
+
+		self:SetImage(trainingSlot, self:GetActivityIconRuid(activityId), isFilled)
+
+		if defaultSlot ~= nil and defaultSlot.Entity ~= nil then
+			defaultSlot.Entity.Enable = isFilled ~= true
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCharacterSlot(integer day, string characterId)
+		-- 캐릭터 편성 여부에 따라 CharacterSlot 이미지와 DefaultCharacterSlot 이미지를 전환합니다.
+		local isFilled = characterId ~= nil and characterId ~= ""
+		local characterSlot = self:GetCharacterSlotIcon(day)
+		local defaultSlot = self:GetDefaultCharacterSlotIcon(day)
+
+		self:SetImage(characterSlot, self:GetCharacterPortraitRuid(characterId), isFilled)
+
+		if defaultSlot ~= nil and defaultSlot.Entity ~= nil then
+			defaultSlot.Entity.Enable = isFilled ~= true
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshStartButton()
+		-- 5일 편성이 모두 채워졌을 때만 START 버튼을 활성화합니다.
+		local canStart = self:CanStartCurrentPanel()
+		if self.startButton ~= nil then
+			self.startButton.Enable = canStart
+		end
+		self:SetStartButtonHover(false)
+
+		if self.startButtonBg ~= nil then
+			self.startButtonBg.ImageRUID = DataRef("02c1c767564543e092dcda2d27bc147d")
+			if canStart == true then
+				self.startButtonBg.Color = Color(1, 1, 1, 1)
+			else
+				self.startButtonBg.Color = Color(0.55, 0.55, 0.55, 0.85)
+			end
+		end
+
+		if self.startButtonText ~= nil then
+			if canStart == true then
+				self.startButtonText.FontColor = Color(1, 1, 1, 1)
+			else
+				self.startButtonText.FontColor = Color(0.82, 0.82, 0.82, 1)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetStartButtonHover(boolean isHover)
+		if self.startButtonHoverImage ~= nil then
+			self.startButtonHoverImage.Enable = isHover
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartButtonStateChanged(ButtonStateChangeEvent event)
+		if self:CanStartCurrentPanel() ~= true then
+			self:SetStartButtonHover(false)
+			return
+		end
+
+		if event ~= nil and (event.state == ButtonState.Hover or event.state == ButtonState.Pressed) then
+			self:SetStartButtonHover(true)
+		else
+			self:SetStartButtonHover(false)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsWeeklyPlanComplete()
+		-- 모든 요일에 캐릭터와 활동이 하나씩 편성되었는지 확인합니다.
+		for day = 1, 5 do
+			if self.tSelectedCharacterIds[day] == nil or self.tSelectedCharacterIds[day] == "" then
+				return false
+			end
+
+			if self.tSelectedActivityIds[day] == nil or self.tSelectedActivityIds[day] == "" then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanStartCurrentPanel()
+		-- 현재 선택된 패널의 START 가능 여부를 반환합니다.
+		if self.activePostItKey == "stage" then
+			if self:IsPerformanceProgressStep() == false then
+				return false
+			end
+
+			return self:IsStageSelectionComplete()
+		end
+
+		return self:IsWeeklyPlanComplete()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsStageSelectionComplete()
+		-- 스테이지 슬롯 3칸이 모두 채워졌는지 확인합니다.
+		for index = 1, 3 do
+			if self.tSelectedStageCharacterIds[index] == nil or self.tSelectedStageCharacterIds[index] == "" then
+				return false
+			end
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartClicked(ButtonClickEvent event)
+		-- 완성된 5일 편성 데이터를 ScheduleProgressUILogic에 전달합니다.
+		if self:CanStartCurrentPanel() == false then
+			return
+		end
+
+		if self.activePostItKey == "stage" then
+			self:OnStartPerformanceClicked()
+			return
+		end
+
+		local weeklyPlan = {}
+		for day = 1, 5 do
+			local slot = WeeklyPlanData()
+			slot.characterId = self.tSelectedCharacterIds[day]
+			slot.activityId = self.tSelectedActivityIds[day]
+			weeklyPlan[day] = slot
+		end
+
+		if _WeeklySequenceScheduler ~= nil then
+			local started = _WeeklySequenceScheduler:StartWeeklySequence(weeklyPlan)
+			if started == true then
+				if _SoundManager ~= nil then
+					_SoundManager:PlayWeeklyScheduleBGM()
+				end
+				self:Close()
+			end
+		else
+			log_warning("[ScheduleUI] WeeklySequenceScheduler not found")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartPerformanceClicked()
+		-- 스테이지 편성 슬롯을 공연 역할 배정으로 변환해 공연 진입 흐름을 시작합니다.
+		if _PerformanceConductor == nil then
+			log_warning("[ScheduleUI] PerformanceConductor not found")
+			return
+		end
+
+		local assignment = self:BuildPerformanceRoleAssignment()
+		if assignment:IsEmpty() == true then
+			return
+		end
+
+		local performanceId = self:GetCurrentStagePerformanceId()
+		if performanceId == "" then
+			log_warning("[ScheduleUI] performanceId is empty")
+			return
+		end
+
+		_PerformanceConductor:StartPerformanceFlow(performanceId, assignment)
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method PerformanceRoleAssignment BuildPerformanceRoleAssignment()
+		-- 현재 스테이지 슬롯 선택값을 공연 역할 배정 구조체로 변환합니다.
+		local assignment = PerformanceRoleAssignment()
+		assignment.subL = self.tSelectedStageCharacterIds[1] or ""
+		assignment.center = self.tSelectedStageCharacterIds[2] or ""
+		assignment.subR = self.tSelectedStageCharacterIds[3] or ""
+		return assignment
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentStagePerformanceId()
+		-- 현재 진행 데이터의 gameGoalId를 공연 ID로 사용합니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		if progress == nil or progress.gameGoalId == nil or progress.gameGoalId == "" then
+			return ""
+		end
+
+		if _PerformanceMaster ~= nil and _PerformanceMaster:HasPerformance(progress.gameGoalId) == true then
+			return progress.gameGoalId
+		end
+
+		if _GameGoalMaster ~= nil then
+			local goal = _GameGoalMaster:GetGameGoal(progress.gameGoalId)
+			if goal ~= nil and goal.id ~= nil and goal.id ~= "" then
+				return goal.id
+			end
+		end
+
+		return progress.gameGoalId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectStaticButtons()
+		-- 정적으로 배치된 카드, 슬롯, 탭, 시작 버튼 이벤트를 연결합니다.
+		self:DisconnectStaticButtons()
+		self.tClickHandlers = {}
+
+		self:AddButtonHandler(self.characterButton1, function(event) self:OnCharacterCardClicked(1) end)
+		self:AddButtonHandler(self.characterButton2, function(event) self:OnCharacterCardClicked(2) end)
+		self:AddButtonHandler(self.characterButton3, function(event) self:OnCharacterCardClicked(3) end)
+		self:AddButtonHandler(self.stageSlotButton1, function(event) self:OnStageSlotClicked(1) end)
+		self:AddButtonHandler(self.stageSlotButton2, function(event) self:OnStageSlotClicked(2) end)
+		self:AddButtonHandler(self.stageSlotButton3, function(event) self:OnStageSlotClicked(3) end)
+
+		for day = 1, 5 do
+			local capturedDay = day
+			self:AddButtonHandler(self:GetActivitySlotButton(day), function(event) self:OnActivitySlotClicked(capturedDay) end)
+			self:AddButtonHandler(self:GetCharacterSlotButton(day), function(event) self:OnCharacterSlotClicked(capturedDay) end)
+		end
+
+		self:AddButtonHandler(self.tabActivityButton, function(event) self:OnPostItTabClicked("training") end)
+		self:AddButtonHandler(self.tabPerformanceButton, function(event) self:OnPostItTabClicked("performance") end)
+		self:AddButtonHandler(self.tabRestButton, function(event) self:OnPostItTabClicked("rest") end)
+		self:AddButtonHandler(self.stageButton, function(event) self:OnStageButtonClicked() end)
+		self:AddButtonHandler(self.startButton, self.OnStartClicked)
+		if self.startButton ~= nil and self.startButton.Entity ~= nil then
+			self.startButtonStateChangedHandler = self.startButton.Entity:ConnectEvent(ButtonStateChangeEvent, self.OnStartButtonStateChanged)
+		end
+		self:AddButtonHandler(self.closeButton, function(event) self:OnCloseButtonClicked() end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddButtonHandler(ButtonComponent button, any callback)
+		-- 버튼이 존재할 때 클릭 이벤트를 연결하고 해제를 위해 핸들을 보관합니다.
+		if button == nil or button.Entity == nil or callback == nil then
+			return
+		end
+
+		local clickHandler = button.Entity:ConnectEvent(ButtonClickEvent, callback)
+		table.insert(self.tClickHandlers, { entity = button.Entity, clickEventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectStaticButtons()
+		-- 정적 UI 버튼에 연결한 이벤트 핸들을 모두 해제합니다.
+		if self.startButtonStateChangedHandler ~= nil and self.startButton ~= nil and self.startButton.Entity ~= nil then
+			self.startButton.Entity:DisconnectEvent(ButtonStateChangeEvent, self.startButtonStateChangedHandler)
+			self.startButtonStateChangedHandler = nil
+		end
+
+		if self.tClickHandlers == nil then
+			self.tClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.tClickHandlers) do
+			if item.entity ~= nil and item.clickEventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.clickEventHandler)
+			end
+		end
+
+		self.tClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetOptionStatItems(Entity item, any activity)
+		-- 활동 카드의 스탯 슬롯에 아이콘 리치텍스트와 부호가 붙은 수치를 표시합니다.
+		local baseSlots = self:GetOptionStatTextSlots(item)
+		local spriteVOffset = self:GetOptionStatSpriteVOffset(baseSlots[1])
+		local parts = self:BuildActivityStatParts(activity, spriteVOffset)
+
+		self:SetOptionStatRowsEnable(item, false)
+
+		local allSlots = self:GetAllOptionStatTextSlots(item)
+		for _, slot in ipairs(allSlots) do
+			if slot ~= nil then
+				slot.Enable = false
+
+				if slot.TextGUIRendererComponent ~= nil then
+					slot.TextGUIRendererComponent.Text = ""
+					slot.TextGUIRendererComponent.IsRichText = true
+					slot.TextGUIRendererComponent.TextSpriteSetId = _ScheduleStatTextUtil:GetScheduleStatTextSpriteSetId()
+				end
+			end
+		end
+
+		local displayCount = #parts
+		local slots = self:GetOptionStatDisplayTextSlots(item, displayCount)
+		if displayCount > #slots then
+			displayCount = #slots
+		end
+
+		self:SetOptionStatDisplayRowsEnable(item, displayCount, true)
+
+		for index = 1, displayCount do
+			local slot = slots[index]
+			local part = parts[index]
+			if slot ~= nil and part ~= nil then
+				slot.Enable = true
+
+				if slot.TextGUIRendererComponent ~= nil then
+					slot.TextGUIRendererComponent.IsRichText = true
+					slot.TextGUIRendererComponent.TextSpriteSetId = _ScheduleStatTextUtil:GetScheduleStatTextSpriteSetId()
+					slot.TextGUIRendererComponent.Text = part.text
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetOptionStatRowsEnable(Entity item, boolean isEnable)
+		if item == nil then
+			return
+		end
+
+		self:SetOptionStatRowEnable(item:GetChildByName("Top", false), isEnable)
+		self:SetOptionStatRowEnable(item:GetChildByName("Middle", false), isEnable)
+		self:SetOptionStatRowEnable(item:GetChildByName("Bottom", false), isEnable)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetOptionStatDisplayRowsEnable(Entity item, integer displayCount, boolean isEnable)
+		if item == nil then
+			return
+		end
+
+		if displayCount <= 0 then
+			return
+		end
+
+		if displayCount <= 2 then
+			self:SetOptionStatRowEnable(item:GetChildByName("Middle", false), isEnable)
+			return
+		end
+
+		self:SetOptionStatRowEnable(item:GetChildByName("Top", false), isEnable)
+		self:SetOptionStatRowEnable(item:GetChildByName("Bottom", false), isEnable)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetOptionStatRowEnable(Entity row, boolean isEnable)
+		if row == nil then
+			return
+		end
+
+		row.Enable = isEnable
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetOptionStatTextSlots(Entity item)
+		-- 행 단위로 배치된 TextGUI 스탯 슬롯을 화면 표시 순서대로 반환합니다.
+		local slots = {}
+		if item == nil then
+			return slots
+		end
+
+		self:AddOptionStatRowSlots(slots, item:GetChildByName("Top", false))
+		self:AddOptionStatRowSlots(slots, item:GetChildByName("Middle", false))
+		self:AddOptionStatRowSlots(slots, item:GetChildByName("Bottom", false))
+
+		return slots
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetOptionStatDisplayTextSlots(Entity item, integer displayCount)
+		local slots = {}
+		if item == nil then
+			return slots
+		end
+
+		if displayCount <= 2 then
+			self:AddOptionStatRowSlots(slots, item:GetChildByName("Middle", false))
+			return slots
+		end
+
+		self:AddOptionStatRowSlots(slots, item:GetChildByName("Top", false))
+		self:AddOptionStatRowSlots(slots, item:GetChildByName("Bottom", false))
+
+		return slots
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddOptionStatRowSlots(table slots, Entity row)
+		if slots == nil or row == nil then
+			return
+		end
+
+		local leftSlot = row:GetChildByName("left", false)
+		local rightSlot = row:GetChildByName("right", false)
+
+		if leftSlot ~= nil then
+			table.insert(slots, leftSlot)
+		end
+
+		if rightSlot ~= nil then
+			table.insert(slots, rightSlot)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetAllOptionStatTextSlots(Entity item)
+		-- 카드를 채우기 전에 사용하지 않는 행을 숨길 수 있도록 모든 스탯 슬롯을 반환합니다.
+		return self:GetOptionStatTextSlots(item)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetOptionStatSpriteVOffset(Entity firstSlot)
+		-- 첫 번째 TextGUI 슬롯의 샘플 리치텍스트에서 아이콘 세로 보정값을 읽습니다.
+		if firstSlot == nil or firstSlot.TextGUIRendererComponent == nil then
+			return 0
+		end
+
+		local text = firstSlot.TextGUIRendererComponent.Text
+		if text == nil or text == "" then
+			return 0
+		end
+
+		local offsetText = string.match(text, "<voffset=([%-%d%.]+)>")
+		if offsetText == nil or offsetText == "" then
+			return 0
+		end
+
+		return tonumber(offsetText) or 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method table BuildActivityStatParts(any activity, number spriteVOffset)
+		-- 스케줄 활동 카드에서 사용하는 순서대로 스탯 리치텍스트 항목을 만듭니다.
+		local parts = {}
+		if activity == nil then
+			return parts
+		end
+
+		self:AddActivityStatPart(parts, "vocal", activity.vocal or 0, spriteVOffset)
+		self:AddActivityStatPart(parts, "dance", activity.dance or 0, spriteVOffset)
+		self:AddActivityStatPart(parts, "visual", activity.visual or 0, spriteVOffset)
+		self:AddActivityStatPart(parts, "fandom", activity.fandom or 0, spriteVOffset)
+		self:AddActivityStatPart(parts, "fatigue", activity.fatigue or 0, spriteVOffset)
+
+		return parts
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddActivityStatPart(table parts, string statKey, number value, number spriteVOffset)
+		-- 0이 아닌 스탯 변화만 추가합니다.
+		if value == nil or value == 0 then
+			return
+		end
+
+		table.insert(parts, { statKey = statKey, value = value, text = self:BuildActivityStatRichText(statKey, value, spriteVOffset) })
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildActivityStatRichText(string statKey, number value, number spriteVOffset)
+		-- 스케줄 스탯 공용 유틸로 리치 텍스트 한 항목을 만듭니다.
+		return _ScheduleStatTextUtil:BuildStatRichText(statKey, value, spriteVOffset)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetStatSpriteTag(string statKey)
+		-- 스케줄 스탯 공용 유틸의 아이콘 태그를 반환합니다.
+		return _ScheduleStatTextUtil:GetStatSpriteTag(statKey)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsGoodStatChange(string statKey, number value)
+		-- 스케줄 스탯 공용 유틸의 좋은 변화 판정을 반환합니다.
+		return _ScheduleStatTextUtil:IsGoodStatChange(statKey, value)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetScheduleStatTextSpriteSetId()
+		-- 스케줄 스탯 공용 유틸의 TextSpriteSet ID를 반환합니다.
+		return _ScheduleStatTextUtil:GetScheduleStatTextSpriteSetId()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatSignedNumber(number value)
+		-- 스케줄 스탯 공용 유틸의 부호 포함 숫자 문자열을 반환합니다.
+		return _ScheduleStatTextUtil:FormatSignedNumber(value)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetActivityIconRuid(string activityId)
+		-- 활동 ID에 해당하는 아이콘 RUID를 마스터와 임시 데이터에서 찾아 가져옵니다.
+		if activityId == nil or activityId == "" then
+			return self:GetPlaceholderRuid()
+		end
+
+		local activity = self:GetActivityRow(activityId)
+		if activity == nil then
+			return self:GetPlaceholderRuid()
+		end
+
+		local iconResource = activity["iconResource"]
+		if iconResource == nil or iconResource == "" then
+			return self:GetPlaceholderRuid()
+		end
+
+		return self:ResolveResourceRuid(iconResource)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetActivityRow(string activityId)
+		-- 활동 ID에 해당하는 row를 ActivityMaster에서 찾습니다.
+		if activityId == nil or activityId == "" then
+			return nil
+		end
+
+		if _ActivityMaster ~= nil then
+			return _ActivityMaster:GetActivity(activityId)
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCharacterPortraitRuid(string characterId)
+		-- 캐릭터 ID에 해당하는 초상화 RUID를 Actor/Resource 테이블 경로로 가져옵니다.
+		if characterId == nil or characterId == "" then
+			return self:GetPlaceholderRuid()
+		end
+
+		if _RuntimeActorManager ~= nil then
+			local portraitRuid = _RuntimeActorManager:ClientGetActorPortraitHorizontalRuid(characterId, "")
+			if portraitRuid ~= nil and portraitRuid ~= "" then
+				return portraitRuid
+			end
+		end
+
+		return self:GetPlaceholderRuid()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCharacterVerticalPortraitRuid(string characterId)
+		-- 캐릭터 ID에 해당하는 세로 초상화 RUID를 반환합니다.
+		if characterId == nil or characterId == "" then
+			return self:GetPlaceholderRuid()
+		end
+
+		if _RuntimeActorManager ~= nil then
+			local portraitRuid = _RuntimeActorManager:ClientGetActorPortraitRuid(characterId, "")
+			if portraitRuid ~= nil and portraitRuid ~= "" then
+				return portraitRuid
+			end
+		end
+
+		return self:GetPlaceholderRuid()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveResourceRuid(string resourceId)
+		-- 리소스 테이블 ID를 실제 RUID로 변환하고 비어 있으면 플레이스홀더를 반환합니다.
+		if resourceId == nil or resourceId == "" then
+			return self:GetPlaceholderRuid()
+		end
+
+		if _ResourceMaster ~= nil then
+			local ruid = _ResourceMaster:ResolveResourceId(resourceId)
+			if ruid ~= nil and ruid ~= "" then
+				return ruid
+			end
+		end
+
+		return self:GetPlaceholderRuid()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetPlaceholderRuid()
+		-- 플레이스홀더 리소스 ID를 RUID로 변환하고 실패하면 기본 RUID를 반환합니다.
+		if _ResourceMaster ~= nil then
+			local ruid = _ResourceMaster:ResolveResourceId(self.PlaceholderResourceId)
+			if ruid ~= nil and ruid ~= "" then
+				return ruid
+			end
+		end
+
+		return self.PlaceholderRuid
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImage(SpriteGUIRendererComponent renderer, string ruid, boolean isFilled)
+		-- 이미지 컴포넌트에 RUID를 적용하고 비어 있는 이미지는 렌더링하지 않습니다.
+		if renderer == nil then
+			return
+		end
+
+		if isFilled ~= true then
+			renderer.ImageRUID = DataRef("")
+			renderer.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		if ruid == nil or ruid == "" then
+			ruid = self:GetPlaceholderRuid()
+		end
+
+		renderer.ImageRUID = DataRef(ruid)
+		renderer.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetConditionIconRuid(number fatigue)
+		-- ConditionMaster에서 피로도에 해당하는 컨디션 아이콘 ImageRUID를 가져옵니다.
+		if _ConditionMaster == nil then
+			return ""
+		end
+
+		return _ConditionMaster:GetConditionIconRuidByFatigue(fatigue or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string NormalizeQuotedText(string text)
+		-- CSV에서 들어온 따옴표 감싸기 문자열을 화면 표시용으로 정리합니다.
+		if text == nil then
+			return ""
+		end
+
+		local normalized = text
+		if string.len(normalized) >= 2 and string.sub(normalized, 1, 1) == "\"" and string.sub(normalized, -1) == "\"" then
+			normalized = string.sub(normalized, 2, -2)
+		end
+
+		return normalized
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatIntegerWithComma(number value)
+		-- 정수 값을 세 자리마다 쉼표가 포함된 문자열로 변환합니다.
+		local integerValue = math.floor(math.max(value or 0, 0))
+		local textValue = tostring(integerValue)
+		local formattedText = textValue
+
+		while true do
+			local nextText, replaceCount = string.gsub(formattedText, "^(-?%d+)(%d%d%d)", "%1,%2")
+			formattedText = nextText
+			if replaceCount == 0 then
+				break
+			end
+		end
+
+		return formattedText
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(TextGUIRendererComponent textComponent, string text)
+		-- 텍스트 컴포넌트가 존재할 때만 문자열을 갱신합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = text or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTextGUI(TextGUIRendererComponent textComponent, string text)
+		-- TextGUIRendererComponent가 존재할 때만 문자열을 갱신합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = text or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetWeekText(integer week)
+		-- 현재 주차 텍스트를 기존 스프라이트 템플릿에 맞춰 표시합니다.
+		if self.weekText == nil then
+			return
+		end
+
+		self.weekText.IsRichText = true
+		self.weekText.TextSpriteSetId = self:GetScheduleStatTextSpriteSetId()
+
+		local weekTemplate = self:GetLocalizedText(self.UI_WEEK_TITLE_KEY, "")
+		local renderedText, replacedCount = string.gsub(weekTemplate, "{value1}", tostring(week))
+		if replacedCount == 0 then
+			renderedText, _ = string.gsub(weekTemplate, "{week}", tostring(week))
+		end
+		self.weekText.Text = renderedText
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPerformanceWeekText()
+		-- 공연 단계에서는 주차 영역에 무대 편성 안내 문구를 표시합니다.
+		if self.weekText == nil then
+			return
+		end
+
+		if self.WeekTextTemplate == nil or self.WeekTextTemplate == "" then
+			self.WeekTextTemplate = self.weekText.Text
+		end
+
+		self.weekText.IsRichText = false
+		self.weekText.Text = self:GetLocalizedText(self.UI_PERFORMANCE_WEEK_TITLE_KEY, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method ButtonComponent GetCharacterButton(integer index)
+		-- 캐릭터 카드 번호에 해당하는 버튼 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterButton1 end
+		if index == 2 then return self.characterButton2 end
+		return self.characterButton3
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetCharacterPortrait(integer index)
+		-- 캐릭터 카드 번호에 해당하는 초상화 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterPortrait1 end
+		if index == 2 then return self.characterPortrait2 end
+		return self.characterPortrait3
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetStagePortrait(integer index)
+		-- 스테이지 슬롯 번호에 해당하는 세로 초상화 컴포넌트를 반환합니다.
+		if index == 1 then return self.stagePortrait1 end
+		if index == 2 then return self.stagePortrait2 end
+		return self.stagePortrait3
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetCharacterConditionIcon(integer index)
+		-- 캐릭터 카드 번호에 해당하는 컨디션 아이콘 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterConditionIcon1 end
+		if index == 2 then return self.characterConditionIcon2 end
+		return self.characterConditionIcon3
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCharacterNameText(integer index)
+		-- 캐릭터 카드 번호에 해당하는 이름 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterNameText1 end
+		if index == 2 then return self.characterNameText2 end
+		return self.characterNameText3
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCharacterVocalText(integer index)
+		-- 캐릭터 카드 번호에 해당하는 보컬 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterVocalText1 end
+		if index == 2 then return self.characterVocalText2 end
+		return self.characterVocalText3
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCharacterDanceText(integer index)
+		-- 캐릭터 카드 번호에 해당하는 댄스 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterDanceText1 end
+		if index == 2 then return self.characterDanceText2 end
+		return self.characterDanceText3
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCharacterVisualText(integer index)
+		-- 캐릭터 카드 번호에 해당하는 비주얼 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterVisualText1 end
+		if index == 2 then return self.characterVisualText2 end
+		return self.characterVisualText3
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCharacterConditionText(integer index)
+		-- 캐릭터 카드 번호에 해당하는 컨디션 텍스트 컴포넌트를 반환합니다.
+		if index == 1 then return self.characterConditionText1 end
+		if index == 2 then return self.characterConditionText2 end
+		return self.characterConditionText3
+	end
+
+	@ExecSpace("ClientOnly")
+	method ButtonComponent GetActivitySlotButton(integer day)
+		-- 요일 번호에 해당하는 활동 슬롯 버튼을 반환합니다.
+		if day == 1 then return self.activitySlotButton1 end
+		if day == 2 then return self.activitySlotButton2 end
+		if day == 3 then return self.activitySlotButton3 end
+		if day == 4 then return self.activitySlotButton4 end
+		return self.activitySlotButton5
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetActivitySlotIcon(integer day)
+		-- 요일 번호에 해당하는 TrainingSlot 이미지 렌더러를 반환합니다.
+		if day == 1 then return self.activitySlotIcon1 end
+		if day == 2 then return self.activitySlotIcon2 end
+		if day == 3 then return self.activitySlotIcon3 end
+		if day == 4 then return self.activitySlotIcon4 end
+		return self.activitySlotIcon5
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetDefaultTrainingSlotIcon(integer day)
+		-- 편성되지 않은 상태에서 보여 줄 기본 슬롯 이미지를 반환합니다.
+		if day == 1 then return self.defaultTrainingSlotIcon1 end
+		if day == 2 then return self.defaultTrainingSlotIcon2 end
+		if day == 3 then return self.defaultTrainingSlotIcon3 end
+		if day == 4 then return self.defaultTrainingSlotIcon4 end
+		if day == 5 then return self.defaultTrainingSlotIcon5 end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method ButtonComponent GetCharacterSlotButton(integer day)
+		-- 요일 번호에 해당하는 캐릭터 슬롯 버튼을 반환합니다.
+		if day == 1 then return self.characterSlotButton1 end
+		if day == 2 then return self.characterSlotButton2 end
+		if day == 3 then return self.characterSlotButton3 end
+		if day == 4 then return self.characterSlotButton4 end
+		return self.characterSlotButton5
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetCharacterSlotIcon(integer day)
+		-- 요일 번호에 해당하는 CharacterSlot 이미지 렌더러를 반환합니다.
+		if day == 1 then return self.characterSlotIcon1 end
+		if day == 2 then return self.characterSlotIcon2 end
+		if day == 3 then return self.characterSlotIcon3 end
+		if day == 4 then return self.characterSlotIcon4 end
+		return self.characterSlotIcon5
+	end
+
+	@ExecSpace("ClientOnly")
+	method SpriteGUIRendererComponent GetDefaultCharacterSlotIcon(integer day)
+		-- 편성되지 않은 상태에서 보여 줄 기본 캐릭터 슬롯 이미지를 반환합니다.
+		if day == 1 then return self.defaultCharacterSlotIcon1 end
+		if day == 2 then return self.defaultCharacterSlotIcon2 end
+		if day == 3 then return self.defaultCharacterSlotIcon3 end
+		if day == 4 then return self.defaultCharacterSlotIcon4 end
+		if day == 5 then return self.defaultCharacterSlotIcon5 end
+		return nil
+	end
+
+end

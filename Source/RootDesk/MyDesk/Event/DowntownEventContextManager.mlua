@@ -1,0 +1,51 @@
+-- Map_Downtown 진입 이동과 NPC 스폰 갱신 담당 (플레이어=매니저가 외출하는 자유 이동 모델)
+@Logic
+script DowntownEventContextManager extends Logic
+
+	-- Downtown 맵 식별 이름
+	property string DowntownMapId = "Map_Downtown"
+
+	-- Downtown 기본 진입 좌표 X
+	property number DefaultDowntownEntryX = 3.3763
+
+	-- Downtown 기본 진입 좌표 Y
+	property number DefaultDowntownEntryY = 1.4266
+
+	@ExecSpace("ClientOnly")
+	method void EnterDowntownByPosition(number positionX, number positionY)
+		-- 전달받은 좌표로 Downtown 맵 이동, 이미 Downtown에 있으면 스폰 직접 갱신
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return
+		end
+
+		if player.PlayerComponent == nil then
+			return
+		end
+
+		local currentMap = player.CurrentMap
+		local alreadyInDowntown = currentMap ~= nil and currentMap.Name == self.DowntownMapId
+
+		player.PlayerComponent:MoveToMapPosition(self.DowntownMapId, Vector2(positionX, positionY))
+
+		if alreadyInDowntown == true then
+			self:RefreshDowntownNpcSpawn(currentMap)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshDowntownNpcSpawn(Entity downtownMap)
+		-- Downtown 맵의 NpcSpawnComponent를 찾아 진입 스폰 강제 갱신
+		if downtownMap == nil then
+			return
+		end
+
+		---@type NpcSpawnComponent
+		local spawnComponent = downtownMap:GetComponent("script.NpcSpawnComponent")
+		if spawnComponent == nil then
+			return
+		end
+
+		spawnComponent:RefreshEntrySpawn()
+	end
+end

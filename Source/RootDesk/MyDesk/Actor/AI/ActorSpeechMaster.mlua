@@ -1,0 +1,124 @@
+@Logic
+script ActorSpeechMaster extends Logic
+
+	property any tSpeechByActorId = {}
+
+	property boolean isCached = false
+
+	method void OnBeginPlay()
+		-- 액터 발화 마스터 테이블을 캐싱합니다.
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- ActorSpeechTable을 actorId 기준 발화 목록으로 다시 구성합니다.
+		if self.isCached == true then
+			return
+		end
+		
+		self.tSpeechByActorId = {}
+		
+		local dataSet = _DataService:GetTable("ActorSpeechTable")
+		if dataSet == nil then
+			log_warning("[ActorSpeechMaster] ActorSpeechTable not found")
+			return
+		end
+		
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local actorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "actorId", "")
+			if actorId ~= "" then
+				local messageKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "messageKey", "")
+				local localizedMessage = ""
+				if _LocalizationLogic ~= nil then
+					localizedMessage = _LocalizationLogic:GetText(messageKey, "")
+				end
+				local tSpeech = {
+					speechId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speechId", ""),
+					actorId = actorId,
+					speechType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speechType", ""),
+					message = localizedMessage,
+					messageKey = messageKey,
+					minIntimacyLevel = self:ParseOptionalNumber(dataSet, rowIndex, "minIntimacyLevel"),
+					maxIntimacyLevel = self:ParseOptionalNumber(dataSet, rowIndex, "maxIntimacyLevel")
+				}
+		
+				if self.tSpeechByActorId[actorId] == nil then
+					self.tSpeechByActorId[actorId] = {}
+				end
+		
+				table.insert(self.tSpeechByActorId[actorId], tSpeech)
+			end
+		end
+		
+		self.isCached = true
+	end
+
+	method any GetSpeeches(string actorId)
+		-- 액터 아이디에 대응되는 모든 발화 목록을 반환합니다.
+		self:CacheAll()
+		
+		return self.tSpeechByActorId[actorId] or {}
+	end
+
+	method any GetSpeechesByType(string actorId, string speechType)
+		-- 액터 아이디와 발화 타입에 대응되는 발화 목록을 반환합니다.
+		self:CacheAll()
+		
+		local tResult = {}
+		local tSpeeches = self:GetSpeeches(actorId)
+		
+		for _, tSpeech in ipairs(tSpeeches) do
+			if speechType == "" or tSpeech.speechType == speechType then
+				table.insert(tResult, tSpeech)
+			end
+		end
+		
+		return tResult
+	end
+
+	method any GetAvailableSpeeches(string actorId, string speechType, integer intimacyLevel)
+		-- 액터, 발화 타입, 친밀도 조건에 맞는 스피치 후보를 반환합니다.
+		self:CacheAll()
+		
+		local tResult = {}
+		local tSpeeches = self:GetSpeeches(actorId)
+		
+		for _, tSpeech in ipairs(tSpeeches) do
+			if (speechType == "" or tSpeech.speechType == speechType) and self:IsIntimacyMatched(tSpeech, intimacyLevel) == true then
+				table.insert(tResult, tSpeech)
+			end
+		end
+		
+		return tResult
+	end
+
+	method any GetRandomSpeech(string actorId, string speechType, integer intimacyLevel)
+		-- 조건에 맞는 스피치 후보 중 하나를 균등 확률로 선택합니다.
+		local tSpeeches = self:GetAvailableSpeeches(actorId, speechType, intimacyLevel)
+		
+		if #tSpeeches <= 0 then
+			return nil
+		end
+		
+		return tSpeeches[_UtilLogic:RandomIntegerRange(1, #tSpeeches)]
+	end
+
+	method boolean IsIntimacyMatched(any tSpeech, integer intimacyLevel)
+		-- 스피치의 친밀도 구간이 현재 친밀도와 맞는지 확인합니다.
+		if tSpeech.minIntimacyLevel ~= nil and intimacyLevel < tSpeech.minIntimacyLevel then
+			return false
+		end
+		
+		if tSpeech.maxIntimacyLevel ~= nil and intimacyLevel > tSpeech.maxIntimacyLevel then
+			return false
+		end
+		
+		return true
+	end
+
+	method any ParseOptionalNumber(any dataSet, integer rowIndex, string columnName)
+		-- 빈 셀은 nil로 두고 값이 있는 셀만 숫자로 변환합니다.
+		return _DataTableUtil:SafeGetOptionalNumber(dataSet, rowIndex, columnName)
+	end
+
+end

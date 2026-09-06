@@ -1,0 +1,47 @@
+@Struct
+script MiniGameDrawResultData
+
+	property integer drawNumber = 0
+	property integer row = 0
+	property integer column = 0
+	property string blockId = ""
+	property number multiplier = 0
+	property boolean isWin = false
+	property integer payout = 0
+	property integer netChange = 0
+	property integer balance = 0
+
+	method any ToPlainTable()
+		-- RPC 전송용 단순 테이블 변환
+		return {
+			drawNumber = self.drawNumber,
+			row = self.row,
+			column = self.column,
+			blockId = self.blockId,
+			multiplier = self.multiplier,
+			isWin = self.isWin,
+			payout = self.payout,
+			netChange = self.netChange,
+			balance = self.balance
+		}
+	end
+
+	method any FromPlainTable(any source)
+		-- RPC 수신 테이블 검증 및 구조체 복원
+		if source == nil or type(source) ~= "table" then
+			return self
+		end
+
+		self.drawNumber = math.floor(tonumber(source.drawNumber) or 0)
+		self.row = math.floor(tonumber(source.row) or 0)
+		self.column = math.floor(tonumber(source.column) or 0)
+		self.blockId = tostring(source.blockId or "")
+		self.multiplier = tonumber(source.multiplier) or 0
+		self.isWin = source.isWin == true
+		self.payout = math.floor(tonumber(source.payout) or 0)
+		self.netChange = math.floor(tonumber(source.netChange) or 0)
+		self.balance = math.floor(tonumber(source.balance) or 0)
+		return self
+	end
+
+end

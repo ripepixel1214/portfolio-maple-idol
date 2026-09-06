@@ -1,0 +1,175 @@
+@Component
+@ExecSpace("ClientOnly")
+script OutdoorMapPortalComponent extends Component
+
+	property Entity indicator = nil
+
+	property boolean isPlayerInRange = false
+
+	property any interactionHandler = nil
+
+	property any touchHandler = nil
+
+	property any enterHandler = nil
+
+	property any leaveHandler = nil
+
+	property Vector3 indicatorBasePosition = Vector3(0, 0, 0)
+
+	property boolean isIndicatorBasePositionReady = false
+
+	property boolean isIndicatorFloating = false
+
+	property number indicatorFloatElapsed = 0
+
+	property number indicatorFloatPeriod = 1.5
+
+	property number indicatorFloatHeight = 0.025
+
+	method void OnBeginPlay()
+		-- 포털 상호작용과 안내 아이콘 연결
+		self.indicator = _EntityService:GetEntityByPath(self.Entity.Path .. "/InteractIndicator")
+		self:CacheIndicatorBasePosition()
+		self:SetIndicatorVisible(false)
+		self.interactionHandler = self.Entity:ConnectEvent(InteractionEvent, self.OnInteraction)
+		self.touchHandler = self.Entity:ConnectEvent(TouchEvent, self.OnTouch)
+		self.enterHandler = self.Entity:ConnectEvent(InteractionEnterEvent, self.OnInteractionEnter)
+		self.leaveHandler = self.Entity:ConnectEvent(InteractionLeaveEvent, self.OnInteractionLeave)
+	end
+
+	method void OnEndPlay()
+		-- 포털 이벤트 연결 해제
+		self:StopIndicatorFloat()
+		if self.interactionHandler ~= nil then
+			self.Entity:DisconnectEvent(InteractionEvent, self.interactionHandler)
+		end
+		if self.touchHandler ~= nil then
+			self.Entity:DisconnectEvent(TouchEvent, self.touchHandler)
+		end
+		if self.enterHandler ~= nil then
+			self.Entity:DisconnectEvent(InteractionEnterEvent, self.enterHandler)
+		end
+		if self.leaveHandler ~= nil then
+			self.Entity:DisconnectEvent(InteractionLeaveEvent, self.leaveHandler)
+		end
+	end
+
+	method void OnUpdate(number delta)
+		-- NPC 상호작용 표시와 동일한 상하 부유 모션 적용
+		if self.isIndicatorFloating == false then
+			return
+		end
+		if self.indicator == nil or isvalid(self.indicator) == false
+			or self.indicator.TransformComponent == nil then
+			self:StopIndicatorFloat()
+			return
+		end
+
+		self.indicatorFloatElapsed = self.indicatorFloatElapsed + math.max(delta, 0)
+		local floatPeriod = math.max(self.indicatorFloatPeriod, 0.01)
+		local phase = (self.indicatorFloatElapsed / floatPeriod) * math.pi * 2
+		self:ApplyIndicatorPositionOffset(math.sin(phase) * self.indicatorFloatHeight)
+	end
+
+	method void OnInteraction(InteractionEvent event)
+		self:OpenMapList()
+	end
+
+	method void OnTouch(TouchEvent event)
+		if self.isPlayerInRange == true then
+			self:OpenMapList()
+		end
+	end
+
+	method void OnInteractionEnter(InteractionEnterEvent event)
+		if self:IsLocalPlayer(event) == false then
+			return
+		end
+		self.isPlayerInRange = true
+		self:SetIndicatorVisible(true)
+	end
+
+	method void OnInteractionLeave(InteractionLeaveEvent event)
+		if self:IsLocalPlayer(event) == false then
+			return
+		end
+		self.isPlayerInRange = false
+		self:SetIndicatorVisible(false)
+	end
+
+	method boolean IsLocalPlayer(any event)
+		return event ~= nil
+			and event.InteractionEntity ~= nil
+			and event.InteractionEntity == _UserService.LocalPlayer
+	end
+
+	method void OpenMapList()
+		-- 공통 외출 맵 선택 API 호출
+		if _OutdoorMapTransitionLogic ~= nil then
+			_OutdoorMapTransitionLogic:OpenMapSelection()
+		end
+	end
+
+	method void SetIndicatorVisible(boolean visible)
+		if self.indicator == nil or isvalid(self.indicator) == false then
+			return
+		end
+		if visible == true then
+			self.indicator:SetVisible(true)
+			self.indicator:SetEnable(true)
+			self:StartIndicatorFloat()
+			return
+		end
+
+		self:StopIndicatorFloat()
+		self.indicator:SetVisible(visible)
+		self.indicator:SetEnable(visible)
+	end
+
+	method void CacheIndicatorBasePosition()
+		-- 에디터 배치 위치를 부유 모션 기준점으로 저장
+		if self.isIndicatorBasePositionReady == true
+			or self.indicator == nil or isvalid(self.indicator) == false
+			or self.indicator.TransformComponent == nil then
+			return
+		end
+
+		local position = self.indicator.TransformComponent.Position
+		self.indicatorBasePosition = Vector3(position.x, position.y, position.z)
+		self.isIndicatorBasePositionReady = true
+	end
+
+	method void StartIndicatorFloat()
+		-- 표시 시작 시 기준 위치부터 부유 모션 시작
+		self:CacheIndicatorBasePosition()
+		if self.isIndicatorBasePositionReady == false then
+			return
+		end
+
+		self.isIndicatorFloating = true
+		self.indicatorFloatElapsed = 0
+		self:ApplyIndicatorPositionOffset(0)
+	end
+
+	method void StopIndicatorFloat()
+		-- 부유 모션 중단과 기준 위치 복원
+		self.isIndicatorFloating = false
+		self.indicatorFloatElapsed = 0
+		self:ApplyIndicatorPositionOffset(0)
+	end
+
+	method void ApplyIndicatorPositionOffset(number offsetY)
+		if self.isIndicatorBasePositionReady == false
+			or self.indicator == nil or isvalid(self.indicator) == false
+			or self.indicator.TransformComponent == nil then
+			return
+		end
+
+		local basePosition = self.indicatorBasePosition
+		self.indicator.TransformComponent.Position = Vector3(
+			basePosition.x,
+			basePosition.y + offsetY,
+			basePosition.z)
+	end
+
+end

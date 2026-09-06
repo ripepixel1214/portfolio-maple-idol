@@ -1,0 +1,53 @@
+---@description "공연 역할 배정 구조체. 센터/서브L/서브R 슬롯에 배정된 캐릭터 id를 담아 공연 진입점으로 전달한다."
+@Struct
+script PerformanceRoleAssignment
+
+	-- 센터(화면 가운데) 캐릭터 id
+	property string center = ""
+
+	-- 서브 L(화면 왼쪽) 캐릭터 id
+	property string subL = ""
+
+	-- 서브 R(화면 오른쪽) 캐릭터 id
+	property string subR = ""
+
+	method string GetByRole(string role)
+		-- 역할 키(center/sub_L/sub_R)에 해당하는 캐릭터 id를 반환
+		if role == "center" then return self.center end
+		if role == "sub_L" then return self.subL end
+		if role == "sub_R" then return self.subR end
+		return ""
+	end
+
+	method boolean IsEmpty()
+		-- 세 슬롯이 모두 비어 있는지 여부를 반환
+		return self.center == "" and self.subL == "" and self.subR == ""
+	end
+
+	method any ToPlainTable()
+		-- RPC 전송/저장용 plain table로 변환 (서버 권위 결과 매니저 등에 넘길 때 사용)
+		local tPlain = {}
+		tPlain.center = self.center
+		tPlain.subL = self.subL
+		tPlain.subR = self.subR
+		return tPlain
+	end
+
+	method any FromPlainTable(any tPlain)
+		-- plain table을 PerformanceRoleAssignment 구조로 복원 후 self 반환 (체이닝용)
+		if tPlain == nil then
+			return self
+		end
+
+		self.center = tPlain.center or ""
+		self.subL = tPlain.subL or ""
+		self.subR = tPlain.subR or ""
+		return self
+	end
+
+	method any Copy()
+		-- 현재 배정을 변경 가능한 새 구조체로 복사
+		return PerformanceRoleAssignment():FromPlainTable(self:ToPlainTable())
+	end
+
+end

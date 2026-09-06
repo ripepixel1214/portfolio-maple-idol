@@ -1,0 +1,113 @@
+-- DialogTable을 로드하고 dialogId별 대사 목록을 캐싱해 제공합니다.
+@Logic
+script DialogMaster extends Logic
+
+	-- Dictionary<string, DialogLine[]>
+	property any tDialogLinesById = {}
+
+	property boolean isCached = false
+
+	method void OnBeginPlay()
+		-- 다이얼로그 마스터 테이블을 캐싱합니다.
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- DialogTable을 dialogId 기준 대사 목록으로 다시 구성합니다.
+		if self.isCached == true then
+			return
+		end
+
+		self.tDialogLinesById = {}
+
+		local dataSet = _DataService:GetTable("DialogTable")
+		if dataSet == nil then
+			log_warning("[DialogMaster] DialogTable not found")
+			return
+		end
+
+		local rowCount = dataSet:GetRowCount()
+		local hasFailure = false
+		for rowIndex = 1, rowCount do
+			-- 한 행의 네이티브 데이터셋 읽기 에러(간헐적 MODUserDataSet 등)가 전체 캐싱을 중단시키지 않도록 행 단위로 격리한다.
+			local ok, err = pcall(function()
+				self:CacheRow(dataSet, rowIndex)
+			end)
+			if ok == false then
+				hasFailure = true
+				log_warning("[DialogMaster] row cache failed rowIndex=" .. tostring(rowIndex) .. " err=" .. tostring(err))
+			end
+		end
+
+		for _, tDialogLines in pairs(self.tDialogLinesById) do
+			table.sort(tDialogLines, function(leftLine, rightLine)
+				return leftLine.index < rightLine.index
+			end)
+		end
+
+		-- 일부 행이 실패했다면 캐시를 확정하지 않는다. 다음 GetDialogLines 호출 때 다시 로드를 시도해 간헐적 실패를 회복한다.
+		if hasFailure == false then
+			self.isCached = true
+		end
+	end
+
+	method void CacheRow(any dataSet, integer rowIndex)
+		-- 한 행을 읽어 dialogId별 대사 목록에 추가합니다.
+		local dialogId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogId", "")
+		if dialogId == "" then
+			return
+		end
+
+		local lineId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "lineId", "")
+		local lineIndex = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "index", rowIndex)
+		local messageKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "messageKey", "")
+		local message = ""
+		local speakerActorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speakerActorId", "")
+		local speakerNameOverrideKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speakerNameOverrideKey", "")
+		local speakerNameOverride = ""
+		if _LocalizationLogic ~= nil then
+			message = _LocalizationLogic:GetText(messageKey, "")
+			if speakerNameOverrideKey ~= "" then
+				speakerNameOverride = _LocalizationLogic:GetText(speakerNameOverrideKey, "")
+			end
+		end
+		local tokens = _DialogParser:Parse(message)
+		local leftActorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "leftActorId", "")
+		local leftPortraitOverride = _DataTableUtil:SafeGetString(dataSet, rowIndex, "leftPortraitOverride", "")
+		local middleActorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "middleActorId", "")
+		local middlePortraitOverride = _DataTableUtil:SafeGetString(dataSet, rowIndex, "middlePortraitOverride", "")
+		local rightActorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "rightActorId", "")
+		local rightPortraitOverride = _DataTableUtil:SafeGetString(dataSet, rowIndex, "rightPortraitOverride", "")
+		local eventId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "eventId", "")
+
+		if self.tDialogLinesById[dialogId] == nil then
+			self.tDialogLinesById[dialogId] = {}
+		end
+
+		local tLine = {
+			index = lineIndex,
+			lineId = lineId,
+			messageKey = messageKey,
+			speakerActorId = speakerActorId,
+			speakerNameOverride = speakerNameOverride,
+			speakerNameOverrideKey = speakerNameOverrideKey,
+			tokens = tokens,
+			leftActorId = leftActorId,
+			leftPortraitOverride = leftPortraitOverride,
+			middleActorId = middleActorId,
+			middlePortraitOverride = middlePortraitOverride,
+			rightActorId = rightActorId,
+			rightPortraitOverride = rightPortraitOverride,
+			eventId = eventId
+		}
+
+		table.insert(self.tDialogLinesById[dialogId], tLine)
+	end
+
+	method any GetDialogLines(string dialogId)
+		-- 다이얼로그 아이디에 대응되는 대사 목록을 반환합니다.
+		self:CacheAll()
+
+		return self.tDialogLinesById[dialogId] or {}
+	end
+end

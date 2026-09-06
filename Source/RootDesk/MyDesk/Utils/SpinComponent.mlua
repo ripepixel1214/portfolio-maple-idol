@@ -1,0 +1,42 @@
+@Component
+@ExecSpace("ClientOnly")
+script SpinComponent extends Component
+
+	@Description("초당 회전 각도(도). 음수면 시계방향(오른쪽으로 구르는 방향)으로 회전합니다.")
+	property number RotateSpeed = -360
+
+	@HideFromInspector
+	property number angle = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 시작 시 회전 각도를 초기화한다.
+		self.angle = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 위치는 그대로 두고 스프라이트만 Z축으로 회전시켜 굴러가는 것처럼 보이게 한다.
+		if self.Entity == nil or self.Entity.UITransformComponent == nil then
+			return
+		end
+
+		self.angle = self.angle + self.RotateSpeed * delta
+		if self.angle > 360 then
+			self.angle = self.angle - 360
+		elseif self.angle < -360 then
+			self.angle = self.angle + 360
+		end
+
+		self.Entity.UITransformComponent.UIRotation = Vector3(0, 0, self.angle)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 종료 시 회전을 원래대로(0도) 되돌린다.
+		if self.Entity ~= nil and self.Entity.UITransformComponent ~= nil then
+			self.Entity.UITransformComponent.UIRotation = Vector3(0, 0, 0)
+		end
+	end
+
+end

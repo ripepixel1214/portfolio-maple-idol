@@ -1,0 +1,134 @@
+---@description "플레이어가 엔티티(렌더 순서상 앞에 있는 엔티티)에 가려질 때 해당 엔티티의 스프라이트를 반투명하게 페이드하는 컴포넌트"
+@Component
+script EntityFadeComponent extends Component
+
+	-- 가려질 때 적용할 목표 알파 (0=완전 투명, 1=불투명)
+	property number FadeAlpha = 0.5
+
+	-- 알파 보간 속도(초당). 클수록 빠르게 페이드된다
+	property number FadeSpeed = 10.0
+
+	-- 여러 스프라이트 파츠를 직접 자식으로 묶은 복합 엔티티인지 여부.
+	-- true면 자신이 아닌 직접 자식들의 SpriteRendererComponent를 대상으로 삼는다.
+	property boolean IsCompositeEntity = false
+
+	-- 페이드 대상 SpriteRendererComponent 목록(OnBeginPlay에서 1회 캐싱)
+	@HideFromInspector
+	property any _renderers = nil
+
+	-- 현재 알파(보간 상태). 부드러운 전환 및 중복 적용 방지용
+	@HideFromInspector
+	property number _alpha = 1.0
+
+	-- 로컬 플레이어가 트리거 영역과 겹쳐 있는지 여부
+	@HideFromInspector
+	property boolean _overlapping = false
+
+	-- TriggerEnterEvent 구독 핸들(해제용)
+	@HideFromInspector
+	property any _enterHandler = nil
+
+	-- TriggerLeaveEvent 구독 핸들(해제용)
+	@HideFromInspector
+	property any _leaveHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 페이드 대상 렌더러를 1회 수집해 캐싱하고, 트리거 진입/이탈 이벤트를 구독한다.
+		self._renderers = self:CollectRenderers()
+		self._enterHandler = self.Entity:ConnectEvent(TriggerEnterEvent, self.OnEnterArea)
+		self._leaveHandler = self.Entity:ConnectEvent(TriggerLeaveEvent, self.OnLeaveArea)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 구독한 트리거 이벤트를 해제한다.
+		if self._enterHandler then self.Entity:DisconnectEvent(TriggerEnterEvent, self._enterHandler) end
+		if self._leaveHandler then self.Entity:DisconnectEvent(TriggerLeaveEvent, self._leaveHandler) end
+	end
+
+	method void OnEnterArea(TriggerEnterEvent event)
+		-- 겹친 대상이 이 클라의 로컬 플레이어일 때만 겹침 상태로 표시한다.
+		if event.TriggerBodyEntity == _UserService.LocalPlayer then
+			self._overlapping = true
+		end
+	end
+
+	method void OnLeaveArea(TriggerLeaveEvent event)
+		-- 이탈한 대상이 이 클라의 로컬 플레이어일 때만 겹침 상태를 해제한다.
+		if event.TriggerBodyEntity == _UserService.LocalPlayer then
+			self._overlapping = false
+		end
+	end
+
+	method table CollectRenderers()
+		-- 복합 엔티티면 직접 자식들의 스프라이트를, 아니면 자신의 스프라이트를 대상 목록으로 수집.
+		local list = {}
+		if self.IsCompositeEntity then
+			for _, child in ipairs(self.Entity.Children:ToTable()) do
+				local r = child.SpriteRendererComponent
+				if isvalid(r) then
+					table.insert(list, r)
+				end
+			end
+		else
+			local r = self.Entity.SpriteRendererComponent
+			if isvalid(r) then
+				table.insert(list, r)
+			end
+		end
+		return list
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 겹친 상태에서 플레이어가 오브젝트에 실제로 가려질 때만 페이드, 아니면 불투명으로 알파를 보간한다.
+		local renderers = self._renderers
+		if renderers == nil or #renderers == 0 then return end
+
+		-- 기본은 불투명. 겹쳐 있고 + 파츠 중 하나라도 플레이어 앞일 때만 페이드 목표로 잡는다.
+		local target = 1.0
+		if self._overlapping and self:IsPlayerOccluded(renderers) then
+			target = self.FadeAlpha
+		end
+
+		-- 이미 목표 알파에 도달했으면 더 계산하지 않는다.
+		if self._alpha == target then return end
+
+		-- 프레임 독립적으로 현재 알파를 목표를 향해 보간한다.
+		local t = math.min(delta * self.FadeSpeed, 1.0)
+		self._alpha = self._alpha + (target - self._alpha) * t
+
+		-- 목표에 충분히 근접하면 스냅해 미세 떨림을 막는다.
+		if math.abs(target - self._alpha) < 0.01 then
+			self._alpha = target
+		end
+
+		-- 캐싱된 모든 대상 렌더러에 같은 알파를 일괄 적용한다.
+		for _, r in ipairs(renderers) do
+			if isvalid(r) then
+				r:SetAlpha(self._alpha)
+			end
+		end
+	end
+
+	method boolean IsPlayerOccluded(table renderers)
+		-- 파츠 중 하나라도 렌더 순서(OrderInLayer)상 플레이어 앞이면 가림으로 판정(all-or-nothing 일괄).
+		-- EntityYSort/PlayerYSort가 유지하는 값을 그대로 읽으므로 정렬 로직과 항상 일치한다.
+		local player = _UserService.LocalPlayer
+		if not isvalid(player) then return false end
+
+		local avatar = player.AvatarRendererComponent
+		if not isvalid(avatar) then return false end
+
+		for _, r in ipairs(renderers) do
+			-- 같은 SortingLayer에서 파츠 order가 더 크면 그 파츠가 앞에 렌더되어 플레이어가 가려진다.
+			if isvalid(r) and r.SortingLayer == avatar.SortingLayer and r.OrderInLayer > avatar.OrderInLayer then
+				return true
+			end
+		end
+
+		return false
+	end
+
+end

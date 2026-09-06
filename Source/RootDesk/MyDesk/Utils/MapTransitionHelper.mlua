@@ -1,0 +1,225 @@
+-- 화면 페이드와 실제 맵 도착 대기를 포함한 클라이언트 맵 전환을 담당합니다.
+@Logic
+script MapTransitionHelper extends Logic
+
+	property number transitionDuration = 1
+
+	property number settleDelay = 0.75
+
+	property number prevCameraTransitionBlendTime = 2
+
+	property boolean isCameraTransitionBlendOverride = false
+
+	property boolean isWaitingMapTransition = false
+
+	property boolean isFadeInStarted = false
+
+	property string pendingMapName = ""
+
+	property number pendingElapsed = 0
+
+	property number transitionTimeout = 5
+
+	property number worldViewSizeToleranceRatio = 0.02
+
+	property boolean hasWorldViewReference = false
+
+	property number worldViewWidthAtZoom100 = 0
+
+	property number worldViewHeightAtZoom100 = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 서버 RPC 맵 이동이 실제로 완료되어 목표 맵에 도착했는지 기다립니다.
+		if self.isWaitingMapTransition == false then
+			return
+		end
+
+		self.pendingElapsed = self.pendingElapsed + delta
+
+		local player = _UserService.LocalPlayer
+		local currentMap = player ~= nil and player.CurrentMap or nil
+		local isArrived = isvalid(currentMap) and currentMap.Name == self.pendingMapName
+		local isTimedOut = self.pendingElapsed >= self.transitionTimeout
+		if isArrived == false and isTimedOut == false then
+			return
+		end
+
+		if isArrived == true and isTimedOut == false and self:IsTargetMapCameraReady(currentMap) == false then
+			return
+		end
+
+		if self.isFadeInStarted then
+			return
+		end
+
+		self.isFadeInStarted = true
+		if isTimedOut == true then
+			log_warning("[MapTransition] readiness timed out map=" .. tostring(self.pendingMapName))
+		end
+
+		self:StartFadeIn()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsTargetMapCameraReady(Entity currentMap)
+		-- 목표 카메라 전환과 해당 줌 기준의 월드 가시 범위 반영이 모두 끝났는지 확인합니다.
+		if isvalid(currentMap) == false then
+			return false
+		end
+
+		local cameraControl = currentMap:GetComponent("script.CameraControlComponent")
+		if isvalid(cameraControl) == false or cameraControl.targetCamera == nil then
+			return true
+		end
+
+		local targetCamera = cameraControl.targetCamera
+		local currentCamera = _CameraService:GetCurrentCameraComponent()
+		if currentCamera ~= targetCamera then
+			return false
+		end
+
+		return self:IsCameraProjectionReady(targetCamera)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CaptureWorldViewReference()
+		-- zoom이 100일때를 기준으로 목표 zoom을 통해 화면의 월드 좌표 영역이 올바르게 세팅되었는지 검사합니다.
+		if _CameraBoundsUtil == nil then
+			self.hasWorldViewReference = false
+			return false
+		end
+
+		local bounds = _CameraBoundsUtil:GetCurrentWorldPosBounds()
+		local currentZoom = _CameraService.currentZoomRatio
+		if bounds == nil or currentZoom == nil or currentZoom <= 0 then
+			self.hasWorldViewReference = false
+			return false
+		end
+
+		local worldViewSize = _CameraBoundsUtil:GetBoundsSize(bounds)
+		self.worldViewWidthAtZoom100 = worldViewSize.x * currentZoom / 100
+		self.worldViewHeightAtZoom100 = worldViewSize.y * currentZoom / 100
+		self.hasWorldViewReference = self.worldViewWidthAtZoom100 > 0 and self.worldViewHeightAtZoom100 > 0
+		return self.hasWorldViewReference
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCameraProjectionReady(CameraComponent targetCamera)
+		-- 현재 화면 좌표 변환 크기가 이 디바이스와 목표 줌에서 예상되는 월드 크기인지 확인합니다.
+		if targetCamera == nil or self.hasWorldViewReference == false or _CameraBoundsUtil == nil then
+			return false
+		end
+
+		local targetZoom = targetCamera.ZoomRatio
+		if targetZoom == nil or targetZoom <= 0 then
+			return false
+		end
+
+		local bounds = _CameraBoundsUtil:GetCurrentWorldPosBounds()
+		if bounds == nil then
+			return false
+		end
+
+		local expectedWorldViewSize = Vector2(
+			self.worldViewWidthAtZoom100 * 100 / targetZoom,
+			self.worldViewHeightAtZoom100 * 100 / targetZoom
+		)
+		return _CameraBoundsUtil:IsBoundsSizeWithinRatio(bounds, expectedWorldViewSize, self.worldViewSizeToleranceRatio)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 진행 중인 맵 전환 상태와 예약된 타이머를 정리합니다.
+		self:Complete()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestMoveToMap(string targetMapName, any mapMoveAction)
+		-- 페이드아웃 후 서버 맵 이동 요청을 보내고, 실제 목표 맵 도착까지 페이드인을 지연합니다.
+		if mapMoveAction == nil then
+			return
+		end
+
+		self.pendingMapName = targetMapName or ""
+		self.pendingElapsed = 0
+		self.isWaitingMapTransition = true
+		self.isFadeInStarted = false
+		if self:CaptureWorldViewReference() == false then
+			log_warning("[MapTransition] failed to capture world view reference map=" .. tostring(targetMapName))
+		end
+		self:BeginImmediateCameraMode()
+
+		-- 이미 덮여있다면 곧바로 mapMoveAction 실행
+		if _ScreenEffectUILogic ~= nil then
+			if _ScreenEffectUILogic.currentAlpha >= 0.99 then
+				mapMoveAction()
+				return
+			end
+
+			_ScreenEffectUILogic:FadeOut(self.transitionDuration, function()
+				mapMoveAction()
+			end)
+			return
+		end
+
+		mapMoveAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartFadeIn()
+		-- 목표 맵 도착 후 한 박자 정착 시간을 둔 뒤 화면을 다시 보여줍니다.
+		if _ScreenEffectUILogic ~= nil then
+			_ScreenEffectUILogic:FadeIn(self.transitionDuration, function()
+				self:Complete()
+			end)
+			return
+		end
+
+		self:Complete()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Complete()
+		-- 맵 전환 대기를 끝내고 임시 카메라 컷 모드를 원래 상태로 복구합니다.
+		self.isWaitingMapTransition = false
+		self.isFadeInStarted = false
+		self.pendingMapName = ""
+		self.pendingElapsed = 0
+		self:EndImmediateCameraMode()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CancelPendingTransition()
+		-- 서버가 이동 요청을 거절한 경우 현재 화면을 복구하고 전환 대기 종료
+		if self.isWaitingMapTransition == false then
+			return
+		end
+
+		self.isFadeInStarted = true
+		self:StartFadeIn()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginImmediateCameraMode()
+		-- 실제 맵 이동 RPC가 완료될 때까지 카메라 전환 블렌드를 0으로 유지합니다.
+		if self.isCameraTransitionBlendOverride == false then
+			self.prevCameraTransitionBlendTime = _CameraService.TransitionBlendTime
+			self.isCameraTransitionBlendOverride = true
+		end
+
+		_CameraService.TransitionBlendTime = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndImmediateCameraMode()
+		-- 임시로 0으로 둔 카메라 전환 블렌드를 원래 값으로 되돌립니다.
+		if self.isCameraTransitionBlendOverride == false then
+			return
+		end
+
+		_CameraService.TransitionBlendTime = self.prevCameraTransitionBlendTime
+		self.isCameraTransitionBlendOverride = false
+	end
+
+end

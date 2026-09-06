@@ -1,0 +1,35 @@
+@Component
+script AudienceJumpComponent extends Component
+
+	-- 점프 최대 높이(월드유닛)
+	property number jumpHeight = 0.25
+	-- 한 번 점프(바닥->정점->착지) 주기(초)
+	property number period = 0.6
+	-- X 좌표를 위상차로 바꾸는 계수 (관객이 좌->우로 파도치듯 어긋나게 점프)
+	property number phaseByX = 0.6
+
+	-- 스폰 시점 기준 Y / 누적 시간 / 이 인스턴스의 위상차
+	property number baseY = 0
+	property number elapsed = 0
+	property number phase = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 스폰 위치의 Y를 점프 기준으로 삼고, X 위치로 위상차를 만들어 관객마다 타이밍을 어긋나게 한다.
+		local pos = self.Entity.TransformComponent.Position
+		self.baseY = pos.y
+		self.phase = pos.x * self.phaseByX
+		self.elapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- abs(sin)으로 바닥(baseY)에서 위로만 튀어오르는 점프 모션
+		self.elapsed = self.elapsed + delta
+		local w = (2 * math.pi) / self.period
+		local offset = math.abs(math.sin(self.elapsed * w + self.phase)) * self.jumpHeight
+		local pos = self.Entity.TransformComponent.Position
+		self.Entity.TransformComponent.Position = Vector3(pos.x, self.baseY + offset, pos.z)
+	end
+
+end

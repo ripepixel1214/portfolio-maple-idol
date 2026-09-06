@@ -1,0 +1,510 @@
+@Logic
+@ExecSpace("ClientOnly")
+script DialogTimedPlayer extends Logic
+
+	property TextGUIRendererComponent panelMessageText = "1d7a6a52-d974-4e1a-8a9c-224890004b81"
+
+	property number defaultDelay = 0.03
+
+	property number speedMultiplier = 1
+
+	property integer typingTimerId = 0
+
+
+	property boolean isTyping = false
+
+	property number currentDelay = 0.03
+
+	property number typingElapsed = 0
+
+	property number waitRemaining = 0
+
+	property number lastTypingTime = 0
+
+	property any tokens = {}
+
+	property any preparedItems = {}
+
+	property integer revealItemIdx = 1
+
+	property any outputParts = {}
+
+	property any activeRichTags = {}
+
+	@ExecSpace("ClientOnly")
+	method void PlayTokens(any tokens)
+		-- 파싱된 다이얼로그 토큰을 시간차 리치 텍스트 출력으로 재생합니다.
+		self:StopTypingTimer()
+		self:ResetPlaybackState()
+
+		self.tokens = tokens or {}
+		self:PrepareItems(self.tokens)
+		self:SetRendererText("")
+		self.isTyping = true
+		self:StartTypingTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildFullTextFromTokens(any tokens)
+		-- 파서가 넘긴 리치 텍스트를 시간순 출력 없이 한 번에 표시합니다.
+		if tokens == nil then
+			return ""
+		end
+
+		local parts = {}
+
+		for _, token in ipairs(tokens) do
+			if token.kind == "text" then
+				table.insert(parts, token.text or "")
+			end
+		end
+
+		return table.concat(parts, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteImmediately()
+		-- 현재 줄의 남은 내용을 즉시 전부 표시합니다.
+		if self.isTyping == false then
+			return
+		end
+
+		self:StopTypingTimer()
+
+		while self.revealItemIdx <= #self.preparedItems do
+			local item = self.preparedItems[self.revealItemIdx]
+			self.revealItemIdx = self.revealItemIdx + 1
+			self:ApplyPreparedItem(item, true)
+		end
+
+		self:UpdateRendererText()
+		self:FinishTyping()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsTyping()
+		-- 현재 줄이 아직 시간차 출력 중인지 반환합니다.
+		return self.isTyping
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSpeedMultiplier(number multiplier)
+		-- 텍스트 출력 배속을 설정합니다.
+		if multiplier ~= 2 and multiplier ~= 4 then
+			multiplier = 1
+		end
+
+		self.speedMultiplier = multiplier
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetDefaultDelay(number delay)
+		-- 텍스트 한 글자 출력의 기본 딜레이를 설정합니다.
+		if delay == nil or delay <= 0 then
+			delay = 0.03
+		end
+
+		if delay < 0.001 then
+			delay = 0.001
+		end
+
+		self.defaultDelay = delay
+		if self.isTyping == false then
+			self.currentDelay = self.defaultDelay
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSpeedMultiplier()
+		-- 현재 텍스트 출력 배속을 반환합니다.
+		if self.speedMultiplier == nil or self.speedMultiplier <= 0 then
+			return 1
+		end
+
+		return self.speedMultiplier
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Clear()
+		-- 현재 다이얼로그 텍스트를 비우고 재생을 중단합니다.
+		self:StopTypingTimer()
+		self:ResetPlaybackState()
+		self.isTyping = false
+		self:SetRendererText("")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetPlaybackState()
+		-- 새 줄 재생을 위해 임시 출력 상태를 초기화합니다.
+		self.currentDelay = self.defaultDelay
+		self.typingElapsed = 0
+		self.waitRemaining = 0
+		self.tokens = {}
+		self.preparedItems = {}
+		self.revealItemIdx = 1
+		self.outputParts = {}
+		self.activeRichTags = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartTypingTimer()
+		-- 시간차 출력 타이머를 시작합니다.
+		self.lastTypingTime = _UtilLogic.ElapsedSeconds
+		self.typingTimerId = _TimerService:SetTimerRepeat(function() self:OnTypingTick() end, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopTypingTimer()
+		-- 실행 중인 시간차 출력 타이머를 중지합니다.
+		if self.typingTimerId > 0 then
+			_TimerService:ClearTimer(self.typingTimerId)
+			self.typingTimerId = 0
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTypingTick()
+		-- 출력 시간을 누적하고 다음 표시 항목을 출력합니다.
+		if self.isTyping == false then
+			return
+		end
+
+		local now = _UtilLogic.ElapsedSeconds
+		local delta = (now - self.lastTypingTime) * self:GetSpeedMultiplier()
+		self.lastTypingTime = now
+
+		if self.waitRemaining > 0 then
+			self.waitRemaining = self.waitRemaining - delta
+			return
+		end
+
+		self.typingElapsed = self.typingElapsed + delta
+
+		while self.typingElapsed >= self.currentDelay and self.isTyping == true do
+			self.typingElapsed = self.typingElapsed - self.currentDelay
+			self:RevealNextItem()
+
+			if self.waitRemaining > 0 or self.isTyping == false then
+				return
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RevealNextItem()
+		-- 표시되지 않는 리치 텍스트 태그는 건너뛰고 다음 표시 항목을 출력합니다.
+		while self.revealItemIdx <= #self.preparedItems do
+			local item = self.preparedItems[self.revealItemIdx]
+			self.revealItemIdx = self.revealItemIdx + 1
+
+			local revealed = self:ApplyPreparedItem(item, false)
+			if revealed == true then
+				self:UpdateRendererText()
+				return
+			end
+
+			if self.waitRemaining > 0 then
+				return
+			end
+		end
+
+		self:FinishTyping()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ApplyPreparedItem(any item, boolean forceReveal)
+		-- 준비된 항목 하나를 적용하고, 실제 표시 단위가 출력되었는지 반환합니다.
+		if item == nil then
+			return false
+		end
+
+		if item.kind == "char" then
+			table.insert(self.outputParts, item.text)
+			return true
+		end
+
+		if item.kind == "richOpen" then
+			table.insert(self.outputParts, item.text)
+			table.insert(self.activeRichTags, {
+				name = item.name,
+				closeText = item.closeText
+			})
+			return false
+		end
+
+		if item.kind == "richClose" then
+			self:RemoveActiveRichTag(item.name)
+			table.insert(self.outputParts, item.text)
+			return false
+		end
+
+		if item.kind == "richSelf" then
+			table.insert(self.outputParts, item.text)
+			return true
+		end
+
+		if item.kind == "delay" then
+			self.currentDelay = self:NormalizeDelay(item.value)
+			return false
+		end
+
+		if item.kind == "resetDelay" then
+			self.currentDelay = self.defaultDelay
+			return false
+		end
+
+		if item.kind == "wait" then
+			if forceReveal == false then
+				self.waitRemaining = math.max(item.value or 0, 0)
+			end
+			return false
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishTyping()
+		-- 현재 줄의 출력을 완료하고 다이얼로그 UI에 알립니다.
+		if self.isTyping == false then
+			return
+		end
+
+		self:StopTypingTimer()
+		self.isTyping = false
+		self.typingElapsed = 0
+		self.waitRemaining = 0
+		self:UpdateRendererText()
+
+		if _DialogPlayer ~= nil then
+			_DialogPlayer:OnPlaybackFinished()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method number NormalizeDelay(number value)
+		-- 표시 단위 하나에 사용할 안전한 지연 시간을 반환합니다.
+		if value == nil or value <= 0 then
+			return self.defaultDelay
+		end
+
+		return value
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareItems(any tokens)
+		-- 파싱된 토큰을 시간차 출력 항목으로 변환합니다.
+		self.preparedItems = {}
+		self.revealItemIdx = 1
+
+		if tokens == nil then
+			return
+		end
+
+		for _, token in ipairs(tokens) do
+			if token.kind == "text" then
+				self:AddRichTextItems(token.text)
+			elseif token.kind == "delay" then
+				table.insert(self.preparedItems, {
+					kind = "delay",
+					value = token.value
+				})
+			elseif token.kind == "resetDelay" then
+				table.insert(self.preparedItems, {
+					kind = "resetDelay"
+				})
+			elseif token.kind == "wait" then
+				table.insert(self.preparedItems, {
+					kind = "wait",
+					value = token.value
+				})
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddRichTextItems(string text)
+		-- 리치 텍스트 문자열을 표시 문자와 보존할 태그로 분리합니다.
+		if text == nil or text == "" then
+			return
+		end
+
+		local index = 1
+		local length = string.len(text)
+
+		while index <= length do
+			local openIdx, _ = string.find(text, "<", index, true)
+
+			if openIdx == nil then
+				self:AddCharacterItems(string.sub(text, index))
+				break
+			end
+
+			if openIdx > index then
+				self:AddCharacterItems(string.sub(text, index, openIdx - 1))
+			end
+
+			local closeIdx, _ = string.find(text, ">", openIdx + 1, true)
+
+			if closeIdx == nil then
+				self:AddCharacterItems(string.sub(text, openIdx))
+				break
+			end
+
+			self:AddRichTagItem(string.sub(text, openIdx, closeIdx))
+			index = closeIdx + 1
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddCharacterItems(string text)
+		-- 유니코드 코드포인트 하나를 표시 단위 하나로 추가합니다.
+		if text == nil or text == "" then
+			return
+		end
+
+		for _, code in utf8.codes(text) do
+			table.insert(self.preparedItems, {
+				kind = "char",
+				text = utf8.char(code)
+			})
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddRichTagItem(string tagText)
+		-- 리치 텍스트 태그를 보이지 않는 스타일 태그 또는 표시되는 스프라이트 단위로 추가합니다.
+		local name = self:ExtractRichTagName(tagText)
+
+		if name == "sprite" then
+			table.insert(self.preparedItems, {
+				kind = "richSelf",
+				text = tagText
+			})
+			return
+		end
+
+		if self:IsClosingRichTag(tagText) == true then
+			table.insert(self.preparedItems, {
+				kind = "richClose",
+				name = name,
+				text = tagText
+			})
+			return
+		end
+
+		table.insert(self.preparedItems, {
+			kind = "richOpen",
+			name = name,
+			text = tagText,
+			closeText = self:BuildCloseRichTag(name)
+		})
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsClosingRichTag(string tagText)
+		-- 태그가 리치 텍스트 닫는 태그인지 반환합니다.
+		if tagText == nil or string.len(tagText) < 3 then
+			return false
+		end
+
+		return string.sub(tagText, 2, 2) == "/"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ExtractRichTagName(string tagText)
+		-- 리치 텍스트 태그 이름을 소문자로 추출합니다.
+		if tagText == nil or string.len(tagText) < 3 then
+			return ""
+		end
+
+		local body = string.sub(tagText, 2, string.len(tagText) - 1)
+
+		if string.sub(body, 1, 1) == "/" then
+			body = string.sub(body, 2)
+		end
+
+		body = self:Trim(body)
+		local nameEnd = string.len(body)
+
+		for index = 1, string.len(body) do
+			local ch = string.sub(body, index, index)
+
+			if ch == " " or ch == "\t" or ch == "=" or ch == "/" then
+				nameEnd = index - 1
+				break
+			end
+		end
+
+		if nameEnd <= 0 then
+			return ""
+		end
+
+		return string.lower(string.sub(body, 1, nameEnd))
+	end
+
+	@ExecSpace("ClientOnly")
+	method string Trim(string text)
+		-- 문자열 양끝의 공백을 제거합니다.
+		if text == nil then
+			return ""
+		end
+
+		return string.match(text, "^%s*(.-)%s*$") or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildCloseRichTag(string name)
+		-- 리치 텍스트 태그 이름에 맞는 닫는 태그를 만듭니다.
+		if name == nil or name == "" then
+			return ""
+		end
+
+		return "</" .. name .. ">"
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RemoveActiveRichTag(string name)
+		-- 현재 열린 리치 텍스트 태그 중 가장 최근의 동일 태그를 제거합니다.
+		for index = #self.activeRichTags, 1, -1 do
+			local activeTag = self.activeRichTags[index]
+
+			if activeTag.name == name then
+				table.remove(self.activeRichTags, index)
+				return
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildCurrentText()
+		-- 현재 열린 스타일 태그를 임시로 닫아 유효한 리치 텍스트 문자열을 만듭니다.
+		local text = table.concat(self.outputParts, "")
+
+		for index = #self.activeRichTags, 1, -1 do
+			local activeTag = self.activeRichTags[index]
+
+			if activeTag.closeText ~= nil and activeTag.closeText ~= "" then
+				text = text .. activeTag.closeText
+			end
+		end
+
+		return text
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateRendererText()
+		-- 현재 리치 텍스트 출력 문자열을 렌더러에 반영합니다.
+		self:SetRendererText(self:BuildCurrentText())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetRendererText(string text)
+		-- 바인딩된 렌더러에 다이얼로그 텍스트를 설정합니다.
+		if self.panelMessageText == nil then
+			return
+		end
+
+		self.panelMessageText.Text = text or ""
+	end
+end

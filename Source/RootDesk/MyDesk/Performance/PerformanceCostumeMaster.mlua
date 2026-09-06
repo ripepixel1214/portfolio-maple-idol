@@ -1,0 +1,86 @@
+---@description "공연 무대 전용 고정 코스튬을 캐릭터 id별로 제공하는 마스터. 저장 코스튬과 무관하게 공연에서만 사용한다."
+@Logic
+script PerformanceCostumeMaster extends Logic
+
+	-- 공연 고정 코스튬 캐시 { [characterId:string] = CharacterCostumeData }
+	property any tCostumeByCharacterId = {}
+
+	-- 캐시 구성 완료 여부
+	property boolean isCached = false
+
+	method void OnBeginPlay()
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- 공연 고정 코스튬을 캐릭터 id별 CharacterCostumeData로 1회 구성
+		if self.isCached == true then
+			return
+		end
+
+		self.tCostumeByCharacterId = {}
+
+		-- 시그너스
+		self:RegisterCostume("character_cygnus", {
+			body = "b103dbf5d7a741e4ba61ddb44d73966b",
+			hair = "363b7144e7a04fb68cbf19f200fe0b71",
+			face = "669cbb110dd6414aae8448610d822a49",
+			cap = "372be596f6e84cf4af87b6fb105afa20",
+			longcoat = "cec0797742eb4a38987799782c72c392",
+			shoes = "daeb0e1724f64bb1ba90c415e1328a84",
+			oneHandedWeapon = "9d1bd2e260174485bec72c7e34d8e1c3",
+			faceAccessory = "25f870aa99284a348edb185a836f8fe5"
+		})
+
+		-- 루시드
+		self:RegisterCostume("character_lucid", {
+			body = "b103dbf5d7a741e4ba61ddb44d73966b",
+			hair = "51c6e707f70b4c4f8389f6da864acd27",
+			face = "ebd7369de15740a881592ec647b7d205",
+			cap = "49f31f4123554db09d0d020cb0142da3",
+			longcoat = "56ea2fb1808548878af6f2585d56a863",
+			shoes = "daeb0e1724f64bb1ba90c415e1328a84",
+			oneHandedWeapon = "9d1bd2e260174485bec72c7e34d8e1c3",
+			faceAccessory = "25f870aa99284a348edb185a836f8fe5"
+		})
+
+		-- 리린
+		self:RegisterCostume("character_lilin", {
+			body = "b103dbf5d7a741e4ba61ddb44d73966b",
+			hair = "78fa72c0cf5145c08c17e8f0a6778d49",
+			face = "d1134922e21042b8ae92c1f87959e85f",
+			cap = "1736f355ab874cb59e459f4e72e14304",
+			longcoat = "8325814af9c14c27b51f35afcc2e94cd",
+			shoes = "0ce6a97dd09045fd9bdd5b2c08b2c352",
+			oneHandedWeapon = "9d1bd2e260174485bec72c7e34d8e1c3",
+			faceAccessory = "25f870aa99284a348edb185a836f8fe5"
+		})
+
+		self.isCached = true
+	end
+
+	method void RegisterCostume(string characterId, table tSlots)
+		-- slot plain table을 CharacterCostumeData로 변환해 캐시에 등록
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		self.tCostumeByCharacterId[characterId] = CharacterCostumeData():FromPlainTable(tSlots)
+	end
+
+	method any GetCostume(string characterId)
+		-- 캐릭터 id의 공연 고정 코스튬(CharacterCostumeData 복사본)을 반환. 없으면 nil
+		self:CacheAll()
+		if characterId == nil or characterId == "" then
+			return nil
+		end
+
+		local tCostumeData = self.tCostumeByCharacterId[characterId]
+		if tCostumeData == nil then
+			return nil
+		end
+
+		return tCostumeData:Copy()
+	end
+
+end

@@ -1,0 +1,80 @@
+@Logic
+@ExecSpace("ClientOnly")
+script DialogRichTextPlayer extends Logic
+
+	property TextGUIRendererComponent panelMessageText = "1d7a6a52-d974-4e1a-8a9c-224890004b81"
+
+	property boolean isTyping = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:InitializeRenderer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayTokens(any tokens)
+		local text = self:BuildFullTextFromTokens(tokens)
+		self:SetRendererText(text)
+		self.isTyping = true
+		self:Finish()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsTyping()
+		return self.isTyping
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Clear()
+		self.isTyping = false
+		self:SetRendererText("")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Finish()
+		if self.isTyping == false then
+			return
+		end
+
+		self.isTyping = false
+
+		if _DialogPlayer ~= nil then
+			_DialogPlayer:OnPlaybackFinished()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void InitializeRenderer()
+		if self.panelMessageText == nil then
+			return
+		end
+
+		self.panelMessageText.IsRichText = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildFullTextFromTokens(any tokens)
+		if tokens == nil then
+			return ""
+		end
+
+		local parts = {}
+
+		for _, token in ipairs(tokens) do
+			if token.kind == "text" then
+				table.insert(parts, token.text or "")
+			end
+		end
+
+		return table.concat(parts, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetRendererText(string text)
+		if self.panelMessageText == nil then
+			return
+		end
+
+		self.panelMessageText.Text = text or ""
+	end
+end

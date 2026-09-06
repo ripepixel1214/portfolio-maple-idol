@@ -1,0 +1,260 @@
+---@description "오타게 응원 오버레이의 LightStick 자식들을 스윙(안쪽으로만 이동+회전, 같은 주기)시키는 컴포넌트"
+@Component
+script LightStickSwayComponent extends Component
+
+	-- 스윙 안쪽 이동 최대(UI 좌표). 각 스틱이 화면 안쪽으로 이 만큼 이동
+	@Description("스윙 안쪽 이동 최대")
+	property number swayAmplitude = 15
+
+	-- 스윙 안쪽 회전 최대 각도(도) — 좌우 이동과 같은 주기로 적용
+	@Description("스윙 안쪽 회전 최대 각도(도)")
+	property number swayRotAmplitude = 15
+
+	-- 상시(박자) 스윙 한 주기 시간(초)
+	@Description("상시 박자 스윙 주기(초)")
+	property number swingDuration = 0.8
+
+	-- 상시(박자) 스윙 사용 여부. false면 SwayOnce() 트리거로만 스윙한다.
+	@Description("상시 박자 스윙 사용 (false면 SwayOnce 트리거로만)")
+	property boolean autoSway = true
+
+	-- 원샷(SwayOnce) 위로 팝: 기본 위치에서 이 y좌표까지 올라갔다 복귀
+	@Description("원샷 위로 팝 도달 y 좌표")
+	property number popTargetY = 200
+
+	-- 원샷 위로 팝 지속 시간(초). 상승+하강 전체 시간(빠르게)
+	@Description("원샷 위로 팝 지속 시간(초)")
+	property number popDuration = 0.25
+
+	-- 원샷 팝에서 최고점에 도달하는 지점 비율(0~1). 작을수록 위로 더 빠르게 튄다. 입력 스윙도 이 시점(최고점)에 1회 완료된다.
+	@Description("원샷 팝 상승 비율(0~1, 작을수록 빠르게 위로)")
+	property number popRiseRatio = 0.3
+
+	-- 방향 입력(커맨드 상하좌우) 팝 이동 거리(px). Up은 popTargetY(절대 y 타겟)를 쓰고, Down/Left/Right는 이 거리만큼 방향 벡터로 균일 오프셋 팝
+	@Description("방향 입력 팝 이동 거리(px)")
+	property number popDistance = 150
+
+	-- 현재 입력 팝 방향 모드("up"=기존 y타겟 위로 팝 / "offset"=popDir 벡터로 균일 오프셋). SwayOnce/SwayDirection에서 설정
+	@HideFromInspector
+	property string popDirMode = "up"
+
+	-- offset 모드 팝 방향 단위 벡터. Down=(0,-1) Left=(-1,0) Right=(1,0)
+	@HideFromInspector
+	property number popDirX = 0
+
+	@HideFromInspector
+	property number popDirY = 1
+
+	-- 수집한 LightStick 자식 목록 (최초 OnUpdate에서 1회 수집)
+	@HideFromInspector
+	property any sticks = nil
+
+	-- 스틱별 기준 위치(px) 캐시. CollectSticks에서 채운다.
+	@HideFromInspector
+	property any basePositions = nil
+
+	-- 스틱별 안쪽 방향 부호(+1=오른쪽으로가 안쪽, -1=왼쪽으로가 안쪽). CollectSticks에서 채운다.
+	@HideFromInspector
+	property any inwardSigns = nil
+
+	-- 상시 스윙 누적 시계(초). 입력 시 0으로 리셋
+	@HideFromInspector
+	property number timer = 0
+
+	-- 원샷 위로 팝 남은 시간(초). >0이면 진행
+	@HideFromInspector
+	property number popTimer = 0
+
+	-- 원샷(입력) 빠른 스윙 남은 시간(초). >0이면 진행. 총 길이 = popRiseRatio*popDuration(팝 최고점에 완료)
+	@HideFromInspector
+	property number swingTimer = 0
+
+	@ExecSpace("ClientOnly")
+	method void SwayOnce()
+		-- 방향 없는 입력(연타 등): 위로 빠른 팝 1회
+		self:TriggerSway("Up")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SwayDirection(string direction)
+		-- 방향 입력(커맨드 상하좌우): 해당 방향으로 빠른 팝 1회. 알 수 없는 방향은 위로 팝 처리
+		self:TriggerSway(direction)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TriggerSway(string direction)
+		-- 입력 시: 진행 중 스윙을 무시하고 원래 위치에서 빠른 스윙 1회 + 지정 방향으로 빠른 팝을 시작.
+		-- 빠른 스윙은 팝이 최고점에 도달하는 시각(popRiseRatio*popDuration)에 1회 완료되도록 맞춘다.
+		if self.sticks == nil then
+			self:CollectSticks()
+		end
+		self:SetPopDirection(direction)
+		self.timer = 0
+		self.popTimer = self.popDuration
+		self.swingTimer = self.popRiseRatio * self.popDuration
+
+		-- 스윙 1회마다 응원봉 효과음 재생
+		if _SoundManager ~= nil then
+			_SoundManager:PlaySfx("cdd2ca876f4d436a8bac7135e856f7e2", 1)
+		end
+	end
+
+	method void SetPopDirection(string direction)
+		-- 방향 문자열(Up/Down/Left/Right)을 팝 모드/벡터로 변환. Up(및 미지정)은 기존 y타겟 위로 팝, 나머지는 균일 오프셋 팝
+		if direction == "Down" then
+			self.popDirMode = "offset"
+			self.popDirX = 0
+			self.popDirY = -1
+		elseif direction == "Left" then
+			self.popDirMode = "offset"
+			self.popDirX = -1
+			self.popDirY = 0
+		elseif direction == "Right" then
+			self.popDirMode = "offset"
+			self.popDirX = 1
+			self.popDirY = 0
+		else
+			self.popDirMode = "up"
+			self.popDirX = 0
+			self.popDirY = 1
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 켜져 있는 동안 LightStick들의 위치/회전 갱신: (입력 시)빠른 원샷 스윙 우선, 아니면 상시 박자 스윙 + 위로 팝
+		if self.sticks == nil then
+			self:CollectSticks()
+		end
+		if #self.sticks == 0 then
+			return
+		end
+
+		self.timer = self.timer + delta
+
+		-- 위로 팝 진행 곡선(0=기본, 1=popTargetY 도달). 진행 중이 아니면 0.
+		local popCurve = self:AdvancePop(delta)
+
+		-- 스윙 세기(0~1, 안쪽으로만 밀었다 복귀). 입력 원샷이 진행 중이면 빠른 스윙으로 상시 스윙을 대체(무시).
+		local swingMag = 0
+		local oneShotTotal = self.popRiseRatio * self.popDuration
+		if self.swingTimer > 0 and oneShotTotal > 0 then
+			self.swingTimer = self.swingTimer - delta
+			if self.swingTimer < 0 then
+				self.swingTimer = 0
+			end
+			local osProgress = 1 - self.swingTimer / oneShotTotal
+			swingMag = (1 - math.cos(osProgress * 2 * math.pi)) / 2
+		elseif self.autoSway == true and self.swingDuration > 0 then
+			swingMag = (1 - math.cos((self.timer / self.swingDuration) * 2 * math.pi)) / 2
+		end
+
+		for i, stick in ipairs(self.sticks) do
+			if isvalid(stick) then
+				local transform = stick.UITransformComponent
+				if isvalid(transform) then
+					local base = self.basePositions[i]
+					local inwardSign = self.inwardSigns[i]
+
+					-- 안쪽 이동: 화면 안쪽 방향(inwardSign)으로만. 회전: 바닥 피벗 기준 안쪽으로 기울임(부호 반대)
+					local offsetX = self.swayAmplitude * swingMag * inwardSign
+					local rotAngle = self.swayRotAmplitude * swingMag * (-inwardSign)
+
+					-- 입력 팝: Up은 기존 y타겟까지, 그 외 방향(Down/Left/Right)은 base에서 popDistance만큼 방향 벡터로 균일 오프셋(빠르게 팝 후 복귀)
+					local posX = base.x + offsetX
+					local posY = base.y
+					if self.popDirMode == "offset" then
+						posX = posX + self.popDirX * self.popDistance * popCurve
+						posY = base.y + self.popDirY * self.popDistance * popCurve
+					else
+						posY = base.y + (self.popTargetY - base.y) * popCurve
+					end
+
+					transform.anchoredPosition = Vector2(posX, posY)
+					transform.UIRotation = Vector3(0, 0, rotAngle)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method number AdvancePop(number delta)
+		-- 원샷 위로 팝의 현재 진행 곡선값(0~1)을 반환. 상승은 빠르게(popRiseRatio 지점에서 최고점), 복귀는 나머지 시간동안 0으로.
+		if self.popTimer <= 0 or self.popDuration <= 0 then
+			return 0
+		end
+
+		self.popTimer = self.popTimer - delta
+		if self.popTimer < 0 then
+			self.popTimer = 0
+		end
+
+		local progress = 1 - self.popTimer / self.popDuration
+		local rise = self.popRiseRatio
+		if rise <= 0 then
+			rise = 0.01
+		end
+		if rise >= 1 then
+			rise = 0.99
+		end
+
+		if progress < rise then
+			-- 상승 구간: 0 -> 1 (앞부분에서 빠르게, 최고점)
+			return math.sin((progress / rise) * (math.pi / 2))
+		end
+
+		-- 복귀 구간: 1 -> 0
+		local t = (progress - rise) / (1 - rise)
+		return math.cos(t * (math.pi / 2))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 정리 시 다음 표시를 위해 상태 초기화 (기준 위치도 다시 수집하도록 비운다)
+		self.sticks = nil
+		self.basePositions = nil
+		self.inwardSigns = nil
+		self.timer = 0
+		self.popTimer = 0
+		self.swingTimer = 0
+	end
+
+	method void CollectSticks()
+		-- 이름에 'LightStick'이 포함된 직속 자식들을 수집하고, 각 스틱의 기준 위치(px)와 안쪽 방향 부호를 캐시한다.
+		self.sticks = {}
+		self.basePositions = {}
+		self.inwardSigns = {}
+		local children = self.Entity.Children
+		if children == nil then
+			return
+		end
+
+		for _, child in ipairs(children:ToTable()) do
+			if isvalid(child) and string.find(child.Name, "LightStick") ~= nil then
+				table.insert(self.sticks, child)
+
+				local pos = Vector2(0, 0)
+				local transform = child.UITransformComponent
+				if isvalid(transform) then
+					local cur = transform.anchoredPosition
+					pos = Vector2(cur.x, cur.y)
+					transform.UIRotation = Vector3(0, 0, 0)
+				end
+				table.insert(self.basePositions, pos)
+
+				-- 안쪽 방향 부호: 이름 끝 'L'=왼쪽 스틱(안쪽=+X), 'R'=오른쪽 스틱(안쪽=-X). 그 외는 순번 교대.
+				local inwardSign = 1
+				local side = string.upper(string.sub(child.Name, -1))
+				if side == "R" then
+					inwardSign = -1
+				elseif side == "L" then
+					inwardSign = 1
+				elseif (#self.sticks) % 2 == 0 then
+					inwardSign = -1
+				end
+				table.insert(self.inwardSigns, inwardSign)
+			end
+		end
+	end
+
+end

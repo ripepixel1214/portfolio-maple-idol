@@ -1,0 +1,148 @@
+---@description "PerformanceTable/PerformanceCueTable을 로드해 공연 헤더와 큐(공연별·시간순)를 제공하는 마스터."
+@Logic
+script PerformanceMaster extends Logic
+
+	-- 로드 완료 여부
+	property boolean IsLoaded = false
+	-- Dictionary<string, PerformanceRow>
+	property any tPerformanceById = {}
+	-- PerformanceRow[]
+	property any tPerformances = {}
+	-- Dictionary<string, PerformanceCueRow[]> (각 리스트는 time 오름차순)
+	property any tCuesByPerformanceId = {}
+
+	method void OnBeginPlay()
+		-- 공연 정적 데이터는 서버/클라 양쪽에서 조회하므로 시작 시 캐시를 준비
+		self:EnsureLoaded()
+	end
+
+	method void EnsureLoaded()
+		-- 아직 로드되지 않았으면 로드
+		if self.IsLoaded == true then
+			return
+		end
+		self:LoadTables()
+	end
+
+	method void LoadTables()
+		-- 두 테이블을 읽어 헤더/큐 캐시를 구성
+		self.tPerformanceById = {}
+		self.tPerformances = {}
+		self.tCuesByPerformanceId = {}
+		self.IsLoaded = false
+
+		self:LoadPerformanceTable()
+		self:LoadCueTable()
+
+		self.IsLoaded = true
+	end
+
+	method void LoadPerformanceTable()
+		-- PerformanceTable → PerformanceRow 캐시
+		local dataSet = _DataService:GetTable("PerformanceTable")
+		if dataSet == nil then
+			log_warning("[PerformanceMaster] PerformanceTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local id = _DataTableUtil:SafeGetString(dataSet, rowIndex, "performanceId", "")
+			if id ~= "" then
+				local tRow = self:CreatePerformanceRow(dataSet, rowIndex, id)
+				self.tPerformanceById[id] = tRow
+				table.insert(self.tPerformances, tRow)
+			end
+		end
+
+	end
+
+	method any CreatePerformanceRow(any dataSet, integer rowIndex, string id)
+		-- PerformanceTable 한 row를 PerformanceRow로 변환
+		local tRow = PerformanceRow()
+		tRow.id = id
+		tRow.name = _DataTableUtil:SafeGetString(dataSet, rowIndex, "name", "")
+		tRow.bgmRuid = _DataTableUtil:SafeGetString(dataSet, rowIndex, "bgmRuid", "")
+		tRow.bgmVolume = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "bgmVolume", 1)
+		tRow.length = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "length", 0)
+		tRow.clearScore = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "clearScore", 0)
+		tRow.vocalWeight = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "vocalWeight", 1)
+		tRow.danceWeight = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "danceWeight", 1)
+		tRow.visualWeight = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "visualWeight", 1)
+		return tRow
+	end
+
+	method void LoadCueTable()
+		-- PerformanceCueTable → 공연별 큐 리스트(시간순)
+		local dataSet = _DataService:GetTable("PerformanceCueTable")
+		if dataSet == nil then
+			log_warning("[PerformanceMaster] PerformanceCueTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local performanceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "performanceId", "")
+			if performanceId ~= "" then
+				local tCue = self:CreateCueRow(dataSet, rowIndex, performanceId)
+				local list = self.tCuesByPerformanceId[performanceId]
+				if list == nil then
+					list = {}
+					self.tCuesByPerformanceId[performanceId] = list
+				end
+				table.insert(list, tCue)
+			end
+		end
+
+		-- 공연별 큐를 실행 시점(time) 오름차순으로 정렬
+		for _, list in pairs(self.tCuesByPerformanceId) do
+			table.sort(list, function(a, b)
+				return a.time < b.time
+			end)
+		end
+
+	end
+
+	method any CreateCueRow(any dataSet, integer rowIndex, string performanceId)
+		-- PerformanceCueTable 한 row를 PerformanceCueRow로 변환 (type 문자열 → cueType enum)
+		local tCue = PerformanceCueRow()
+		tCue.performanceId = performanceId
+		tCue.time = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "time", 0)
+		tCue.duration = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "duration", 0)
+		tCue.track = _DataTableUtil:SafeGetString(dataSet, rowIndex, "track", "")
+		tCue.cueType = _EPerformanceCueType:FromKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "type", ""))
+		tCue.targetId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "targetId", "")
+		tCue.stringParam = _DataTableUtil:SafeGetString(dataSet, rowIndex, "stringParam", "")
+		tCue.num1 = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "num1", 0)
+		tCue.num2 = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "num2", 0)
+		tCue.num3 = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "num3", 0)
+		return tCue
+	end
+
+	method any GetPerformance(string performanceId)
+		-- 공연 헤더 반환 (없으면 nil)
+		self:EnsureLoaded()
+		return self.tPerformanceById[performanceId]
+	end
+
+	method any GetCues(string performanceId)
+		-- 공연의 큐 목록(time 오름차순) 반환, 없으면 빈 배열
+		self:EnsureLoaded()
+		local list = self.tCuesByPerformanceId[performanceId]
+		if list == nil then
+			return {}
+		end
+		return list
+	end
+
+	method any GetAllPerformances()
+		-- 전체 공연 헤더 목록 반환
+		self:EnsureLoaded()
+		return self.tPerformances
+	end
+
+	method boolean HasPerformance(string performanceId)
+		-- 해당 공연이 존재하는지 확인
+		self:EnsureLoaded()
+		return self.tPerformanceById[performanceId] ~= nil
+	end
+
+end

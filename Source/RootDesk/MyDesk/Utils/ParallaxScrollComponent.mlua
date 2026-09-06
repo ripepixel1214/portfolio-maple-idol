@@ -1,0 +1,92 @@
+---@description "배경 레이어 패럴랙스 스크롤 컴포넌트. 클라 전용 연출."
+@Component
+script ParallaxScrollComponent extends Component
+
+	-- 플레이어 이동량을 레이어에 반영하는 비율 (X, Y 축별). 0=월드고정, 1=화면고정
+	property Vector2 FollowFactor = Vector2(0.85, 0.85)
+
+	-- 카메라가 "이동했다"고 판정할 최소 이동량. 이하이면 그 축은 정지로 보고 스크롤을 막는다(경계 클램프 대응)
+	@HideFromInspector
+	property number CameraMoveEpsilon = 0.0001
+
+	-- 시작 시점의 레이어 월드 좌표 (이동 계산의 원점, WorldPosition은 Vector3)
+	@HideFromInspector
+	property Vector3 _initialLayerPos = Vector3(0, 0, 0)
+
+	-- 누적 패럴랙스 오프셋 (카메라가 움직인 축의 플레이어 이동만 반영)
+	@HideFromInspector
+	property Vector2 _accumulatedOffset = Vector2(0, 0)
+
+	-- 직전 프레임의 플레이어 월드 좌표 (WorldPosition은 Vector3)
+	@HideFromInspector
+	property Vector3 _lastPlayerPos = Vector3(0, 0, 0)
+
+	-- 직전 프레임의 카메라 뷰 중심 월드 좌표 (이동 여부 판정용)
+	@HideFromInspector
+	property Vector2 _lastCameraPos = Vector2(0, 0)
+
+	-- 기준값 캡처 완료 여부 (LocalPlayer/화면 준비 지연 대응)
+	@HideFromInspector
+	property boolean _initialized = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 레이어 원점만 먼저 확보하고, 기준 좌표는 첫 유효 프레임에서 lazy 캡처
+		self._initialLayerPos = self.Entity.TransformComponent.WorldPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- LocalPlayer가 아직 준비되지 않았으면 대기
+		local player = _UserService.LocalPlayer
+		if not isvalid(player) then return end
+
+		-- 실제 카메라 뷰 중심(경계 클램프 반영). 준비 전이면 대기
+		local cameraPos = self:GetCameraCenterWorldPosition()
+		if cameraPos == nil then return end
+
+		local playerPos = player.TransformComponent.WorldPosition
+
+		-- LocalPlayer/카메라 준비 시점이 OnBeginPlay보다 늦을 수 있으므로 첫 유효 프레임에서 기준 좌표 캡처
+		if not self._initialized then
+			self._lastPlayerPos = playerPos
+			self._lastCameraPos = cameraPos
+			self._accumulatedOffset = Vector2(0, 0)
+			self._initialized = true
+			return
+		end
+
+		-- 위치는 플레이어 이동량으로 부드럽게 누적하되, 카메라가 멈춘 축은 스크롤을 막는다.
+		-- (맵 경계에서 카메라가 정지하면 해당 축의 이동량이 0이 되어 배경도 정지 → 전경과 함께 고정)
+		local offsetX = self._accumulatedOffset.x
+		local offsetY = self._accumulatedOffset.y
+
+		if math.abs(cameraPos.x - self._lastCameraPos.x) > self.CameraMoveEpsilon then
+			offsetX = offsetX + (playerPos.x - self._lastPlayerPos.x) * self.FollowFactor.x
+		end
+
+		if math.abs(cameraPos.y - self._lastCameraPos.y) > self.CameraMoveEpsilon then
+			offsetY = offsetY + (playerPos.y - self._lastPlayerPos.y) * self.FollowFactor.y
+		end
+
+		self._accumulatedOffset = Vector2(offsetX, offsetY)
+		self.Entity.TransformComponent.WorldPosition = Vector3(
+			self._initialLayerPos.x + offsetX,
+			self._initialLayerPos.y + offsetY,
+			self._initialLayerPos.z)
+
+		self._lastPlayerPos = playerPos
+		self._lastCameraPos = cameraPos
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCameraCenterWorldPosition()
+		-- 화면 중심의 스크린 좌표를 월드 좌표로 변환하면 현재 카메라 뷰 중심(경계 클램프·줌 반영)을 얻는다.
+		if _UILogic == nil or _UILogic.ScreenWidth <= 0 or _UILogic.ScreenHeight <= 0 then
+			return nil
+		end
+		local screenCenter = Vector2(_UILogic.ScreenWidth / 2, _UILogic.ScreenHeight / 2)
+		return _UILogic:ScreenToWorldPosition(screenCenter)
+	end
+
+end

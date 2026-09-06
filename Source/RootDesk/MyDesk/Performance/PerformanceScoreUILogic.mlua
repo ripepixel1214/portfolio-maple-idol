@@ -1,0 +1,254 @@
+---@description "공연 최종 점수 결과 UI 로직. 서버가 산출한 6개 점수(보컬/댄스/비주얼/팬덤투표/현장반응/총점)를 표시하고 Next 버튼으로 다음 단계로 진행한다."
+@Logic
+script PerformanceScoreUILogic extends Logic
+
+	-- 결과 UI 루트 (표시/숨김 토글)
+	property Entity root = "c3f5d32a-7100-49cf-a50e-3b2225d8e84b"
+
+	-- 보컬 점수 값 텍스트 (LowerPanel/VocalText/VocalScoreText)
+	property TextGUIRendererComponent valueVocal = "63944368-4513-422a-b9c3-897885463b89"
+	-- 댄스 점수 값 텍스트 (LowerPanel/DanceText/DanceScoreText)
+	property TextGUIRendererComponent valueDance = "c3548033-8452-49db-b651-3afcb0115272"
+	-- 비주얼 점수 값 텍스트 (LowerPanel/VisualText/VisualScoreText)
+	property TextGUIRendererComponent valueVisual = "27c41dcc-20b7-473e-9028-8405f4c0ff26"
+	-- 팬덤 투표 점수 값 텍스트 (LowerPanel/FandomText/FandomScoreText)
+	property TextGUIRendererComponent valueFandom = "f45d973d-e426-4511-95da-7d481033d015"
+	-- 현장 반응 점수 값 텍스트 (LowerPanel/MinigameText/MinigameScoreText)
+	property TextGUIRendererComponent valueLive = "38e4ee9d-cec4-4695-abc6-47a5eccd28f2"
+	-- 총점 값 텍스트 (LowerPanel/FinalText/FinalScoreText)
+	property TextGUIRendererComponent valueTotal = "5df726cd-ca61-4be8-a22c-94c20adf9a64"
+
+	-- 성공/실패 표시 텍스트
+	property TextComponent resultText = "39dd5366-7146-49d9-b8b2-f1b292f11815"
+
+	-- 다음 단계 진행 버튼
+	property ButtonComponent nextButton = "14549768-433e-441a-993c-09894f8e3539"
+
+	-- Next 버튼 클릭 핸들러
+	property any nextHandler = nil
+
+	-- 현재 표시 중인 공연 id (Step 4 분기에서 사용)
+	property string currentPerformanceId = ""
+	property string UI_SUCCESS_KEY = "ui.performance_result.success"
+	property string UI_FAILURE_KEY = "ui.performance_result.failure"
+	-- 현재 결과의 클리어 여부 (Step 4 분기에서 사용)
+	property boolean isClear = false
+
+	-- 진행 중인 점수 롤업 작업 목록 [{textComp, target, elapsed, duration, startDelay, done}]
+	@HideFromInspector
+	property any rollingScores = {}
+
+	-- 각 점수 롤업(0→목표값) 지속시간(초)
+	property number rollDuration = 1.2
+	-- 항목 간 시작 간격(초) — 순차 등장(스태거)
+	property number rollStagger = 0.5
+	-- Show 직후 첫 롤업 시작까지의 딜레이(초)
+	property number rollStartDelay = 1.0
+
+	-- 점수 롤업 진행 중 반복 재생할 효과음 RUID
+	property string rollLoopSfxRuid = "ee52f48638244989bbde48d64656a858"
+	-- 최종 점수(총점) 확정 시 1회 재생할 효과음 RUID
+	property string finalScoreSfxRuid = "1f78fca1853e4a7685c1f3698817c3ec"
+	-- 롤업 반복 효과음 재생 중 여부 (완료 시 1회만 중지·최종음 재생하도록 판정)
+	@HideFromInspector
+	property boolean scoreRollActive = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 시작 시 결과 UI를 숨기고 Next 버튼 이벤트를 연결
+		self:Hide()
+		self:ConnectNextButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- Next 버튼 이벤트 연결 해제
+		self:DisconnectNextButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Show(string performanceId, table tScore)
+		-- 서버가 산출한 6개 점수 결과를 표시
+		self.currentPerformanceId = performanceId
+		self.isClear = tScore.isClear == true
+
+		-- 점수를 즉시 박아넣는 대신 0부터 목표값까지 순차로 굴려 올리는 롤업 애니메이션을 예약
+		self:StartScoreRoll(tScore)
+
+		-- 성공/실패 라벨
+		if isvalid(self.resultText) then
+			if self.isClear then
+				self.resultText.Text = self:GetLocalizedText(self.UI_SUCCESS_KEY, "")
+				self.resultText.FontColor = Color(1.0, 0.83, 0.31, 1.0)
+			else
+				self.resultText.Text = self:GetLocalizedText(self.UI_FAILURE_KEY, "")
+				self.resultText.FontColor = Color(1.0, 0.42, 0.42, 1.0)
+			end
+		end
+
+		if isvalid(self.root) then
+			self.root.Enable = true
+		end
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Hide()
+		-- 결과 UI 숨김
+		if isvalid(self.root) then
+			self.root.Enable = false
+		end
+		-- 진행 중이던 롤업 정리 (Next 등으로 닫힐 때 잔여 트윈 정지)
+		self.rollingScores = {}
+		-- 롤업 도중 닫히면 반복 효과음도 중지
+		if self.scoreRollActive then
+			self.scoreRollActive = false
+			if _SoundManager ~= nil then
+				_SoundManager:StopSfx(self.rollLoopSfxRuid)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartScoreRoll(table tScore)
+		-- 6개 점수를 순서대로(스태거) 0→목표값 롤업하도록 작업 큐를 구성. i번째는 rollStartDelay + (i-1)*rollStagger 뒤 시작
+		self.rollingScores = {}
+
+		local order = {}
+		table.insert(order, { self.valueVocal, tScore.vocal })
+		table.insert(order, { self.valueDance, tScore.dance })
+		table.insert(order, { self.valueVisual, tScore.visual })
+		table.insert(order, { self.valueFandom, tScore.fandomVote })
+		table.insert(order, { self.valueLive, tScore.liveReaction })
+		table.insert(order, { self.valueTotal, tScore.total })
+
+		for i, pair in ipairs(order) do
+			local textComp = pair[1]
+			if isvalid(textComp) then
+				textComp.Text = self:FormatNumber(0)
+			end
+			table.insert(self.rollingScores, {
+				textComp = textComp,
+				target = pair[2] or 0,
+				elapsed = 0,
+				duration = self.rollDuration,
+				startDelay = self.rollStartDelay + (i - 1) * self.rollStagger,
+				done = false
+			})
+		end
+
+		-- 점수 출력 시작: 총점 확정 전까지 반복 효과음 재생
+		if #self.rollingScores > 0 then
+			self.scoreRollActive = true
+			if _SoundManager ~= nil then
+				_SoundManager:PlayLoopSfx(self.rollLoopSfxRuid, 1)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 롤업 작업 진행: 시작 딜레이(스태거) 후 easeOut 보간으로 0→목표값까지 텍스트 갱신
+		if self.rollingScores == nil then
+			return
+		end
+
+		for _, r in ipairs(self.rollingScores) do
+			if r.done == false and isvalid(r.textComp) then
+				if r.startDelay > 0 then
+					r.startDelay = r.startDelay - delta
+				elseif r.duration <= 0 then
+					-- 지속시간이 0 이하면 즉시 목표값 확정
+					r.textComp.Text = self:FormatNumber(r.target)
+					r.done = true
+				else
+					r.elapsed = r.elapsed + delta
+					local t = r.elapsed / r.duration
+					if t >= 1 then
+						t = 1
+						r.done = true
+					end
+					-- easeOut: 빠르게 올랐다가 감속 (방송 점수 공개 느낌)
+					local eased = 1 - (1 - t) * (1 - t)
+					r.textComp.Text = self:FormatNumber(r.target * eased)
+				end
+			end
+		end
+
+		-- 모든 점수 롤업 완료(=최종 점수 출력 확정) 시 반복음 중지 + 최종 점수 효과음 1회
+		if self.scoreRollActive then
+			local allDone = true
+			for _, r in ipairs(self.rollingScores) do
+				if r.done == false then
+					allDone = false
+					break
+				end
+			end
+			if allDone then
+				self.scoreRollActive = false
+				if _SoundManager ~= nil then
+					_SoundManager:StopSfx(self.rollLoopSfxRuid)
+					_SoundManager:PlaySfx(self.finalScoreSfxRuid, 1)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedText(string key, string fallbackText)
+		-- 현재 locale의 UI 문구 조회
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:GetText(key, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	method string FormatNumber(number value)
+		-- 정수를 천 단위 콤마 문자열로 변환 (예: 999999 → "999,999")
+		local n = math.floor(value)
+		local s = tostring(n)
+		local formatted = ""
+		local count = 0
+		for i = #s, 1, -1 do
+			formatted = string.sub(s, i, i) .. formatted
+			count = count + 1
+			if count % 3 == 0 and i > 1 then
+				formatted = "," .. formatted
+			end
+		end
+		return formatted
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnNextClicked()
+		-- Next 버튼: 결과 UI를 닫고 성공/실패 후속 흐름으로 분기
+		self:Hide()
+		if _PerformancePostFlowLogic ~= nil then
+			_PerformancePostFlowLogic:Proceed(self.currentPerformanceId, self.isClear)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectNextButton()
+		-- Next 버튼 클릭 이벤트 연결
+		self:DisconnectNextButton()
+		if isvalid(self.nextButton) == false or self.nextButton.Entity == nil then
+			return
+		end
+		self.nextHandler = self.nextButton.Entity:ConnectEvent(ButtonClickEvent, self.OnNextClicked)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectNextButton()
+		-- Next 버튼 클릭 이벤트 연결 해제
+		if self.nextHandler == nil then
+			return
+		end
+		if isvalid(self.nextButton) and self.nextButton.Entity ~= nil then
+			self.nextButton.Entity:DisconnectEvent(ButtonClickEvent, self.nextHandler)
+		end
+		self.nextHandler = nil
+	end
+
+end

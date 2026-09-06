@@ -1,0 +1,71 @@
+﻿@Logic
+script EActorInteractionType extends Logic
+
+	property integer None = 0
+
+	property integer Idle = 1
+
+	property integer Move = 2
+
+	property integer Touch = 3
+
+	property integer Drag = 4
+
+	property integer Drop = 5
+
+	method integer GetNone()
+		-- 값이 지정되지 않은 액터 상호작용 타입을 반환합니다.
+		return 0
+	end
+
+	method integer GetIdleInteger()
+		-- idle 액터 상호작용 타입을 반환합니다.
+		return 1
+	end
+
+	method integer GetMoveInteger()
+		-- move 액터 상호작용 타입을 반환합니다.
+		return 2
+	end
+
+	method integer GetTouchInteger()
+		-- touch 액터 상호작용 타입을 반환합니다.
+		return 3
+	end
+
+	method integer GetDragInteger()
+		-- drag 액터 상호작용 타입을 반환합니다.
+		return 4
+	end
+
+	method integer GetDropInteger()
+		-- drop 액터 상호작용 타입을 반환합니다.
+		return 5
+	end
+
+	method string ToSpeechType(integer interactionType)
+		-- 액터 상호작용 enum 값을 ActorSpeechTable 조회용 문자열로 변환합니다.
+		if interactionType == self:GetIdleInteger() then
+			return "idle"
+		end
+		
+		if interactionType == self:GetMoveInteger() then
+			return "move"
+		end
+		
+		if interactionType == self:GetTouchInteger() then
+			return "touch"
+		end
+		
+		if interactionType == self:GetDragInteger() then
+			return "drag"
+		end
+		
+		if interactionType == self:GetDropInteger() then
+			return "drop"
+		end
+		
+		return ""
+	end
+
+end

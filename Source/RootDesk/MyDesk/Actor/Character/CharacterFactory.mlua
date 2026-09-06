@@ -1,0 +1,184 @@
+-- 캐릭터 기본 스탯과 타입 데이터를 조합해서 CharacterData를 생성합니다.
+@Logic
+script CharacterFactory extends Logic
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharacters()
+		-- 보유 캐릭터 목록을 생성합니다.
+		return self:CreateDefaultCharacters()
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateDefaultCharacters()
+		-- 신규 유저에게 지급할 기본 캐릭터 목록을 생성합니다.
+		local tCharacters = {}
+		local tDefaultCharacterIds = {"character_cygnus", "character_lilin", "character_lucid"}
+
+		for _, characterId in ipairs(tDefaultCharacterIds) do
+			local tCharacter = self:CreateCharacterFromMaster(characterId)
+			if tCharacter ~= nil then
+				table.insert(tCharacters, tCharacter)
+			end
+		end
+
+		return tCharacters
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharactersFromPlainTable(table tCharacterPlainRows)
+		-- Storage에서 복원한 캐릭터 plain row 목록을 서버 권위 CharacterData 목록으로 변환합니다.
+		local tCharacters = {}
+		if tCharacterPlainRows == nil then
+			return tCharacters
+		end
+
+		for _, tCharacterPlainRow in ipairs(tCharacterPlainRows) do
+			local tCharacter = self:CreateCharacterFromPlainTable(tCharacterPlainRow)
+			if tCharacter ~= nil then
+				table.insert(tCharacters, tCharacter)
+			end
+		end
+
+		return tCharacters
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharacterFromPlainTable(table tCharacterPlainRow)
+		-- 캐릭터 plain row의 id/baseCharacterId를 기준으로 마스터 데이터를 조합하고 런타임 스탯을 덮어씁니다.
+		if tCharacterPlainRow == nil then
+			return nil
+		end
+
+		if self:HasPlainTableStats(tCharacterPlainRow) == false then
+			log_warning("[CharacterFactory] character plain row stats are invalid characterId=" .. tostring(tCharacterPlainRow.id))
+			return nil
+		end
+
+		local characterId = tCharacterPlainRow.id or ""
+		local baseCharacterId = tCharacterPlainRow.baseCharacterId or characterId
+		local tCharacter = self:CreateCharacterFromMaster(baseCharacterId)
+		if tCharacter == nil then
+			log_warning("[CharacterFactory] character master not found baseCharacterId=" .. tostring(baseCharacterId))
+			return nil
+		end
+
+		if characterId ~= "" then
+			tCharacter.id = characterId
+		end
+
+		tCharacter.vocal = self:ResolvePlainTableStat(tCharacterPlainRow.vocal)
+		tCharacter.dance = self:ResolvePlainTableStat(tCharacterPlainRow.dance)
+		tCharacter.visual = self:ResolvePlainTableStat(tCharacterPlainRow.visual)
+		tCharacter.fatigue = self:ResolvePlainTableStat(tCharacterPlainRow.fatigue)
+		tCharacter.intimacy = self:ResolvePlainTableStat(tCharacterPlainRow.intimacy)
+		tCharacter.maxIntimacyReached = self:ResolveMaxIntimacyReached(tCharacterPlainRow.maxIntimacyReached, tCharacter.intimacy)
+		tCharacter.isDiscovered = self:ResolvePlainTableBoolean(tCharacterPlainRow.isDiscovered, false)
+		tCharacter.hasPlayed = self:ResolvePlainTableBoolean(tCharacterPlainRow.hasPlayed, false)
+
+		return tCharacter
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharacterFromMaster(string id)
+		-- 캐릭터 id로 관련 테이블 row를 찾아 완성된 캐릭터 데이터를 생성합니다.
+		local tBaseStatRow = _CharacterBaseStatMaster:GetCharacterBaseStat(id)
+
+		if tBaseStatRow == nil then
+			return nil
+		end
+
+		return self:CreateCharacter(tBaseStatRow)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCharacter(any tBaseStatRow)
+		-- 기본 스탯, 타입, 이름 row를 조합해서 캐릭터 데이터를 만듭니다.
+		local tCharacter = CharacterData()
+		tCharacter.id = tBaseStatRow.id
+		tCharacter.name = self:GetCharacterDisplayName(tBaseStatRow)
+		tCharacter.typeId = tBaseStatRow.typeId
+		tCharacter.vocal = tBaseStatRow.vocal
+		tCharacter.dance = tBaseStatRow.dance
+		tCharacter.visual = tBaseStatRow.visual
+		tCharacter.maxIntimacyReached = tCharacter.intimacy
+		tCharacter.isDiscovered = true
+		tCharacter.hasPlayed = true
+
+		local tCharacterType = _CharacterTypeMaster:GetCharacterType(tBaseStatRow.typeId)
+		if tCharacterType ~= nil then
+			tCharacter.typeName = tCharacterType.name
+		end
+
+		return tCharacter
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HasPlainTableStats(table tCharacterPlainRow)
+		-- 캐릭터 plain row에 런타임 스탯이 모두 들어있는지 확인합니다.
+		if tCharacterPlainRow == nil then
+			return false
+		end
+
+		return tonumber(tCharacterPlainRow.vocal) ~= nil
+			and tonumber(tCharacterPlainRow.dance) ~= nil
+			and tonumber(tCharacterPlainRow.visual) ~= nil
+			and tonumber(tCharacterPlainRow.fatigue) ~= nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method number ResolvePlainTableStat(any value)
+		-- plain table의 런타임 스탯 값을 0 이상 숫자로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return 0
+		end
+
+		return _MathUtil:ClampMin(numberValue, 0)
+	end
+
+	@ExecSpace("ServerOnly")
+	method number ResolveMaxIntimacyReached(any value, number currentIntimacy)
+		-- maxIntimacyReached가 없던 저장 데이터는 현재 친밀도를 최고 기록으로 사용합니다.
+		local maxIntimacyReached = self:ResolvePlainTableStat(value)
+		return math.max(maxIntimacyReached, currentIntimacy or 0)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ResolvePlainTableBoolean(any value, boolean defaultValue)
+		-- plain table의 boolean 값을 안전하게 보정합니다.
+		if value == nil then
+			return defaultValue
+		end
+
+		if value == true or value == false then
+			return value
+		end
+
+		local textValue = tostring(value)
+		if textValue == "true" or textValue == "1" then
+			return true
+		end
+
+		if textValue == "false" or textValue == "0" then
+			return false
+		end
+
+		return defaultValue
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetCharacterDisplayName(any tBaseStat)
+		-- ActorTable의 표시 이름을 사용하고, 없으면 actorId를 표시합니다.
+		if tBaseStat == nil then
+			return ""
+		end
+
+		local actorName = _ActorMaster:GetActorName(tBaseStat.id)
+		if actorName ~= "" and actorName ~= tBaseStat.id then
+			return actorName
+		end
+
+		return tBaseStat.id
+	end
+
+end

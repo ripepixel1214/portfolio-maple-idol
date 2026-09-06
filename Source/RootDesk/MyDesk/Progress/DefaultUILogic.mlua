@@ -1,0 +1,970 @@
+@Logic
+script DefaultUILogic extends Logic
+
+	property ButtonComponent progressActionButton = "e6037948-8764-4515-abaa-63bc264589a5"
+
+	property TextGUIRendererComponent progressActionButtonText = "e6037948-8764-4515-abaa-63bc264589a5"
+
+	property Entity weeklyProgressGroup = "aab0b4f4-8333-4297-b2f5-631ad636f690"
+
+	property Entity weekendProgressGroup = "3aa18146-25ce-40b1-9049-8877b435ee46"
+
+	property Entity outsideProgressGroup = "96503397-0af2-4ef2-8d1e-d7e88dd8ab61"
+
+	property Entity performanceProgressGroup = "4664e40a-5ab7-4e7e-bd6e-ff9d2d40b8cf"
+
+	property Entity demoDimmer = "e4db4e97-bb1b-4942-a89e-31eb8e5eb812"
+
+	property Entity demoPanel = "c5edb88a-de22-49c6-9829-0e26a71fa88d"
+
+	property ButtonComponent demoConfirmButton = "439ca803-f111-4835-8650-ad4c1bf73839"
+
+	property Entity rootGroup = "7de246e2-077d-4dd2-8d7e-ffa5ac81c2bc"
+
+	property SliderComponent actionPointGauge = "08ff4af5-1092-4d9e-a860-089cca03b23d"
+
+	property TextGUIRendererComponent actionPointText = "43d4a9cb-b97d-47e1-aa69-1bc87419c73a"
+
+	property TextGUIRendererComponent fandomText = "b3e3671e-b051-47ae-a711-bbd77daa4e0f"
+
+	property TextGUIRendererComponent mesoText = "b19c9907-24ef-4f10-be1d-13bf2f596178"
+
+	property Entity cloudSunImage = "fa8eaee1-d125-41b2-9cd9-de7a2b94dec3"
+
+	property Entity cloudTreeImage = "493f1315-2ea1-4f7a-9227-ddac29e8f438"
+
+	property TextGUIRendererComponent cloudWeekText = "8c354912-5bff-42a0-a2b0-a18e31dbbd50"
+
+	property TextGUIRendererComponent cloudMonthText = "8e8f2349-ebdc-403f-98e8-7a76796d005f"
+
+	property Entity cloudDDayText = "36703f33-6abe-42a5-815a-78911468f29f"
+
+	property TextGUIRendererComponent goalText = "96926754-2701-4fba-8e80-cd583cf5f29c"
+
+	property string UI_MONTH_WEEK_KEY = "ui.default.hud.month_week"
+
+	property string UI_GOAL_NONE_KEY = "ui.schedule.goal.none"
+
+	property string UI_GOAL_COUNTDOWN_KEY = "ui.default.hud.goal_countdown"
+
+	property string UI_PERFORMANCE_NAME_KEY = "ui.common.performance"
+
+	property integer maxActionPoint = 2
+
+	property number actionPointTweenDuration = 0.25
+
+	property integer actionPointTweenTimerId = 0
+
+	property number currentActionPointGaugeValue = 0
+
+	property any progressActionButtonClickHandler = nil
+
+	property any progressActionButtonStateChangedHandler = nil
+
+	property any tProgressImageClickHandlers = {}
+
+	property any tProgressImageStateChangedHandlers = {}
+
+	property boolean isProgressActionButtonHovered = false
+
+	property boolean isProgressImageHovered = false
+
+	property any progressChangedHandler = nil
+
+	property any languageChangedHandler = nil
+
+	property integer languageRefreshTimerId = 0
+
+	property any dialogVisibilityChangedHandler = nil
+
+	property any scheduleVisibilityChangedHandler = nil
+
+	property any scheduleProgressVisibilityChangedHandler = nil
+
+	property any settlementVisibilityChangedHandler = nil
+
+	property any demoConfirmButtonClickHandler = nil
+
+	property any tOpenUiById = {}
+
+	property boolean isMoveRequestInFlight = false
+
+	property number moveRequestTimeout = 5
+
+	property integer moveRequestTimeoutTimerId = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- Connects DefaultUI button and visibility state events.
+		-- 에디터 저장 상태와 관계없이 데모 종료 팝업은 게임 시작 시 닫힌 상태로 초기화합니다.
+		self:SetEntityEnable(self.demoDimmer, false)
+		self:SetEntityEnable(self.demoPanel, false)
+
+		if self.progressActionButton ~= nil then
+			self.progressActionButtonClickHandler = self.progressActionButton.Entity:ConnectEvent(ButtonClickEvent, self.OnProgressActionButtonClicked)
+			self.progressActionButtonStateChangedHandler = self.progressActionButton.Entity:ConnectEvent(ButtonStateChangeEvent, self.OnProgressActionButtonStateChanged)
+		end
+
+		if self.demoConfirmButton ~= nil and self.demoConfirmButton.Entity ~= nil then
+			self.demoConfirmButtonClickHandler = self.demoConfirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDemoConfirmButtonClicked)
+		end
+		self:ConnectProgressImageButtonEvents()
+
+		if _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+
+		if _LocalizationLogic ~= nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+
+		self:ConnectUIVisibilityChangedEvents()
+		self:RefreshDefaultUI()
+		self:RefreshProgressText()
+		self:RefreshActionPoint(false)
+		self:RefreshProgressStats()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- Disconnects DefaultUI event handlers.
+		self:StopActionPointTween()
+		self:StopMoveRequestTimeout()
+		self:StopLanguageRefreshTimer()
+
+		if self.progressActionButton ~= nil and self.progressActionButtonClickHandler ~= nil then
+			self.progressActionButton.Entity:DisconnectEvent(ButtonClickEvent, self.progressActionButtonClickHandler)
+		end
+
+		if self.progressActionButton ~= nil and self.progressActionButtonStateChangedHandler ~= nil then
+			self.progressActionButton.Entity:DisconnectEvent(ButtonStateChangeEvent, self.progressActionButtonStateChangedHandler)
+		end
+
+		if self.demoConfirmButton ~= nil and self.demoConfirmButton.Entity ~= nil and self.demoConfirmButtonClickHandler ~= nil then
+			self.demoConfirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.demoConfirmButtonClickHandler)
+		end
+
+		self:DisconnectProgressImageButtonEvents()
+
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+		end
+
+		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
+			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+		end
+
+		self:DisconnectUIVisibilityChangedEvents()
+		self.progressActionButtonClickHandler = nil
+		self.progressActionButtonStateChangedHandler = nil
+		self.demoConfirmButtonClickHandler = nil
+		self.progressChangedHandler = nil
+		self.languageChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnLanguageChanged(LanguageChangedEvent event)
+		-- Master 번역 캐시 갱신 완료 이후 동적 HUD 문구 갱신 예약
+		self:ScheduleLanguageRefresh()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ScheduleLanguageRefresh()
+		-- 같은 프레임의 언어 변경 요청을 하나로 병합
+		if self.languageRefreshTimerId ~= nil and self.languageRefreshTimerId > 0 then
+			return
+		end
+
+		self.languageRefreshTimerId = _TimerService:SetTimerOnce(function()
+			self.languageRefreshTimerId = 0
+			self:RefreshProgressText()
+		end, 0.05)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopLanguageRefreshTimer()
+		-- 언어 변경 지연 갱신 타이머 해제
+		if self.languageRefreshTimerId ~= nil and self.languageRefreshTimerId > 0 then
+			_TimerService:ClearTimer(self.languageRefreshTimerId)
+		end
+		self.languageRefreshTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisibleRoot(boolean visible)
+		-- 공연 중에는 기본 HUD를 통째로 숨긴다. 루트 그룹만 토글하므로 내부 진행단계 갱신과 무관하게 유지된다.
+		if self.rootGroup == nil then
+			return
+		end
+
+		self.rootGroup.Enable = visible
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressActionButtonClicked(ButtonClickEvent event)
+		-- 현재 진행 단계에 맞는 DefaultUI 액션을 실행합니다.
+		if self:IsProgressActionButtonVisible() == false then
+			return
+		end
+
+		local currentStep = self:GetCurrentStep()
+		if _EProgressStep:IsDemoEndStep(currentStep) then
+			self:OpenDemoEndPanel()
+			return
+		end
+
+		if currentStep == _EProgressStep.Step_Weekly then
+			self:OpenScheduleUI()
+			return
+		end
+
+		if currentStep == _EProgressStep.Step_Performance then
+			self:OpenScheduleUI()
+			return
+		end
+
+		if currentStep == _EProgressStep.Step_TrainingCompleted then
+			self:EnterWeekendDowntown(currentStep)
+			return
+		end
+
+		if currentStep == _EProgressStep.Step_Weekend then
+			self:ReturnToStudio(currentStep)
+			return
+		end
+
+		self:SendMoveToNextStepRequest(currentStep)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendMoveToNextStepRequest(integer expectedStep)
+		-- 서버에 진행 단계 이동을 요청. 응답 전까지 잠금을 걸어 연타를 막고, 요청 시점 단계를 함께 보내 서버가 중복 요청을 거절할 수 있게 함
+		if _ProgressManager == nil then
+			log_warning("[DefaultUILogic] ProgressManager is nil")
+			return
+		end
+
+		if self:TryBeginMoveRequest() == false then
+			log("[DefaultUILogic] move request ignored step=" .. tostring(expectedStep))
+			return
+		end
+
+		log("[DefaultUILogic] request move to next step from=" .. tostring(expectedStep))
+		_ProgressManager:RequestMoveToNextStep(expectedStep)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean TryBeginMoveRequest()
+		-- 이동 요청을 시작할 수 있으면 잠그고 true 반환. 이미 요청이 떠 있거나 맵 전환 중이면 false
+		if self.isMoveRequestInFlight == true then
+			return false
+		end
+
+		if _MapTransitionHelper ~= nil and _MapTransitionHelper.isWaitingMapTransition == true then
+			return false
+		end
+
+		self.isMoveRequestInFlight = true
+		self:StartMoveRequestTimeout()
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndMoveRequest()
+		-- 이동 요청 잠금을 해제. 서버 응답(ProgressChangedEvent) 수신 시 호출
+		self.isMoveRequestInFlight = false
+		self:StopMoveRequestTimeout()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartMoveRequestTimeout()
+		-- 서버가 요청을 거절해 응답 push가 오지 않는 경우에도 잠금이 영구히 남지 않도록 해제 타이머를 검
+		self:StopMoveRequestTimeout()
+		if _TimerService == nil then
+			return
+		end
+
+		self.moveRequestTimeoutTimerId = _TimerService:SetTimerOnce(function()
+			self.moveRequestTimeoutTimerId = 0
+			if self.isMoveRequestInFlight == true then
+				log_warning("[DefaultUILogic] move request timed out")
+			end
+			self.isMoveRequestInFlight = false
+		end, self.moveRequestTimeout)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopMoveRequestTimeout()
+		-- 이동 요청 해제 타이머를 정리
+		if self.moveRequestTimeoutTimerId > 0 and _TimerService ~= nil then
+			_TimerService:ClearTimer(self.moveRequestTimeoutTimerId)
+		end
+
+		self.moveRequestTimeoutTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressActionButtonStateChanged(ButtonStateChangeEvent event)
+		-- Keeps the progress image hover state in sync when the main move button is hovered.
+		self.isProgressActionButtonHovered = self:IsHoverLikeButtonState(event)
+		self:RefreshProgressActionHoverVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressImageButtonStateChanged(ButtonStateChangeEvent event)
+		-- Keeps the main move button hover state in sync when the visible progress image is hovered.
+		self.isProgressImageHovered = self:IsHoverLikeButtonState(event)
+		self:RefreshProgressActionHoverVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnterWeekendDowntown(integer expectedStep)
+		-- Requests transition from training-completed state to weekend state.
+		self:SendMoveToNextStepRequest(expectedStep)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReturnToStudio(integer expectedStep)
+		-- Requests transition from weekend state back to weekly state.
+		self:SendMoveToNextStepRequest(expectedStep)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenScheduleUI()
+		-- Opens the weekly schedule UI.
+		if _ScheduleUILogic == nil then
+			log_warning("[DefaultUILogic] ScheduleUILogic is nil")
+			return
+		end
+
+		_ScheduleUILogic:Open()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenDemoEndPanel()
+		-- 데모 종료 단계의 진행 버튼은 스케줄 대신 종료 안내 팝업을 표시합니다.
+		self:SetEntityEnable(self.demoDimmer, true)
+		self:SetEntityEnable(self.demoPanel, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDemoConfirmButtonClicked(ButtonClickEvent event)
+		-- 데모 종료 안내의 확인 버튼을 누르면 패널과 딤머를 함께 닫습니다.
+		self:CloseDemoEndPanel()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseDemoEndPanel()
+		-- 데모 종료 안내 패널과 배경 딤머를 비활성화합니다.
+		self:SetEntityEnable(self.demoPanel, false)
+		self:SetEntityEnable(self.demoDimmer, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCurrentStep()
+		-- Returns the current client-side progress step.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		if progress == nil or progress.eCurrentStep == nil then
+			return _EProgressStep.Step_Weekly
+		end
+
+		return progress.eCurrentStep
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshDefaultUI()
+		-- Refreshes DefaultUI groups and button visibility for the current progress step.
+		local currentStep = self:GetCurrentStep()
+		local isActionVisible = self:IsProgressActionButtonVisible()
+		self:RefreshDefaultUIByProgressStep(currentStep, isActionVisible)
+		self:SetProgressActionButtonVisible(isActionVisible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshDefaultUIByProgressStep(integer currentStep, boolean isActionVisible)
+		-- Toggles DefaultUI progress groups and button images for the given progress step.
+		local isWeekly = currentStep == _EProgressStep.Step_Weekly
+		local isTrainingCompleted = currentStep == _EProgressStep.Step_TrainingCompleted
+		local isWeekend = currentStep == _EProgressStep.Step_Weekend
+		local isPerformance = currentStep == _EProgressStep.Step_Performance
+			or _EProgressStep:IsDemoEndStep(currentStep)
+
+		self:SetEntityEnable(self.weeklyProgressGroup, isActionVisible == true and isWeekly == true)
+		self:SetEntityEnable(self.weekendProgressGroup, isActionVisible == true and isTrainingCompleted == true)
+		self:SetEntityEnable(self.outsideProgressGroup, isActionVisible == true and isWeekend == true)
+		self:SetEntityEnable(self.performanceProgressGroup, isActionVisible == true and isPerformance == true)
+		self:RefreshProgressActionButtonText(isWeekend)
+		self:RefreshCloudVisualByProgressStep(currentStep)
+		self:RefreshProgressActionHoverVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshProgressActionButtonText(boolean isWeekend)
+		-- 진행 단계에 따른 이동 버튼 문구 갱신
+		if self.progressActionButtonText == nil then
+			return
+		end
+
+		if isWeekend == true then
+			self.progressActionButtonText.Text = "BACK"
+		else
+			self.progressActionButtonText.Text = "START"
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectProgressImageButtonEvents()
+		-- 진행 단계 이미지는 이동 버튼과 같은 클릭/호버 동작을 공유합니다.
+		self:DisconnectProgressImageButtonEvents()
+		self.tProgressImageClickHandlers = {}
+		self.tProgressImageStateChangedHandlers = {}
+
+		self:AddProgressImageButtonEvents(self.weeklyProgressGroup)
+		self:AddProgressImageButtonEvents(self.weekendProgressGroup)
+		self:AddProgressImageButtonEvents(self.outsideProgressGroup)
+		self:AddProgressImageButtonEvents(self.performanceProgressGroup)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddProgressImageButtonEvents(Entity entity)
+		if entity == nil then
+			return
+		end
+
+		local clickHandler = entity:ConnectEvent(ButtonClickEvent, self.OnProgressActionButtonClicked)
+		local stateHandler = entity:ConnectEvent(ButtonStateChangeEvent, self.OnProgressImageButtonStateChanged)
+		table.insert(self.tProgressImageClickHandlers, { entity = entity, eventHandler = clickHandler })
+		table.insert(self.tProgressImageStateChangedHandlers, { entity = entity, eventHandler = stateHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectProgressImageButtonEvents()
+		if self.tProgressImageClickHandlers ~= nil then
+			for _, item in ipairs(self.tProgressImageClickHandlers) do
+				if item.entity ~= nil and item.eventHandler ~= nil then
+					item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+				end
+			end
+		end
+
+		if self.tProgressImageStateChangedHandlers ~= nil then
+			for _, item in ipairs(self.tProgressImageStateChangedHandlers) do
+				if item.entity ~= nil and item.eventHandler ~= nil then
+					item.entity:DisconnectEvent(ButtonStateChangeEvent, item.eventHandler)
+				end
+			end
+		end
+
+		self.tProgressImageClickHandlers = {}
+		self.tProgressImageStateChangedHandlers = {}
+		self.isProgressActionButtonHovered = false
+		self.isProgressImageHovered = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsHoverLikeButtonState(ButtonStateChangeEvent event)
+		if event == nil then
+			return false
+		end
+
+		return event.state == ButtonState.Hover or event.state == ButtonState.Pressed
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshProgressActionHoverVisual()
+		local color = self:GetProgressActionVisualColor()
+
+		self:SetEntitySpriteColor(self.progressActionButton ~= nil and self.progressActionButton.Entity or nil, color)
+		self:SetEntitySpriteColor(self.weeklyProgressGroup, color)
+		self:SetEntitySpriteColor(self.weekendProgressGroup, color)
+		self:SetEntitySpriteColor(self.outsideProgressGroup, color)
+		self:SetEntitySpriteColor(self.performanceProgressGroup, color)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetProgressActionVisualColor()
+		if self:IsProgressActionButtonVisible() ~= true then
+			return self:GetProgressActionButtonColor(ButtonState.Normal)
+		end
+
+		if self.isProgressActionButtonHovered == true or self.isProgressImageHovered == true then
+			return self:GetProgressActionButtonColor(ButtonState.Hover)
+		end
+
+		return self:GetProgressActionButtonColor(ButtonState.Normal)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetProgressActionButtonColor(any state)
+		if self.progressActionButton == nil or self.progressActionButton.Colors == nil then
+			return Color(1, 1, 1, 1)
+		end
+
+		if state == ButtonState.Pressed and self.progressActionButton.Colors.PressedColor ~= nil then
+			return self.progressActionButton.Colors.PressedColor
+		end
+
+		if state == ButtonState.Hover and self.progressActionButton.Colors.HighlightedColor ~= nil then
+			return self.progressActionButton.Colors.HighlightedColor
+		end
+
+		if self.progressActionButton.Colors.NormalColor ~= nil then
+			return self.progressActionButton.Colors.NormalColor
+		end
+
+		return Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntitySpriteColor(Entity entity, any color)
+		if entity == nil or entity.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		entity.SpriteGUIRendererComponent.Color = color
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCloudVisualByProgressStep(integer currentStep)
+		-- 프로그레스 단계에 따라 Cloud 아이콘과 Week 텍스트 색상을 갱신합니다.
+		local isPerformance = currentStep == _EProgressStep.Step_Performance
+			or _EProgressStep:IsDemoEndStep(currentStep)
+		local isTreeStep = currentStep == _EProgressStep.Step_TrainingCompleted
+			or currentStep == _EProgressStep.Step_Weekend
+
+		self:SetEntityEnable(self.cloudSunImage, isTreeStep == false or isPerformance == true)
+		self:SetEntityEnable(self.cloudTreeImage, isTreeStep == true and isPerformance == false)
+		self:SetEntityEnable(self.cloudDDayText, isPerformance == true)
+
+		if self.cloudMonthText ~= nil then
+			self:SetEntityEnable(self.cloudMonthText.Entity, isPerformance == false)
+		end
+
+		if self.cloudWeekText == nil then
+			return
+		end
+
+		self:SetEntityEnable(self.cloudWeekText.Entity, isPerformance == false)
+		if isTreeStep == true then
+			self.cloudWeekText.FontColor = Color.FromHexCode("#00C72B")
+		else
+			self.cloudWeekText.FontColor = Color.FromHexCode("#F091BB")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshProgressText()
+		-- 현재 진행 정보의 월/주차와 다음 공연 예정 문구를 DefaultUI에 반영합니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		local month = 1
+		local week = 1
+		local goalTextValue = self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+
+		if progress ~= nil then
+			if progress.currentMonth ~= nil and progress.currentMonth > 0 then
+				month = math.floor(progress.currentMonth)
+			end
+
+			if progress.currentWeek ~= nil and progress.currentWeek > 0 then
+				week = math.floor(progress.currentWeek)
+			end
+
+			if _GameGoalMaster ~= nil then
+				local goal = _GameGoalMaster:GetGameGoal(progress.gameGoalId)
+				if goal ~= nil then
+					if progress.eCurrentStep == _EProgressStep.Step_Performance
+						or _EProgressStep:IsDemoEndStep(progress.eCurrentStep) then
+						goalTextValue = self:GetGoalNameText(goal)
+					else
+						goalTextValue = self:BuildGoalScheduleText(month, week, goal)
+					end
+				end
+			end
+		end
+
+		local monthWeekText = ""
+		if _LocalizationLogic ~= nil then
+			monthWeekText = _LocalizationLogic:Format(self.UI_MONTH_WEEK_KEY, "", month, week, nil, "")
+		end
+		self:SetGuiText(self.cloudMonthText, monthWeekText)
+		self:SetGuiText(self.goalText, goalTextValue)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string BuildGoalScheduleText(integer currentMonth, integer currentWeek, any goal)
+		-- 다음 공연까지 남은 주차와 공연명을 DefaultUI 목표 문구로 변환합니다.
+		if goal == nil then
+			return self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+		end
+
+		local goalName = goal.name or ""
+		if goalName == "" then
+			goalName = self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+		end
+
+		local remainWeek = self:GetRemainWeeksUntilGoal(currentMonth, currentWeek, goal.month or 1, goal.week or 1)
+		return self:FormatLocalized(self.UI_GOAL_COUNTDOWN_KEY, "", remainWeek, goalName, nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedText(string key, string fallbackText)
+		-- 현재 locale의 UI 문구를 조회합니다.
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:GetText(key, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatLocalized(string key, string fallbackText, any value1, any value2, any value3)
+		-- 현재 locale의 UI 템플릿에 값을 반영
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:Format(key, fallbackText, value1, value2, value3, "")
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetGoalNameText(any goal)
+		if goal == nil or goal.name == nil or goal.name == "" then
+			return self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+		end
+
+		return goal.name
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetRemainWeeksUntilGoal(integer currentMonth, integer currentWeek, integer goalMonth, integer goalWeek)
+		-- 현재 월/주차에서 공연 발생 직전 주차까지 남은 주 수를 계산합니다.
+		local currentIndex = self:GetAbsoluteWeekIndex(currentMonth, currentWeek)
+		local goalIndex = self:GetAbsoluteWeekIndex(goalMonth, goalWeek)
+		return math.floor(_MathUtil:ClampMin(goalIndex - currentIndex, 0))
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetAbsoluteWeekIndex(integer month, integer week)
+		-- 월/주차를 비교 가능한 0 기반 절대 주차 인덱스로 변환합니다.
+		local safeMonth = math.floor(_MathUtil:ClampMin(month or 1, 1))
+		local safeWeek = math.floor(_MathUtil:Clamp(week or 1, 1, 4))
+		return (safeMonth - 1) * 4 + safeWeek - 1
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsProgressActionButtonVisible()
+		-- Returns whether the DefaultUI action button should be visible.
+		if self.tOpenUiById == nil then
+			self.tOpenUiById = {}
+		end
+
+		for _uiId, _isOpen in pairs(self.tOpenUiById) do
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetProgressActionButtonVisible(boolean isVisible)
+		-- Applies visible state to the DefaultUI action button.
+		if self.progressActionButton == nil or self.progressActionButton.Entity == nil then
+			return
+		end
+
+		local buttonEntity = self.progressActionButton.Entity
+		buttonEntity:SetVisible(isVisible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityEnable(Entity entity, boolean isEnabled)
+		-- Applies Enable state to a UI entity when the entity reference exists.
+		if entity == nil then
+			return
+		end
+
+		entity.Enable = isEnabled
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshActionPoint(boolean useTween)
+		-- 현재 액션 포인트를 텍스트와 게이지에 반영합니다.
+		local actionPoint = self:GetCurrentActionPoint()
+		self:SetActionPointText(actionPoint)
+
+		if self.actionPointGauge == nil then
+			self.currentActionPointGaugeValue = actionPoint
+			return
+		end
+
+		if useTween == true then
+			self:PlayActionPointGaugeTween(actionPoint)
+			return
+		end
+
+		self:StopActionPointTween()
+		self:SetActionPointGaugeValue(actionPoint)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshProgressStats()
+		-- ProgressManager의 클라이언트 캐시에서 메소와 팬덤 값을 가져와 DefaultUI에 반영합니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		if progress == nil then
+			self:SetProgressStatText(self.mesoText, 0)
+			self:SetProgressStatText(self.fandomText, 0)
+			return
+		end
+
+		self:SetProgressStatText(self.mesoText, progress.groupMeso or 0)
+		self:SetProgressStatText(self.fandomText, progress.fandom or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetProgressStatText(TextGUIRendererComponent textComponent, number value)
+		-- 숫자형 진행 값을 UI 텍스트에 표시합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = self:FormatIntegerWithComma(value)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetGuiText(TextGUIRendererComponent textComponent, string text)
+		-- TextGUIRendererComponent가 존재할 때만 텍스트를 갱신합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = text or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string NormalizeQuotedText(string text)
+		-- CSV에서 따옴표가 포함되어 들어온 문자열을 화면 표시용으로 정리합니다.
+		if text == nil then
+			return ""
+		end
+
+		local normalized = text
+		if string.len(normalized) >= 2 and string.sub(normalized, 1, 1) == "\"" and string.sub(normalized, -1) == "\"" then
+			normalized = string.sub(normalized, 2, -2)
+		end
+
+		return normalized
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatIntegerWithComma(number value)
+		-- 정수 값을 천 단위 쉼표가 포함된 문자열로 변환합니다.
+		local integerValue = math.floor(math.max(value or 0, 0))
+		local textValue = tostring(integerValue)
+		local formattedText = textValue
+
+		while true do
+			local nextText, replaceCount = string.gsub(formattedText, "^(-?%d+)(%d%d%d)", "%1,%2")
+			formattedText = nextText
+			if replaceCount == 0 then
+				break
+			end
+		end
+
+		return formattedText
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCurrentActionPoint()
+		-- ProgressManager의 클라이언트 캐시에서 현재 액션 포인트를 가져옵니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		if progress == nil or progress.actionPoint == nil then
+			return 0
+		end
+
+		return math.floor(self:ClampActionPointValue(progress.actionPoint))
+	end
+
+	@ExecSpace("ClientOnly")
+	method number ClampActionPointValue(number actionPoint)
+		-- 액션 포인트 표시값을 0부터 최대치 사이로 제한합니다.
+		local maxValue = self.maxActionPoint
+		if maxValue <= 0 then
+			maxValue = 2
+		end
+
+		local value = actionPoint or 0
+		return math.max(0, math.min(value, maxValue))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetActionPointText(integer actionPoint)
+		-- 액션 포인트 텍스트를 갱신합니다.
+		if self.actionPointText == nil then
+			return
+		end
+
+		self.actionPointText.Text = tostring(actionPoint) .. " / " .. tostring(self.maxActionPoint)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetActionPointGaugeValue(number gaugeValue)
+		-- 액션 포인트 게이지 값을 즉시 적용합니다.
+		local clampedValue = self:ClampActionPointValue(gaugeValue)
+		if self.actionPointGauge ~= nil then
+			self.actionPointGauge.Value = clampedValue
+		end
+
+		self.currentActionPointGaugeValue = clampedValue
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayActionPointGaugeTween(integer targetActionPoint)
+		-- 현재 게이지 값에서 목표 액션 포인트까지 부드럽게 보간합니다.
+		self:StopActionPointTween()
+
+		local targetValue = self:ClampActionPointValue(targetActionPoint)
+		self:SetActionPointText(math.floor(targetValue))
+
+		local startValue = self.currentActionPointGaugeValue
+		if self.actionPointGauge ~= nil then
+			startValue = self.actionPointGauge.Value or startValue
+		end
+
+		if self.actionPointTweenDuration <= 0 or math.abs(startValue - targetValue) <= 0.01 or _TimerService == nil then
+			self:SetActionPointGaugeValue(targetValue)
+			return
+		end
+
+		local elapsed = 0
+		local previousTime = _UtilLogic.ElapsedSeconds
+		local duration = self.actionPointTweenDuration
+
+		local tick = function()
+			local now = _UtilLogic.ElapsedSeconds
+			local delta = now - previousTime
+			previousTime = now
+			elapsed += delta
+
+			local progress = math.max(0, math.min(elapsed / duration, 1))
+			local easedProgress = progress
+			if _TweenLogic ~= nil then
+				easedProgress = _TweenLogic:Ease(0, 1, 1, EaseType.SineEaseOut, progress)
+			end
+
+			local currentValue = startValue + (targetValue - startValue) * easedProgress
+			self:SetActionPointGaugeValue(currentValue)
+
+			if progress >= 1 then
+				self:StopActionPointTween()
+				self:SetActionPointGaugeValue(targetValue)
+			end
+		end
+
+		self.actionPointTweenTimerId = _TimerService:SetTimerRepeat(tick, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopActionPointTween()
+		-- 액션 포인트 게이지 보간 타이머를 정리합니다.
+		if self.actionPointTweenTimerId > 0 and _TimerService ~= nil then
+			_TimerService:ClearTimer(self.actionPointTweenTimerId)
+		end
+
+		self.actionPointTweenTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectUIVisibilityChangedEvents()
+		-- Subscribes to visibility events from UI that block the DefaultUI action button.
+		if _DialogUILogic ~= nil then
+			self.dialogVisibilityChangedHandler = _DialogUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		end
+
+		if _ScheduleUILogic ~= nil then
+			self.scheduleVisibilityChangedHandler = _ScheduleUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		end
+
+		if _ScheduleProgressUILogic ~= nil then
+			self.scheduleProgressVisibilityChangedHandler = _ScheduleProgressUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		end
+
+		if _SettlementCardUILogic ~= nil then
+			self.settlementVisibilityChangedHandler = _SettlementCardUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectUIVisibilityChangedEvents()
+		-- Disconnects visibility event handlers.
+		if self.dialogVisibilityChangedHandler ~= nil and _DialogUILogic ~= nil then
+			_DialogUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.dialogVisibilityChangedHandler)
+		end
+
+		if self.scheduleVisibilityChangedHandler ~= nil and _ScheduleUILogic ~= nil then
+			_ScheduleUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.scheduleVisibilityChangedHandler)
+		end
+
+		if self.scheduleProgressVisibilityChangedHandler ~= nil and _ScheduleProgressUILogic ~= nil then
+			_ScheduleProgressUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.scheduleProgressVisibilityChangedHandler)
+		end
+
+		if self.settlementVisibilityChangedHandler ~= nil and _SettlementCardUILogic ~= nil then
+			_SettlementCardUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.settlementVisibilityChangedHandler)
+		end
+
+		self.dialogVisibilityChangedHandler = nil
+		self.scheduleVisibilityChangedHandler = nil
+		self.scheduleProgressVisibilityChangedHandler = nil
+		self.settlementVisibilityChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- Refreshes DefaultUI when the progress step changes.
+		-- 서버 응답이 도착했으므로 이동 요청 잠금을 푼다
+		self:EndMoveRequest()
+		self:RefreshDefaultUI()
+		self:RefreshProgressText()
+		self:RefreshActionPoint(true)
+		self:RefreshProgressStats()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUIVisibilityChanged(any uiVisibilityChangedEvent)
+		-- Refreshes action button visibility when a blocking UI opens or closes.
+		if uiVisibilityChangedEvent == nil then
+			return
+		end
+
+		local uiId = uiVisibilityChangedEvent.uiId or ""
+		if uiId == "" then
+			return
+		end
+
+		if self:IsProgressButtonBlockingUI(uiId) == false then
+			return
+		end
+
+		if self.tOpenUiById == nil then
+			self.tOpenUiById = {}
+		end
+
+		if uiVisibilityChangedEvent.isOpen == true then
+			self.tOpenUiById[uiId] = true
+		else
+			self.tOpenUiById[uiId] = nil
+		end
+
+		self:RefreshDefaultUI()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsProgressButtonBlockingUI(string uiId)
+		-- Returns whether the UI id should block the DefaultUI action button.
+		return uiId == "dialog"
+			or uiId == "schedule"
+			or uiId == "scheduleProgress"
+			or uiId == "settlement"
+	end
+
+end

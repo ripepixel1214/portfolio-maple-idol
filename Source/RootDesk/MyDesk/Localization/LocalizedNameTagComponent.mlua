@@ -1,0 +1,201 @@
+@Component
+script LocalizedNameTagComponent extends Component
+
+	property string actorId = ""
+
+	property any languageChangedHandler = nil
+
+	property any actorChangedHandler = nil
+
+	property integer refreshTimerId = 0
+
+	property integer refreshAttemptCount = 0
+
+	property integer MAX_REFRESH_ATTEMPTS = 10
+
+	method void OnBeginPlay()
+		-- 클라이언트 locale 기준 네임태그 갱신 초기화
+		if self:IsClient() then
+			self:InitializeClientNameTag()
+		end
+	end
+
+	method void OnEndPlay()
+		-- 클라이언트 네임태그 구독과 재시도 정리
+		self:DisconnectLanguageChanged()
+		self:DisconnectActorChanged()
+		self:ClearRefreshRetry()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void InitializeClientNameTag()
+		-- 클라이언트 locale 이벤트와 초기 표시 이름 연결
+		self:ConnectLanguageChanged()
+		self:ConnectActorChanged()
+		self.refreshAttemptCount = 0
+		if self:Refresh() == false then
+			self:ScheduleRefreshRetry()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ScheduleRefreshRetry()
+		-- 데이터 로직과 맵 엔티티 초기화 순서 차이를 보정하기 위한 재시도 예약
+		if self.refreshTimerId ~= nil and self.refreshTimerId > 0 then
+			return
+		end
+
+		if self.refreshAttemptCount >= self.MAX_REFRESH_ATTEMPTS then
+			return
+		end
+
+		self.refreshAttemptCount = self.refreshAttemptCount + 1
+		self.refreshTimerId = _TimerService:SetTimerOnce(function() self:OnRefreshRetry() end, 0.2)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnRefreshRetry()
+		-- 지연 초기화된 actorId와 locale 테이블을 다시 조회
+		self.refreshTimerId = 0
+		self:ConnectLanguageChanged()
+		self:ConnectActorChanged()
+		if self:Refresh() == false then
+			self:ScheduleRefreshRetry()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearRefreshRetry()
+		-- 네임태그 재시도 타이머 해제
+		if self.refreshTimerId ~= nil and self.refreshTimerId > 0 then
+			_TimerService:ClearTimer(self.refreshTimerId)
+		end
+		self.refreshTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectLanguageChanged()
+		-- 언어 변경 이벤트 구독
+		if _LocalizationLogic ~= nil and self.languageChangedHandler == nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectLanguageChanged()
+		-- 언어 변경 이벤트 구독 해제
+		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
+			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+		end
+		self.languageChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectActorChanged()
+		-- 런타임 액터 이름 변경 이벤트 구독
+		if _RuntimeActorManager ~= nil and self.actorChangedHandler == nil then
+			self.actorChangedHandler = _RuntimeActorManager:ConnectEvent(ActorChangedEvent, self.OnActorChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectActorChanged()
+		-- 런타임 액터 이름 변경 이벤트 구독 해제
+		if self.actorChangedHandler ~= nil and _RuntimeActorManager ~= nil then
+			_RuntimeActorManager:DisconnectEvent(ActorChangedEvent, self.actorChangedHandler)
+		end
+		self.actorChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnLanguageChanged(LanguageChangedEvent event)
+		-- 현재 locale의 이름표 텍스트 갱신
+		if event == nil then
+			return
+		end
+		if self:Refresh() == false then
+			self:ScheduleRefreshRetry()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnActorChanged(ActorChangedEvent event)
+		-- 해당 액터의 런타임 override 변경 시 이름표 갱신
+		if event == nil or event.actorId == nil or event.actorId == "" or event.actorId == self.actorId then
+			if self:Refresh() == false then
+				self:ScheduleRefreshRetry()
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean Refresh()
+		-- 현재 locale와 런타임 override 기준 이름표 갱신
+		local nameTag = self.Entity.NameTagComponent
+		if nameTag == nil then
+			return false
+		end
+
+		local resolvedActorId = self:ResolveActorId()
+		if resolvedActorId == "" then
+			return false
+		end
+
+		local lookupActorId = resolvedActorId
+		if _ActorMaster ~= nil and _ActorMaster:GetActor(lookupActorId) == nil
+			and string.sub(lookupActorId, 1, 4) == "npc_" then
+			local characterActorId = "character_" .. string.sub(lookupActorId, 5)
+			if _ActorMaster:GetActor(characterActorId) ~= nil then
+				lookupActorId = characterActorId
+				self.actorId = lookupActorId
+			end
+		end
+
+		local localizedName = ""
+		if _RuntimeActorManager ~= nil then
+			localizedName = _RuntimeActorManager:ClientGetLocalizedActorName(lookupActorId)
+		elseif _LocalizationLogic ~= nil and _ActorMaster ~= nil then
+			local actor = _ActorMaster:GetActor(lookupActorId)
+			if actor ~= nil and actor.nameKey ~= nil and actor.nameKey ~= "" then
+				localizedName = _LocalizationLogic:GetText(actor.nameKey, "")
+			end
+		end
+
+		if localizedName == nil or localizedName == "" then
+			return false
+		end
+
+		nameTag.Name = localizedName
+		return true
+	end
+
+	method string ResolveActorId()
+		-- 명시값, 발화 컴포넌트, NPC 이벤트 컴포넌트 순서로 actorId 해석
+		if self.actorId ~= nil and self.actorId ~= "" then
+			return self.actorId
+		end
+
+		local staticSpeech = self.Entity:GetComponent("script.StaticActorSpeechComponent")
+		if staticSpeech ~= nil and staticSpeech.actorId ~= nil and staticSpeech.actorId ~= "" then
+			self.actorId = staticSpeech.actorId
+			return self.actorId
+		end
+
+		local actorSpeech = self.Entity:GetComponent("script.ActorSpeechComponent")
+		if actorSpeech ~= nil and actorSpeech.actorId ~= nil and actorSpeech.actorId ~= "" then
+			self.actorId = actorSpeech.actorId
+			return self.actorId
+		end
+
+		local npcEventTrigger = self.Entity:GetComponent("script.NpcEventTriggerComponent")
+		if npcEventTrigger ~= nil and npcEventTrigger.npcId ~= nil and npcEventTrigger.npcId ~= "" then
+			self.actorId = npcEventTrigger.npcId
+			return self.actorId
+		end
+
+		-- 식별자를 찾지 못한 네임태그는 미해결 상태로 유지
+
+		return ""
+	end
+
+end

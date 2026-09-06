@@ -1,0 +1,289 @@
+-- ProgressManager가 사용하는 서버 권위 진행 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script ProgressStorage extends Logic
+
+	property string ProgressStorageKey = "progressData"
+
+	property integer currentSaveVersion = 1
+
+	property string LastLoadedProgressString = ""
+
+	property boolean CanSaveProgress = false
+
+	-- pending (Async 처리 중 요청 들어오는 경우)
+	property boolean IsProgressSaveInProgress = false
+
+	property string PendingProgressSaveUserId = ""
+
+	property string PendingProgressSaveString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadProgressByUserId(string userId)
+		-- UserDataStorage에서 유저 진행 데이터를 로드하고 없으면 기본 데이터를 사용합니다.
+		if userId == nil or userId == "" then
+			log_warning("[ProgressStorage] userId is required")
+			self.LastLoadedProgressString = ""
+			self.CanSaveProgress = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedProgressString = userStorage:GetAndWait(self.ProgressStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			local tDefaultProgress = self:CreateDefaultProgress()
+			self.LastLoadedProgressString = ""
+			self.CanSaveProgress = true
+			return tDefaultProgress
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.LastLoadedProgressString = ""
+			self.CanSaveProgress = false
+			return nil
+		end
+
+		if storedProgressString == nil or storedProgressString == "" then
+			log("[ProgressStorage] progress storage가 비어있습니다. 디폴트로 사용합니다. userId=" .. tostring(userId))
+			local tDefaultProgress = self:CreateDefaultProgress()
+			self.LastLoadedProgressString = ""
+			self.CanSaveProgress = true
+			return tDefaultProgress
+		end
+
+		local tProgressData = self:DecodeProgressData(storedProgressString)
+		if tProgressData == nil then
+			log_warning("[ProgressStorage] progress load failed invalid serialized data, userId=" .. tostring(userId))
+			self.LastLoadedProgressString = storedProgressString
+			self.CanSaveProgress = false
+			return nil
+		end
+
+		self.LastLoadedProgressString = storedProgressString
+		self.CanSaveProgress = true
+		return tProgressData
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveProgressByUserIdAsync(string userId, any tProgressData)
+		-- 유저 진행 데이터를 비동기 저장으로 요청합니다.
+		if self.CanSaveProgress == false then
+			log_warning("[ProgressStorage] progress save skipped because storage load failed")
+			return
+		end
+
+		-- 유저 진행 데이터를 UserDataStorage에 저장합니다.
+		if userId == nil or userId == "" then
+			log_warning("[ProgressStorage] userId is required")
+			return
+		end
+
+		if tProgressData == nil then
+			log_warning("[ProgressStorage] progressData is nil")
+			return
+		end
+
+		local progressString = self:CreateProgressString(tProgressData)
+		if progressString == self.LastLoadedProgressString then
+			return
+		end
+
+		if self.IsProgressSaveInProgress then
+			self.PendingProgressSaveUserId = userId
+			self.PendingProgressSaveString = progressString
+			return
+		end
+
+		self:SaveProgressStringAsync(userId, progressString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveProgressStringAsync(string userId, string progressString)
+		-- 직렬화된 진행 데이터 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.IsProgressSaveInProgress = true
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.ProgressStorageKey, progressString, function(errorCode, key)
+			self:OnProgressSaveCompleted(userId, progressString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnProgressSaveCompleted(string userId, string progressString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청을 이어서 처리합니다.
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.LastLoadedProgressString = progressString
+			self.CanSaveProgress = true
+		end
+
+		self.IsProgressSaveInProgress = false
+		self:CheckPendingProgress()
+
+		local tProgressData = self:DecodeProgressData(self.LastLoadedProgressString)
+		log(tProgressData:ToLogString("save complete"))
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingProgress()
+		-- 대기 중인 최신 진행 데이터 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.PendingProgressSaveString == "" then
+			return
+		end
+
+		local pendingUserId = self.PendingProgressSaveUserId
+		local pendingProgressString = self.PendingProgressSaveString
+		self.PendingProgressSaveUserId = ""
+		self.PendingProgressSaveString = ""
+
+		if pendingProgressString == self.LastLoadedProgressString then
+			return
+		end
+
+		self:SaveProgressStringAsync(pendingUserId, pendingProgressString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any DecodeProgressData(string progressString)
+		-- 저장된 문자열을 ProgressData로 복원합니다.
+		local ok, tPlainTableData = pcall(function()
+			return _UtilLogic:StringToTable(progressString)
+		end)
+
+		if ok == false or tPlainTableData == nil then
+			log_warning("[ProgressStorage] progress decode failed")
+			return nil
+		end
+
+		return self:CreateProgressFromPlainTable(tPlainTableData)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateProgressString(any tProgressData)
+		-- ProgressData를 현재 버전의 저장 문자열로 만듭니다.
+		local tPlainTableData = tProgressData:ToPlainTable()
+		tPlainTableData.saveVersion = self.currentSaveVersion
+		return _UtilLogic:TableToString(tPlainTableData)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTable(any tPlainTableData)
+		-- plain table의 버전을 확인하고 안전한 ProgressData 값으로 정규화합니다.
+		if tPlainTableData == nil then
+			return self:CreateDefaultProgress()
+		end
+
+		local saveVersion = self:NormalizeInteger(tPlainTableData.saveVersion, 0, 0)
+		if saveVersion == 0 or saveVersion == 1 then
+			return self:CreateProgressFromPlainTableV1(tPlainTableData)
+		end
+
+		log_warning("[ProgressStorage] unsupported progress saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTableV1(any tPlainTableData)
+		-- v1 plain table을 ProgressData 값으로 정규화합니다.
+		local tDefaultProgress = self:CreateDefaultProgress()
+
+		local tProgress = ProgressData()
+		tProgress.gameGoalId = self:NormalizeString(tPlainTableData.gameGoalId, tDefaultProgress.gameGoalId)
+		local eCurrentStep = self:NormalizeInteger(tPlainTableData.eCurrentStep, tDefaultProgress.eCurrentStep, 0)
+		if _EProgressStep:IsValidStep(eCurrentStep) == false then
+			eCurrentStep = tDefaultProgress.eCurrentStep
+		end
+		tProgress.eCurrentStep = eCurrentStep
+		local currentMonth = self:NormalizeInteger(tPlainTableData.currentMonth, tDefaultProgress.currentMonth, 1)
+		local currentWeek = self:NormalizeInteger(tPlainTableData.currentWeek, tDefaultProgress.currentWeek, 1)
+		while currentWeek > 4 do
+			currentWeek = currentWeek - 4
+			currentMonth = currentMonth + 1
+		end
+		tProgress.currentMonth = currentMonth
+		tProgress.currentWeek = currentWeek
+		tProgress.actionPoint = self:NormalizeInteger(tPlainTableData.actionPoint, tDefaultProgress.actionPoint, 0)
+		tProgress.groupMeso = self:NormalizeInteger(tPlainTableData.groupMeso, tDefaultProgress.groupMeso, 0)
+		tProgress.tempWorldCoin = self:NormalizeInteger(tPlainTableData.tempWorldCoin, tDefaultProgress.tempWorldCoin, 0)
+		tProgress.fandom = self:NormalizeInteger(tPlainTableData.fandom, tDefaultProgress.fandom, 0)
+		tProgress.positionX = self:NormalizeNumber(tPlainTableData.positionX, tDefaultProgress.positionX)
+		tProgress.positionY = self:NormalizeNumber(tPlainTableData.positionY, tDefaultProgress.positionY)
+		-- 저장 문자열(CSV)을 완료 집합 테이블로 복원. 레거시 단일 boolean 세이브 마이그레이션 포함.
+		local completedSet = {}
+		local storedCsv = tPlainTableData.completedTutorials
+		if type(storedCsv) == "string" and storedCsv ~= "" then
+			for id in string.gmatch(storedCsv, "([^,]+)") do
+				completedSet[id] = true
+			end
+		end
+		local legacy = tPlainTableData.isTutorialCompleted
+		if legacy == true or legacy == 1 or legacy == "true" then
+			completedSet["studio_intro"] = true
+		end
+		tProgress.completedTutorials = completedSet
+
+		return tProgress
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+	@ExecSpace("ServerOnly")
+	method number NormalizeNumber(any value, number defaultValue)
+		-- 좌표처럼 음수도 가능한 숫자 값을 안전하게 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return numberValue
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateDefaultProgress()
+		-- 저장 데이터가 없을 때 사용할 기본 진행 데이터를 만듭니다.
+		local gameGoalId = "perf_01"
+		if _GameGoalMaster ~= nil then
+			local tGameGoals = _GameGoalMaster:GetGameGoals()
+			if tGameGoals ~= nil and #tGameGoals > 0 then
+				local tFirstGoal = tGameGoals[1]
+				if tFirstGoal ~= nil and tFirstGoal.id ~= nil and tFirstGoal.id ~= "" then
+					gameGoalId = tFirstGoal.id
+				end
+			end
+		end
+
+		local tProgressData = ProgressData()
+		tProgressData.gameGoalId = gameGoalId
+		tProgressData.currentMonth = 1
+		tProgressData.currentWeek = 1
+		tProgressData.actionPoint = 2
+		tProgressData.groupMeso = 500
+		tProgressData.tempWorldCoin = 1000
+		tProgressData.fandom = 0
+		tProgressData.positionX = 0
+		tProgressData.positionY = 0
+
+		return tProgressData
+	end
+
+end

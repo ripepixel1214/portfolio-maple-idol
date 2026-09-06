@@ -1,0 +1,84 @@
+-- ActivityTable을 로드하고 활동 ID에 해당하는 효과 데이터를 제공합니다.
+@Logic
+script ActivityMaster extends Logic
+
+	property boolean IsActivityLoaded = false
+
+	-- ActivityRow
+	property any tActivityById = {}
+
+	-- ActivityRow
+	property any tActivities = {}
+
+	method void OnBeginPlay()
+		-- 로직 시작 시 활동 마스터 데이터를 로드합니다.
+		self:LoadActivities()
+	end
+
+	method void LoadActivities()
+		-- 활동 테이블을 읽고 activityId 기준으로 캐싱합니다.
+		self.tActivityById = {}
+		self.tActivities = {}
+		self.IsActivityLoaded = false
+		
+		local dataSet = _DataService:GetTable("ActivityTable")
+		
+		if dataSet == nil then
+			log_warning("[ActivityMaster] ActivityTable not found")
+			return
+		end
+		
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local id = _DataTableUtil:SafeGetString(dataSet, rowIndex, "activityId", "")
+		
+			if id ~= "" then
+				local activity = {}
+				activity.id = id
+				activity.activityId = id
+				activity.type = _DataTableUtil:SafeGetString(dataSet, rowIndex, "type", "training")
+				if activity.type == "" then
+					activity.type = "training"
+				end
+				activity.nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+				activity.name = ""
+				if _LocalizationLogic ~= nil then
+					activity.name = _LocalizationLogic:GetText(activity.nameKey, "")
+				end
+				activity.nameColor = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameColor", "")
+				activity.animationKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "animationKey", "")
+				activity.defaultUnlocked = _DataTableUtil:SafeGetBoolean(dataSet, rowIndex, "defaultUnlocked", false)
+				activity.description = activity.name
+				activity.vocal = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "vocal", 0)
+				activity.dance = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "dance", 0)
+				activity.visual = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "visual", 0)
+				activity.fandom = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "fandom", 0)
+				activity.fatigue = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "fatigue", 0)
+				activity.iconResource = _DataTableUtil:SafeGetString(dataSet, rowIndex, "iconResource", "")
+		
+				self.tActivityById[id] = activity
+				table.insert(self.tActivities, activity)
+			end
+		end
+		
+		self.IsActivityLoaded = true
+	end
+
+	method any GetActivity(string id)
+		-- id에 해당하는 활동 row를 반환합니다.
+		if self.IsActivityLoaded == false then
+			self:LoadActivities()
+		end
+		
+		return self.tActivityById[id]
+	end
+
+	method table GetAllActivities()
+		-- 전체 활동 row 목록을 반환합니다.
+		if self.IsActivityLoaded == false then
+			self:LoadActivities()
+		end
+		
+		return self.tActivities
+	end
+
+end

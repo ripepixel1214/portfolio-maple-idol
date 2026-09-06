@@ -1,0 +1,46 @@
+---@description "캐릭터 컨디션 3단계(나쁨/보통/좋음) enum. 피로도에서 파생되는 컨디션 값을 표현한다."
+@Logic
+script ECondition extends Logic
+
+	property integer None = 0
+
+	property integer Bad = 1
+
+	property integer Normal = 2
+
+	property integer Good = 3
+
+	method boolean IsValid(integer condition)
+		-- 사용할 수 있는 컨디션 값인지 확인
+		return condition == self.Bad
+			or condition == self.Normal
+			or condition == self.Good
+	end
+
+	method integer FromKey(string conditionKey)
+		-- 문자열 컨디션 키를 컨디션 enum으로 변환
+		if conditionKey == "bad" then
+			return self.Bad
+		elseif conditionKey == "normal" then
+			return self.Normal
+		elseif conditionKey == "good" then
+			return self.Good
+		end
+
+		return self.None
+	end
+
+	method string ToKey(integer condition)
+		-- 컨디션 enum을 데이터 키 문자열로 변환
+		if condition == self.Bad then
+			return "bad"
+		elseif condition == self.Normal then
+			return "normal"
+		elseif condition == self.Good then
+			return "good"
+		end
+
+		return ""
+	end
+
+end

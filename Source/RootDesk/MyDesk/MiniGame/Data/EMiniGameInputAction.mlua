@@ -1,0 +1,50 @@
+@Logic
+script EMiniGameInputAction extends Logic
+
+	-- 미니게임 입력 액션 타입 enum 상수. 입력 이벤트의 종류를 구분하는 데 사용된다.
+	property integer None = -1
+	property integer Start = 0
+	property integer Input = 1
+	property integer Hit = 2
+	property integer Miss = 3
+	property integer Progress = 4
+	property integer Complete = 5
+	property integer Fail = 6
+	property integer Cancel = 7
+
+	method boolean IsValid(integer action)
+		-- Returns whether the value is a known input action.
+		return action == self.Start
+			or action == self.Input
+			or action == self.Hit
+			or action == self.Miss
+			or action == self.Progress
+			or action == self.Complete
+			or action == self.Fail
+			or action == self.Cancel
+	end
+
+	method string ToName(integer action)
+		-- Returns a debug-friendly name for an input action value.
+		if action == self.Start then
+			return "Start"
+		elseif action == self.Input then
+			return "Input"
+		elseif action == self.Hit then
+			return "Hit"
+		elseif action == self.Miss then
+			return "Miss"
+		elseif action == self.Progress then
+			return "Progress"
+		elseif action == self.Complete then
+			return "Complete"
+		elseif action == self.Fail then
+			return "Fail"
+		elseif action == self.Cancel then
+			return "Cancel"
+		end
+
+		return "None"
+	end
+
+end

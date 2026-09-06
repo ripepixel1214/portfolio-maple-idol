@@ -1,0 +1,173 @@
+---@description "공연 성공 시 포토카드 획득 연출 UI. 확인하면 후속 흐름(PerformancePostFlowLogic)으로 이어진다. (연출 전용 — 실제 카드 지급/보관은 이번 범위 제외)"
+@Logic
+script PerformancePhotocardUILogic extends Logic
+
+	-- 포토카드 UI 루트 (표시/숨김 토글)
+	property Entity root = "a20bb663-b1a3-48fc-87cb-830b73cf2d40"
+
+	-- 확인 버튼
+	property ButtonComponent confirmButton = "243097c0-f912-43a0-934f-6f083aac27e8"
+
+	-- 확인 버튼 클릭 핸들러
+	property any confirmHandler = nil
+
+	-- 포토카드 앞면
+	property Entity cardFront = "9e8e92a2-6d60-4cc1-9e33-03fb11892c12"
+
+	-- 포토카드 뒷면
+	property Entity cardBack = "280eda5e-b806-48ce-a526-736052a2bc2b"
+
+	-- 한 번 뒤집히는 데 걸리는 시간
+	property number flipDuration = 0.24
+
+	-- 앞면 또는 뒷면을 유지하는 시간
+	property number faceHoldDuration = 1
+
+	-- 반복 플립 타이머
+	property integer flipTimerId = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 시작 시 숨기고 확인 버튼 이벤트를 연결
+		self:Hide()
+		self:ConnectConfirmButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 반복 연출과 확인 버튼 이벤트 연결을 정리
+		self:StopContinuousFlip()
+		self:DisconnectConfirmButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		-- 포토카드 획득 연출 표시
+		if isvalid(self.root) then
+			self.root.Enable = true
+		end
+		self:StartContinuousFlip()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Hide()
+		-- 포토카드 UI 숨김
+		self:StopContinuousFlip()
+		if isvalid(self.root) then
+			self.root.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartContinuousFlip()
+		-- 앞면부터 시작해 일정 간격으로 앞면과 뒷면 플립을 반복
+		self:StopContinuousFlip()
+		self:ApplyCardFaceVisibility(false)
+		self:SetCardScaleX(1)
+
+		local currentBackVisible = false
+		local elapsed = 0
+		local previousTime = _UtilLogic.ElapsedSeconds
+		local duration = math.max(0.01, self.flipDuration)
+		local holdDuration = math.max(0, self.faceHoldDuration)
+		local halfDuration = duration * 0.5
+
+		self.flipTimerId = _TimerService:SetTimerRepeat(function()
+			local currentTime = _UtilLogic.ElapsedSeconds
+			elapsed = elapsed + (currentTime - previousTime)
+			previousTime = currentTime
+
+			if elapsed < holdDuration then
+				return
+			end
+
+			local flipTime = elapsed - holdDuration
+			if flipTime < halfDuration then
+				local closeTime = math.min(flipTime, halfDuration)
+				local scaleX = _TweenLogic:Ease(1, 0, halfDuration, EaseType.SineEaseIn, closeTime)
+				self:ApplyCardFaceVisibility(currentBackVisible)
+				self:SetCardScaleX(scaleX)
+				return
+			end
+
+			local nextBackVisible = currentBackVisible == false
+			self:ApplyCardFaceVisibility(nextBackVisible)
+			local openTime = math.min(flipTime - halfDuration, halfDuration)
+			local scaleX = _TweenLogic:Ease(0, 1, halfDuration, EaseType.SineEaseOut, openTime)
+			self:SetCardScaleX(scaleX)
+
+			if flipTime >= duration then
+				currentBackVisible = nextBackVisible
+				elapsed = 0
+				self:ApplyCardFaceVisibility(currentBackVisible)
+				self:SetCardScaleX(1)
+			end
+		end, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopContinuousFlip()
+		-- 반복 플립 타이머를 해제하고 카드 표시 상태를 앞면 기준으로 복원
+		if self.flipTimerId ~= nil and self.flipTimerId ~= 0 then
+			_TimerService:ClearTimer(self.flipTimerId)
+			self.flipTimerId = 0
+		end
+		self:ApplyCardFaceVisibility(false)
+		self:SetCardScaleX(1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCardFaceVisibility(boolean isBackVisible)
+		-- 현재 면에 맞춰 앞면과 뒷면 엔티티의 표시 상태를 교체
+		if isvalid(self.cardFront) then
+			self.cardFront.Enable = isBackVisible == false
+		end
+		if isvalid(self.cardBack) then
+			self.cardBack.Enable = isBackVisible
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCardScaleX(number scaleX)
+		-- 앞면과 뒷면의 X축 스케일을 동일하게 적용
+		if isvalid(self.cardFront) and self.cardFront.UITransformComponent ~= nil then
+			self.cardFront.UITransformComponent.UIScale = Vector3(scaleX, 1, 1)
+		end
+		if isvalid(self.cardBack) and self.cardBack.UITransformComponent ~= nil then
+			self.cardBack.UITransformComponent.UIScale = Vector3(scaleX, 1, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirmClicked()
+		-- 확인: 포토카드를 닫고 후속 흐름(스튜디오 이동→대화→데모 종료)으로
+		self:Hide()
+		if _PerformancePostFlowLogic ~= nil then
+			_PerformancePostFlowLogic:OnPhotocardConfirmed()
+			_ItemManager:RequestUnlockItem("photoCard_lucid_firstPerformance")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectConfirmButton()
+		-- 확인 버튼 클릭 이벤트 연결
+		self:DisconnectConfirmButton()
+		if isvalid(self.confirmButton) == false or self.confirmButton.Entity == nil then
+			return
+		end
+		self.confirmHandler = self.confirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnConfirmClicked)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectConfirmButton()
+		-- 확인 버튼 클릭 이벤트 연결 해제
+		if self.confirmHandler == nil then
+			return
+		end
+		if isvalid(self.confirmButton) and self.confirmButton.Entity ~= nil then
+			self.confirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.confirmHandler)
+		end
+		self.confirmHandler = nil
+	end
+
+end

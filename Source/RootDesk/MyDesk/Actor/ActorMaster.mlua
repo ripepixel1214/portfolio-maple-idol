@@ -1,0 +1,185 @@
+@Logic
+script ActorMaster extends Logic
+
+	property any tActorById = {}
+
+	property boolean isCached = false
+
+	method void OnBeginPlay()
+		-- 액터 마스터 테이블을 캐싱합니다.
+		self.isCached = false
+		self:CacheAll()
+	end
+
+	method void EnsureCached()
+		-- 다른 로직이 먼저 접근하면 필요한 캐시를 지연 초기화합니다.
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- 액터 테이블을 actorId 기준 조회 맵으로 다시 구성합니다.
+		if self.isCached == true then
+			return
+		end
+		
+		self.tActorById = {}
+		
+		local dataSet = _DataService:GetTable("ActorTable")
+		if dataSet == nil then
+			log_warning("[ActorMaster] ActorTable not found")
+			return
+		end
+		
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local actorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "actorId", "")
+			if actorId ~= "" then
+				local nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+				self.tActorById[actorId] = {
+					name = "",
+					nameKey = nameKey,
+					dialogVisualType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogVisualType", ""),
+					portrait = _DataTableUtil:SafeGetString(dataSet, rowIndex, "portrait", ""),
+					portraitHorizontal = _DataTableUtil:SafeGetString(dataSet, rowIndex, "portraitHorizontal", ""),
+					portraitFullBody = _DataTableUtil:SafeGetString(dataSet, rowIndex, "portraitFullBody", ""),
+					pixel = _DataTableUtil:SafeGetString(dataSet, rowIndex, "pixel", ""),
+					avatar = _DataTableUtil:SafeGetString(dataSet, rowIndex, "avatar", "")
+				}
+			end
+		end
+		
+		self.isCached = true
+	end
+
+	method any GetActor(string actorId)
+		-- 액터 아이디에 대응되는 정적 액터 데이터를 반환합니다.
+		self:CacheAll()
+		if actorId == "" then
+			return nil
+		end
+		
+		return self.tActorById[actorId]
+	end
+
+	method string GetActorName(string actorId)
+		-- 액터의 기본 표시 이름을 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil or tActor.name == "" then
+			return actorId
+		end
+		
+		return tActor.name
+	end
+
+	method string GetActorPortrait(string actorId)
+		-- 액터의 기본 초상화 리소스 아이디를 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		return tActor.portrait
+	end
+
+	method string GetActorDialogVisualType(string actorId)
+		-- 액터가 대화창에서 사용할 표시 타입을 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		return tActor.dialogVisualType or ""
+	end
+
+	method string GetActorPortraitHorizontal(string actorId)
+		-- 액터의 가로형 초상화 리소스 아이디를 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		return tActor.portraitHorizontal or ""
+	end
+
+	method string GetActorPortraitFullBody(string actorId)
+		-- 액터의 전신 초상화 리소스 아이디를 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		return tActor.portraitFullBody or ""
+	end
+
+	method string GetActorPixel(string actorId)
+		-- 액터의 픽셀 스프라이트 리소스 아이디를 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		return tActor.pixel or ""
+	end
+
+	method string GetActorDialogVisualResourceId(string actorId)
+		-- 대화 표시 타입에 맞는 대화창 표시 리소스 아이디를 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		local dialogVisualType = tActor.dialogVisualType or ""
+		if dialogVisualType == "pixel" then
+			return tActor.pixel or ""
+		end
+		
+		if dialogVisualType == "portraitFullBody" then
+			return tActor.portraitFullBody or ""
+		end
+		
+		if dialogVisualType == "portraitHorizontal" then
+			return tActor.portraitHorizontal or ""
+		end
+		
+		if dialogVisualType == "portrait" then
+			return tActor.portrait or ""
+		end
+		
+		if tActor.portraitFullBody ~= nil and tActor.portraitFullBody ~= "" then
+			return tActor.portraitFullBody
+		end
+		
+		if tActor.portrait ~= nil and tActor.portrait ~= "" then
+			return tActor.portrait
+		end
+		
+		return tActor.pixel or ""
+	end
+
+	method string GetActorAvatar(string actorId)
+		-- 액터의 기본 아바타 리소스 아이디를 반환합니다.
+		local tActor = self:GetActor(actorId)
+		if tActor == nil then
+			return ""
+		end
+		
+		return tActor.avatar
+	end
+
+	method string GetActorIllustrationCard(string actorId)
+		-- 이전 액터 테이블 컬럼 호환용입니다. 현재 테이블에는 illustrationCard가 없습니다.
+		return ""
+	end
+
+	method integer GetActorCount()
+		-- 캐싱된 액터 수를 계산합니다.
+		self:CacheAll()
+		
+		local count = 0
+		for _, _ in pairs(self.tActorById) do
+			count = count + 1
+		end
+		
+		return count
+	end
+
+end

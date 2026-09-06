@@ -1,0 +1,291 @@
+---@description "공연 결과 후속 흐름 오케스트레이터. 점수 UI의 Next 이후 성공/실패로 분기한다. 실패=Map_Studio 복귀(재도전), 성공=포토카드 획득→Map_Studio 이동→공연 후 대화→데모 종료 UI."
+@Logic
+script PerformancePostFlowLogic extends Logic
+
+	-- 공연 후 돌아갈 스튜디오 맵 이름
+	property string studioMapName = "Map_Studio"
+	-- 스튜디오 도착 좌표
+	property number studioSpawnX = 0
+	property number studioSpawnY = 0
+
+	-- 공연 후 대화 id (DialogTable)
+	property string afterDialogId = "perf_after"
+
+	-- 공연 후 대화의 화자로 쓸 센터 캐릭터 actorId (Proceed 시 캡처)
+	property string speakerActorId = ""
+	-- 센터를 확인할 수 없을 때 사용할 기본 화자 actorId
+	property string fallbackSpeakerActorId = "character_cygnus"
+
+	-- 데모 종료 패널 (PerformanceResultUI/DemoEndPanel)
+	property Entity demoEndPanel = "3835e345-3620-475e-b1a6-a3e0aeefd074"
+	-- 데모 종료 패널의 확인 버튼 (PerformanceResultUI/DemoEndPanel/Panel/ConfirmButton)
+	property ButtonComponent demoEndConfirmButton = "a17f4ab6-4829-4f90-9c5d-e13e6c402691"
+
+	-- 스튜디오 도착을 기다렸다가 대화를 재생하기 위한 대기 플래그
+	property boolean waitingStudioForDialog = false
+	-- 대화 종료 이벤트 핸들러
+	property any dialogClosedHandler = nil
+	-- 저장 데이터 로드 후 데모 종료 단계를 복원하기 위한 진행 변경 이벤트 핸들러
+	property any progressChangedHandler = nil
+	-- 데모 종료 저장 데이터를 불러온 뒤 스튜디오 도착을 기다리는 플래그
+	property boolean waitingStudioForDemoEnd = false
+	-- 현재 세션에서 데모 종료 패널을 이미 표시했는지 여부
+	property boolean isDemoEndShown = false
+	-- 데모 종료 확인 버튼 클릭 이벤트 핸들러
+	property any demoEndConfirmClickHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 새 세션에서는 패널을 숨긴 상태로 시작하고, 저장된 진행 단계 동기화를 구독합니다.
+		self:SetDemoEndPanelVisible(false)
+		if self.demoEndConfirmButton ~= nil and self.demoEndConfirmButton.Entity ~= nil then
+			self.demoEndConfirmClickHandler = self.demoEndConfirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDemoEndConfirmClicked)
+		end
+		if _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+		self:RefreshDemoEndFromProgress()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 데모 종료 UI와 공연 후 흐름에서 연결한 이벤트를 정리합니다.
+		self:DisconnectDialogClosed()
+		if self.demoEndConfirmButton ~= nil and self.demoEndConfirmButton.Entity ~= nil and self.demoEndConfirmClickHandler ~= nil then
+			self.demoEndConfirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.demoEndConfirmClickHandler)
+		end
+		self.demoEndConfirmClickHandler = nil
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+		end
+		self.progressChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Proceed(string performanceId, boolean isClear)
+		-- 점수 UI Next 이후 진입점: 성공/실패로 분기
+		-- 공연 후 대화 화자로 쓸 센터 캐릭터를 이 시점(배정 유효)에 캡처
+		self.speakerActorId = self:ResolveCenterActorId()
+		if isClear then
+			log("[PerformancePostFlow] 성공 흐름 시작 id=" .. tostring(performanceId))
+			self:StartSuccessFlow()
+		else
+			log("[PerformancePostFlow] 실패 → Map_Studio 복귀 id=" .. tostring(performanceId))
+			self:GoToStudio()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartSuccessFlow()
+		-- 성공: 포토카드 획득 UI 표시 (확인 시 OnPhotocardConfirmed로 이어짐)
+		if _PerformancePhotocardUILogic ~= nil then
+			_PerformancePhotocardUILogic:Open()
+		else
+			-- 포토카드 UI가 없으면 바로 다음 단계로
+			self:OnPhotocardConfirmed()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPhotocardConfirmed()
+		-- 포토카드 확인 후: 스튜디오로 이동하고 도착하면 대화를 재생하도록 대기
+		self:GoToStudio()
+		self.waitingStudioForDialog = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void GoToStudio()
+		-- 로컬 플레이어를 스튜디오 맵으로 이동
+		local player = _UserService.LocalPlayer
+		if player == nil or player.PlayerComponent == nil then
+			log_warning("[PerformancePostFlow] LocalPlayer 없음")
+			return
+		end
+
+		local moveAction = function()
+			player.PlayerComponent:MoveToMapPosition(self.studioMapName, Vector2(self.studioSpawnX, self.studioSpawnY))
+		end
+		if _MapTransitionHelper == nil then
+			moveAction()
+			return
+		end
+
+		_MapTransitionHelper:RequestMoveToMap(self.studioMapName, moveAction)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 저장 데이터 복원 또는 포토카드 확인 후 스튜디오 도착을 기다립니다.
+		if self.waitingStudioForDialog == false and self.waitingStudioForDemoEnd == false then
+			return
+		end
+
+		if self:IsLocalPlayerInStudio() == false then
+			return
+		end
+
+		if self.waitingStudioForDialog == true then
+			self.waitingStudioForDialog = false
+			self:PlayAfterDialog()
+			return
+		end
+
+		if self.waitingStudioForDemoEnd == true then
+			self.waitingStudioForDemoEnd = false
+			self:ShowDemoEndPanelOnly()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsLocalPlayerInStudio()
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return false
+		end
+		local map = player.CurrentMap
+		return isvalid(map) and map.Name == self.studioMapName
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveCenterActorId()
+		-- 공연 지휘자에 저장된 역할 배정에서 센터 캐릭터 actorId를 가져오고, 없으면 기본 화자를 반환
+		if _PerformanceConductor ~= nil and _PerformanceConductor.tRoleAssignment ~= nil then
+			local centerActorId = _PerformanceConductor.tRoleAssignment.center
+			if centerActorId ~= nil and centerActorId ~= "" then
+				return centerActorId
+			end
+		end
+		return self.fallbackSpeakerActorId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayAfterDialog()
+		-- 공연 후 대화를 재생하고, 종료되면 데모 종료 UI를 표시
+		if _DialogUILogic == nil then
+			self:ShowDemoEnd()
+			return
+		end
+
+		-- 캡처해 둔 센터 화자를 사용(비어 있으면 이 시점에 다시 확인)
+		local speakerActorId = self.speakerActorId
+		if speakerActorId == nil or speakerActorId == "" then
+			speakerActorId = self:ResolveCenterActorId()
+		end
+
+		self:DisconnectDialogClosed()
+		self.dialogClosedHandler = _DialogUILogic:ConnectEvent(DialogClosedEvent, self.OnDialogClosed)
+		-- DialogOpenOptions로 화자/좌측 슬롯을 센터 캐릭터에 바인딩합니다(DialogTable의 {bind}에 대응).
+		local options = DialogOpenOptions()
+		options.dialogId = self.afterDialogId
+		options.useActorBinding = true
+		options.speakerActorId = speakerActorId
+		options.leftActorId = speakerActorId
+		-- 공연 후 대화에서는 기본 일러스트 대신 센터 캐릭터의 웃는 표정 일러스트를 좌측 슬롯에 표시합니다.
+		options.leftOverrideResourceId = self:ResolveSmileFullBodyResourceId(speakerActorId)
+		_DialogUILogic:Open(options)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveSmileFullBodyResourceId(string actorId)
+		-- 센터 캐릭터의 기본 풀바디 리소스 id에 "_smile"을 붙여 웃는 표정 일러스트 id를 만든다. 등록돼 있지 않으면 ""을 반환해 기본 일러스트로 폴백
+		if actorId == nil or actorId == "" then
+			return ""
+		end
+
+		if _RuntimeActorManager == nil or _ResourceMaster == nil then
+			return ""
+		end
+
+		local baseFullBody = _RuntimeActorManager:ClientGetActorPortraitFullBodyResourceId(actorId)
+		if baseFullBody == nil or baseFullBody == "" then
+			return ""
+		end
+
+		local smileResourceId = baseFullBody .. "_smile"
+		if _ResourceMaster:HasResourceId(smileResourceId) == false then
+			return ""
+		end
+
+		return smileResourceId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDialogClosed(any dialogClosedEvent)
+		-- 공연 후 대화가 닫히면 데모 종료 UI 표시
+		if dialogClosedEvent == nil or dialogClosedEvent.dialogId ~= self.afterDialogId then
+			return
+		end
+		self:DisconnectDialogClosed()
+		self:ShowDemoEnd()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectDialogClosed()
+		-- 대화 종료 이벤트 연결 해제
+		if self.dialogClosedHandler == nil then
+			return
+		end
+		if _DialogUILogic ~= nil then
+			_DialogUILogic:DisconnectEvent(DialogClosedEvent, self.dialogClosedHandler)
+		end
+		self.dialogClosedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowDemoEnd()
+		-- 데모 종료 패널을 표시 — 버튼 없이 그대로 두어 더 이상 진행을 막는다
+		self:ShowDemoEndPanelOnly()
+		if _ProgressManager ~= nil then
+			_ProgressManager:RequestCompleteDemo()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 서버에서 로드·동기화된 진행 단계가 데모 종료인지 확인합니다.
+		self:RefreshDemoEndFromProgress()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshDemoEndFromProgress()
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		local isDemoEnd = progress ~= nil and _EProgressStep:IsDemoEndStep(progress.eCurrentStep)
+		if isDemoEnd == false then
+			self.waitingStudioForDemoEnd = false
+			if self.isDemoEndShown == true then
+				self:SetDemoEndPanelVisible(false)
+				self.isDemoEndShown = false
+			end
+			return
+		end
+
+		if self:IsLocalPlayerInStudio() then
+			self.waitingStudioForDemoEnd = false
+			self:ShowDemoEndPanelOnly()
+			return
+		end
+
+		self.waitingStudioForDemoEnd = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowDemoEndPanelOnly()
+		self:SetDemoEndPanelVisible(true)
+		self.isDemoEndShown = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetDemoEndPanelVisible(boolean visible)
+		if isvalid(self.demoEndPanel) then
+			self.demoEndPanel.Enable = visible
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDemoEndConfirmClicked(ButtonClickEvent event)
+		-- 확인 버튼을 누르면 딤머를 포함한 데모 종료 패널 전체를 닫습니다.
+		self:SetDemoEndPanelVisible(false)
+		self.isDemoEndShown = false
+	end
+
+end

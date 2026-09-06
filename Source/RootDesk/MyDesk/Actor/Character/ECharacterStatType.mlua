@@ -1,0 +1,59 @@
+@Logic
+script ECharacterStatType extends Logic
+
+	property integer None = 0
+
+	property integer Vocal = 1
+
+	property integer Dance = 2
+
+	property integer Visual = 3
+
+	property integer Fatigue = 4
+
+	property integer Intimacy = 5
+
+	method boolean IsValid(integer statType)
+		-- 사용할 수 있는 캐릭터 스탯 타입인지 확인합니다.
+		return statType == self.Vocal
+			or statType == self.Dance
+			or statType == self.Visual
+			or statType == self.Fatigue
+			or statType == self.Intimacy
+	end
+
+	method integer FromKey(string statKey)
+		-- 문자열 스탯 키를 캐릭터 스탯 타입 enum으로 변환합니다.
+		if statKey == "vocal" then
+			return self.Vocal
+		elseif statKey == "dance" then
+			return self.Dance
+		elseif statKey == "visual" then
+			return self.Visual
+		elseif statKey == "fatigue" then
+			return self.Fatigue
+		elseif statKey == "intimacy" then
+			return self.Intimacy
+		end
+
+		return self.None
+	end
+
+	method string ToKey(integer statType)
+		-- 캐릭터 스탯 타입 enum을 데이터 키 문자열로 변환합니다.
+		if statType == self.Vocal then
+			return "vocal"
+		elseif statType == self.Dance then
+			return "dance"
+		elseif statType == self.Visual then
+			return "visual"
+		elseif statType == self.Fatigue then
+			return "fatigue"
+		elseif statType == self.Intimacy then
+			return "intimacy"
+		end
+
+		return ""
+	end
+
+end

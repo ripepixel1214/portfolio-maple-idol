@@ -1,0 +1,576 @@
+-- 캐릭터 코스튬의 서버 권위 캐시와 클라이언트 표시 캐시를 관리합니다.
+@Logic
+script CharacterCostumeManager extends Logic
+
+	property boolean isCostumesLoaded = false
+
+	-- { [characterId:string] = CharacterCostumeData }
+	property any tCostumeByCharacterId = {}
+
+	property string currentUserId = ""
+
+	property any userEnterHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 마스터 기반 코스튬 캐시를 준비하고 클라이언트로 동기화합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 서버 종료 시점에 유저 입장 이벤트 연결을 정리합니다.
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendCostumeChangedEvent(string characterId)
+		-- 코스튬 캐시 변경 사실을 현재 클라이언트의 구독자에게 알립니다.
+		local costumeChangedEvent = CharacterCostumeChangedEvent()
+		costumeChangedEvent.characterId = characterId or ""
+		self:SendEvent(costumeChangedEvent)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetCostumes()
+		-- 클라이언트 로컬 캐시에 저장된 전체 코스튬을 characterId 기준 map으로 반환합니다.
+		-- return: { [characterId:string] = CharacterCostumeData }
+		local tCopiedCostumeByCharacterId = {}
+		for characterId, tCostumeData in pairs(self.tCostumeByCharacterId) do
+			-- tCostumeData: CharacterCostumeData
+			if characterId ~= nil and characterId ~= "" then
+				tCopiedCostumeByCharacterId[characterId] = self:CopyCostumeData(tCostumeData)
+			end
+		end
+
+		return tCopiedCostumeByCharacterId
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetCostume(string characterId)
+		-- return: CharacterCostumeData
+		return self:CopyCostumeData(self.tCostumeByCharacterId[characterId])
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientApplyCurrentCostumeToManagerComponent(string characterId, CostumeManagerComponent costumeManager)
+		-- 클라이언트 로컬 캐시의 코스튬을 UI/프리뷰용 CostumeManagerComponent에 적용합니다.
+		return self:ClientApplyCostumeToManagerComponent(self:ClientGetCostume(characterId), costumeManager)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientApplyCostumeToManagerComponent(any tCostumeData, CostumeManagerComponent costumeManager)
+		-- tCostumeData: CharacterCostumeData
+		if tCostumeData == nil or isvalid(costumeManager) == false then
+			return false
+		end
+
+		costumeManager:SetEquip(MapleAvatarItemCategory.Body, tCostumeData.body)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Hair, tCostumeData.hair)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Face, tCostumeData.face)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Cap, tCostumeData.cap)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Cape, tCostumeData.cape)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Coat, tCostumeData.coat)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Longcoat, tCostumeData.longcoat)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Pants, tCostumeData.pants)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Glove, tCostumeData.glove)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Shoes, tCostumeData.shoes)
+		costumeManager:SetEquip(MapleAvatarItemCategory.OneHandedWeapon, tCostumeData.oneHandedWeapon)
+		costumeManager:SetEquip(MapleAvatarItemCategory.TwoHandedWeapon, tCostumeData.twoHandedWeapon)
+		costumeManager:SetEquip(MapleAvatarItemCategory.SubWeapon, tCostumeData.subWeapon)
+		costumeManager:SetEquip(MapleAvatarItemCategory.FaceAccessory, tCostumeData.faceAccessory)
+		costumeManager:SetEquip(MapleAvatarItemCategory.EyeAccessory, tCostumeData.eyeAccessory)
+		costumeManager:SetEquip(MapleAvatarItemCategory.EarAccessory, tCostumeData.earAccessory)
+		costumeManager:SetEquip(MapleAvatarItemCategory.Ear, tCostumeData.ear)
+
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetRuid(string characterId, integer category, string ruid)
+		-- 클라이언트가 특정 캐릭터의 단일 코스튬 슬롯 변경을 서버에 요청합니다.
+		-- category: MapleAvatarItemCategory 값입니다. RPC 제약 때문에 integer로 받습니다.
+		if self:CanUseCostumes(senderUserId) == false then
+			return false
+		end
+
+		local isSet = self:SetCategory(characterId, category, ruid)
+		if isSet then
+			self:PushCostumeToClient(characterId, senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetCostume(string characterId, table tCostumeDataPlain)
+		-- 클라이언트가 특정 캐릭터의 전체 CharacterCostumeData 변경을 서버에 요청합니다.
+		-- tCostumeDataPlain: CharacterCostumeData:ToPlainTable()
+		if self:CanUseCostumes(senderUserId) == false then
+			return false
+		end
+
+		local isSet = self:SetCostume(characterId, tCostumeDataPlain)
+		if isSet then
+			self:PushCostumeToClient(characterId, senderUserId)
+		end
+
+		return isSet
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetCostumeAndSave(string characterId, table tCostumeDataPlain)
+		-- 저장 버튼에서 전달한 전체 치장을 서버 런타임 캐시에 반영하고 Storage 저장과 클라이언트 동기화를 수행합니다.
+		if self:CanUseCostumes(senderUserId) == false then
+			return false
+		end
+
+		local isSet = self:SetCostume(characterId, tCostumeDataPlain)
+		if isSet == false then
+			return false
+		end
+
+		self:SaveCostumesToStorage()
+		self:PushCostumeToClient(characterId, senderUserId)
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestSetCostumesAndSave(table tCostumePlainByCharacterId)
+		-- 저장 버튼에서 전달한 캐릭터별 임시 치장을 모두 반영한 뒤 Storage는 한 번만 저장합니다.
+		if self:CanUseCostumes(senderUserId) == false or tCostumePlainByCharacterId == nil then
+			return false
+		end
+
+		local appliedCount = 0
+		for characterId, tCostumeDataPlain in pairs(tCostumePlainByCharacterId) do
+			if characterId ~= nil and characterId ~= "" and tCostumeDataPlain ~= nil and self.tCostumeByCharacterId[characterId] ~= nil then
+				if self:SetCostume(characterId, tCostumeDataPlain) then
+					appliedCount += 1
+				end
+			end
+		end
+
+		if appliedCount <= 0 then
+			return false
+		end
+
+		self:SaveCostumesToStorage()
+		self:PushCostumesToClient(senderUserId)
+		log("[CharacterCostumeManager] costume drafts saved count=" .. tostring(appliedCount))
+		return true
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestUnEquip(string characterId, integer category)
+		-- 클라이언트가 특정 캐릭터의 단일 코스튬 슬롯 해제를 서버에 요청합니다.
+		-- category: MapleAvatarItemCategory 값입니다. RPC 제약 때문에 integer로 받습니다.
+		if self:CanUseCostumes(senderUserId) == false then
+			return false
+		end
+
+		local isCleared = self:SetCategory(characterId, category, "")
+		if isCleared then
+			self:PushCostumeToClient(characterId, senderUserId)
+		end
+
+		return isCleared
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestResetCategoryToBase(string characterId, integer category)
+		-- 클라이언트가 특정 캐릭터의 단일 코스튬 슬롯을 마스터 기본값으로 되돌리도록 요청합니다.
+		-- category: MapleAvatarItemCategory 값입니다. RPC 제약 때문에 integer로 받습니다.
+		if self:CanUseCostumes(senderUserId) == false then
+			return false
+		end
+
+		local isReset = self:ResetCategoryToBase(characterId, category)
+		if isReset then
+			self:PushCostumeToClient(characterId, senderUserId)
+		end
+
+		return isReset
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestResetCostumeToBase(string characterId)
+		-- 클라이언트가 특정 캐릭터의 전체 코스튬을 마스터 기본값으로 되돌리도록 요청합니다.
+		if self:CanUseCostumes(senderUserId) == false then
+			return false
+		end
+
+		local isReset = self:ResetCostumeToBase(characterId)
+		if isReset then
+			self:PushCostumeToClient(characterId, senderUserId)
+		end
+
+		return isReset
+	end
+
+	@ExecSpace("Server")
+	method void RequestSave()
+		-- 현재 서버 권위 캐릭터별 코스튬 캐시를 Storage에 저장합니다.
+		if self:CanUseCostumes(senderUserId) == false then
+			return
+		end
+
+		self:SaveCostumesToStorage()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 신규 유저가 입장하면 기본 코스튬 위에 저장된 사용자 치장을 덮어쓰고 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][CharacterCostumeManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:Load()
+
+		if self:IsCostumesLoaded() then
+			self:PushCostumesToClient(event.UserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Load()
+		-- 마스터 기본 코스튬을 준비한 뒤 Storage에 저장된 캐릭터별 치장을 덮어씁니다.
+		self.tCostumeByCharacterId = {}
+		self.isCostumesLoaded = false
+
+		if _CharacterBaseCostumeMaster == nil then
+			log_warning("[CharacterCostumeManager] CharacterBaseCostumeMaster is nil")
+			return
+		end
+
+		_CharacterBaseCostumeMaster:CacheAll()
+
+		for characterId, _ in pairs(_CharacterBaseCostumeMaster.tBaseCostumeByCharacterId) do
+			-- tBaseCostumeData: CharacterCostumeData
+			local tBaseCostumeData = _CharacterBaseCostumeMaster:GetBaseCostume(characterId)
+			if characterId ~= nil and characterId ~= "" and tBaseCostumeData ~= nil then
+				self:SetCostume(characterId, tBaseCostumeData)
+			end
+		end
+
+		local tStoredCostumeByCharacterId = {}
+		if _CharacterCostumeStorage ~= nil then
+			tStoredCostumeByCharacterId = _CharacterCostumeStorage:LoadCostumes(self.currentUserId)
+			if tStoredCostumeByCharacterId == nil then
+				log_warning("[CharacterCostumeManager] stored costumes are nil")
+				return
+			end
+		end
+
+		for characterId, tStoredCostumeData in pairs(tStoredCostumeByCharacterId) do
+			if self.tCostumeByCharacterId[characterId] ~= nil and tStoredCostumeData ~= nil then
+				self:SetCostume(characterId, tStoredCostumeData)
+			end
+		end
+
+		self.isCostumesLoaded = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsCostumesLoaded()
+		-- 서버 권위 코스튬 캐시의 로드 완료 여부를 반환합니다.
+		return self.isCostumesLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseCostumes(string userId)
+		-- Request 입구에서 현재 유저와 코스튬 캐시 로드 완료 여부를 검증합니다.
+		if self:IsCostumesLoaded() == false then
+			log_warning("[CharacterCostumeManager] request rejected because costumes are not loaded")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[CharacterCostumeManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[CharacterCostumeManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCostumesToStorage()
+		-- 서버 권위 캐릭터별 코스튬 캐시를 UserDataStorage에 저장합니다.
+		if _CharacterCostumeStorage == nil then
+			return
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[CharacterCostumeManager] currentUserId is required")
+			return
+		end
+
+		if self:IsCostumesLoaded() == false then
+			log_warning("[CharacterCostumeManager] costumes are not loaded")
+			return
+		end
+
+		_CharacterCostumeStorage:SaveCostumesAsync(self.currentUserId, self:CreateCostumePlainTableByCharacterId())
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetCostumeData(string characterId)
+		-- return: CharacterCostumeData
+		return self:CopyCostumeData(self.tCostumeByCharacterId[characterId])
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetCostume(string characterId, any tCostumeData)
+		-- tCostumeData: CharacterCostumeData 또는 CharacterCostumeData:ToPlainTable()
+		if characterId == nil or characterId == "" then
+			return false
+		end
+
+		self.tCostumeByCharacterId[characterId] = self:CopyCostumeData(tCostumeData)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetCategory(string characterId, integer category, string ruid)
+		-- 서버 권위 캐시에 특정 캐릭터의 단일 코스튬 슬롯 변경을 MapleAvatarItemCategory 기준으로 반영합니다.
+		-- category: MapleAvatarItemCategory 값입니다. RPC/스크립트 타입 제약 때문에 integer로 받습니다.
+		if self:IsCostumesLoaded() == false then
+			return false
+		end
+
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = self.tCostumeByCharacterId[characterId]
+		if tCostumeData == nil then
+			log_warning("[CharacterCostumeManager] costume not found characterId=" .. tostring(characterId))
+			return false
+		end
+
+		if self:SetRuidToCostumeData(tCostumeData, category, ruid or "") == false then
+			log_warning("[CharacterCostumeManager] invalid category=" .. tostring(category))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ResetCategoryToBase(string characterId, integer category)
+		-- 서버 권위 캐시의 특정 슬롯을 CharacterBaseCostumeMaster 기본값으로 되돌립니다.
+		-- category: MapleAvatarItemCategory 값입니다. RPC/스크립트 타입 제약 때문에 integer로 받습니다.
+		if self:IsCostumesLoaded() == false then
+			return false
+		end
+
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = self.tCostumeByCharacterId[characterId]
+		-- tBaseCostumeData: CharacterCostumeData
+		local tBaseCostumeData = _CharacterBaseCostumeMaster:GetBaseCostume(characterId)
+		if tCostumeData == nil or tBaseCostumeData == nil then
+			log_warning("[CharacterCostumeManager] reset target not found characterId=" .. tostring(characterId))
+			return false
+		end
+
+		local baseRuid = self:GetRuidFromCostumeData(tBaseCostumeData, category)
+		return self:SetRuidToCostumeData(tCostumeData, category, baseRuid)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ResetCostumeToBase(string characterId)
+		-- 서버 권위 캐시의 특정 캐릭터 전체 코스튬을 CharacterBaseCostumeMaster 기본값으로 되돌립니다.
+		if self:IsCostumesLoaded() == false then
+			return false
+		end
+
+		-- tBaseCostumeData: CharacterCostumeData
+		local tBaseCostumeData = _CharacterBaseCostumeMaster:GetBaseCostume(characterId)
+		if tBaseCostumeData == nil then
+			log_warning("[CharacterCostumeManager] base costume not found characterId=" .. tostring(characterId))
+			return false
+		end
+
+		self:SetCostume(characterId, tBaseCostumeData)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushCostumesToClient(string forUserId)
+		-- 서버 권위 코스튬 캐시 전체를 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		if self:IsCostumesLoaded() == false then
+			return
+		end
+
+		self:SyncCostumes(self:CreateCostumePlainTableByCharacterId(), forUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushCostumeToClient(string characterId, string forUserId)
+		-- 서버 권위 코스튬 캐시의 특정 캐릭터 CharacterCostumeData를 지정한 클라이언트로 전송합니다.
+		if characterId == nil or characterId == "" or forUserId == nil or forUserId == "" then
+			return
+		end
+
+		if self:IsCostumesLoaded() == false then
+			return
+		end
+
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = self.tCostumeByCharacterId[characterId]
+		if tCostumeData == nil then
+			return
+		end
+
+		self:SyncCostume(characterId, tCostumeData:ToPlainTable(), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncCostumes(table tCostumePlainByCharacterId)
+		-- 서버에서 받은 코스튬 캐시 전체를 characterId 기준 map으로 저장합니다.
+		-- tCostumePlainByCharacterId: { [characterId:string] = CharacterCostumeData:ToPlainTable() }
+		self.tCostumeByCharacterId = {}
+
+		for characterId, tCostumeDataPlain in pairs(tCostumePlainByCharacterId) do
+			-- tCostumeDataPlain: CharacterCostumeData:ToPlainTable()
+			if characterId ~= nil and characterId ~= "" then
+				self.tCostumeByCharacterId[characterId] = self:CopyCostumeData(tCostumeDataPlain)
+			end
+		end
+
+		self:SendCostumeChangedEvent("")
+	end
+
+	@ExecSpace("Client")
+	method void SyncCostume(string characterId, table tCostumeDataPlain)
+		-- 서버에서 받은 단일 CharacterCostumeData를 클라이언트 로컬 캐시에 저장합니다.
+		-- tCostumeDataPlain: CharacterCostumeData:ToPlainTable()
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		self.tCostumeByCharacterId[characterId] = self:CopyCostumeData(tCostumeDataPlain)
+		self:SendCostumeChangedEvent(characterId)
+	end
+
+	-- 아래 메서드는 서버/클라 양쪽에서 재사용되는 순수 데이터 helper입니다. 호출한 쪽에서만 동작해야 하므로 ExecSpace를 지정하지 않습니다.
+	method any CopyCostumeData(any tCostumeSource)
+		-- tCostumeSource: CharacterCostumeData 또는 CharacterCostumeData:ToPlainTable()
+		local tCostumeData = self:GetCostumeDataFromAny(tCostumeSource)
+		if tCostumeData == nil then
+			return nil
+		end
+
+		if tCostumeData.ToPlainTable ~= nil then
+			return CharacterCostumeData():FromPlainTable(tCostumeData:ToPlainTable())
+		end
+
+		return CharacterCostumeData():FromPlainTable(tCostumeData)
+	end
+
+	method any GetCostumeDataFromAny(any tCostumeSource)
+		-- tCostumeSource: CharacterCostumeData 또는 CharacterCostumeData:ToPlainTable()
+		if tCostumeSource == nil then
+			return nil
+		end
+
+		if tCostumeSource.ToPlainTable ~= nil then
+			return tCostumeSource
+		end
+
+		return CharacterCostumeData():FromPlainTable(tCostumeSource)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCostumePlainTableByCharacterId()
+		-- 코스튬 캐시 전체를 RPC 전송용 characterId 기준 plain table map으로 변환합니다.
+		-- return: { [characterId:string] = CharacterCostumeData:ToPlainTable() }
+		local tPlainTableByCharacterId = {}
+		for characterId, tCostumeData in pairs(self.tCostumeByCharacterId) do
+			-- tCostumeData: CharacterCostumeData
+			if characterId ~= nil and characterId ~= "" and tCostumeData ~= nil then
+				tPlainTableByCharacterId[characterId] = tCostumeData:ToPlainTable()
+			end
+		end
+
+		return tPlainTableByCharacterId
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetRuidFromCostumeData(any tCostumeSource, integer category)
+		-- tCostumeData: CharacterCostumeData
+		-- category: MapleAvatarItemCategory 값입니다.
+		local tCostumeData = self:GetCostumeDataFromAny(tCostumeSource)
+		if tCostumeData == nil then return "" end
+
+		local itemCategory = MapleAvatarItemCategory.CastFrom(category)
+		if itemCategory == MapleAvatarItemCategory.Body then return tCostumeData.body end
+		if itemCategory == MapleAvatarItemCategory.Hair then return tCostumeData.hair end
+		if itemCategory == MapleAvatarItemCategory.Face then return tCostumeData.face end
+		if itemCategory == MapleAvatarItemCategory.Cap then return tCostumeData.cap end
+		if itemCategory == MapleAvatarItemCategory.Cape then return tCostumeData.cape end
+		if itemCategory == MapleAvatarItemCategory.Coat then return tCostumeData.coat end
+		if itemCategory == MapleAvatarItemCategory.Longcoat then return tCostumeData.longcoat end
+		if itemCategory == MapleAvatarItemCategory.Pants then return tCostumeData.pants end
+		if itemCategory == MapleAvatarItemCategory.Glove then return tCostumeData.glove end
+		if itemCategory == MapleAvatarItemCategory.Shoes then return tCostumeData.shoes end
+		if itemCategory == MapleAvatarItemCategory.OneHandedWeapon then return tCostumeData.oneHandedWeapon end
+		if itemCategory == MapleAvatarItemCategory.TwoHandedWeapon then return tCostumeData.twoHandedWeapon end
+		if itemCategory == MapleAvatarItemCategory.SubWeapon then return tCostumeData.subWeapon end
+		if itemCategory == MapleAvatarItemCategory.Shield then return tCostumeData.subWeapon end
+		if itemCategory == MapleAvatarItemCategory.FaceAccessory then return tCostumeData.faceAccessory end
+		if itemCategory == MapleAvatarItemCategory.EyeAccessory then return tCostumeData.eyeAccessory end
+		if itemCategory == MapleAvatarItemCategory.EarAccessory then return tCostumeData.earAccessory end
+		if itemCategory == MapleAvatarItemCategory.Ear then return tCostumeData.ear end
+
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetRuidToCostumeData(any tCostumeSource, integer category, string ruid)
+		-- tCostumeData: CharacterCostumeData
+		-- category: MapleAvatarItemCategory 값입니다.
+		local tCostumeData = self:GetCostumeDataFromAny(tCostumeSource)
+		if tCostumeData == nil then
+			return false
+		end
+
+		local itemCategory = MapleAvatarItemCategory.CastFrom(category)
+		if itemCategory == MapleAvatarItemCategory.Body then tCostumeData.body = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Hair then tCostumeData.hair = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Face then tCostumeData.face = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Cap then tCostumeData.cap = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Cape then tCostumeData.cape = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Coat then tCostumeData.coat = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Longcoat then tCostumeData.longcoat = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Pants then tCostumeData.pants = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Glove then tCostumeData.glove = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Shoes then tCostumeData.shoes = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.OneHandedWeapon then tCostumeData.oneHandedWeapon = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.TwoHandedWeapon then tCostumeData.twoHandedWeapon = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.SubWeapon then tCostumeData.subWeapon = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Shield then tCostumeData.subWeapon = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.FaceAccessory then tCostumeData.faceAccessory = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.EyeAccessory then tCostumeData.eyeAccessory = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.EarAccessory then tCostumeData.earAccessory = ruid return true end
+		if itemCategory == MapleAvatarItemCategory.Ear then tCostumeData.ear = ruid return true end
+
+		return false
+	end
+
+end

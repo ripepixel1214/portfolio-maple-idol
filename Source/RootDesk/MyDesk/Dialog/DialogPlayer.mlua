@@ -1,0 +1,64 @@
+@Logic
+@ExecSpace("ClientOnly")
+script DialogPlayer extends Logic
+
+	property string activePlayerMode = ""
+
+	@ExecSpace("ClientOnly")
+	method void PlayTokens(any tokens)
+		self:ClearPlayers()
+
+		if _DialogTimedPlayer ~= nil then
+			self.activePlayerMode = "timed"
+			_DialogTimedPlayer:PlayTokens(tokens)
+			return
+		end
+
+		self.activePlayerMode = "richText"
+		_DialogRichTextPlayer:PlayTokens(tokens)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteImmediately()
+		if self.activePlayerMode == "timed" and _DialogTimedPlayer ~= nil then
+			_DialogTimedPlayer:CompleteImmediately()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsTyping()
+		if self.activePlayerMode == "timed" and _DialogTimedPlayer ~= nil then
+			return _DialogTimedPlayer:IsTyping()
+		end
+
+		if self.activePlayerMode == "richText" and _DialogRichTextPlayer ~= nil then
+			return _DialogRichTextPlayer:IsTyping()
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Clear()
+		self.activePlayerMode = ""
+		self:ClearPlayers()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearPlayers()
+		if _DialogTimedPlayer ~= nil then
+			_DialogTimedPlayer:Clear()
+		end
+
+		if _DialogRichTextPlayer ~= nil then
+			_DialogRichTextPlayer:Clear()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPlaybackFinished()
+		if _DialogUILogic ~= nil then
+			_DialogUILogic:OnDialogLineTypingFinished()
+		end
+	end
+end

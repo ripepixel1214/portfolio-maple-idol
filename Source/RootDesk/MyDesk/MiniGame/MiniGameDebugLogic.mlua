@@ -1,0 +1,87 @@
+---@description "MiniGame logic for debugging"
+@Logic
+script MiniGameDebugLogic extends Logic
+
+	property boolean<const> isDebugMode = true
+
+	-- F1~F5에 매핑할 미니게임 id (MiniGameTable 등록 순서와 동일, 인덱스1=F1)
+	property any miniGameIds = { "rapid_press_count", "timing_accuracy", "command_sequence", "mash_gauge_drain", "shape_trace_match" }
+
+	property string MINI_GAME_DALGONA_CHALLENGE = "dalgona_challenge"
+
+	-- 키 입력 구독 핸들러
+	property any keyDownHandler = nil
+
+	method void OnBeginPlay()
+		-- 클라이언트에서 디버그 키 입력을 구독
+		if self:IsClient() == true then
+			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+		end
+	end
+
+	method void OnEndPlay()
+		-- 키 입력 구독 해제
+		if self.keyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
+			self.keyDownHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- F1~F6 입력을 해당 슬롯 미니게임 실행으로 매핑
+		if event == nil then
+			return
+		end
+
+		if self.isDebugMode == false then return end
+
+		if event.key == KeyboardKey.F1 then
+			self:LaunchSlot(1)
+		elseif event.key == KeyboardKey.F2 then
+			self:LaunchSlot(2)
+		elseif event.key == KeyboardKey.F3 then
+			self:LaunchSlot(3)
+		elseif event.key == KeyboardKey.F4 then
+			self:LaunchSlot(4)
+		elseif event.key == KeyboardKey.F5 then
+			self:LaunchSlot(5)
+		elseif event.key == KeyboardKey.F6 then
+			self:OpenDalgonaChallengeLobby()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void LaunchSlot(integer slot)
+		-- 슬롯(1~5)에 매핑된 미니게임을 스탠드얼론 컨텍스트로 시작 요청
+		local miniGameId = self.miniGameIds[slot]
+		if miniGameId == nil or miniGameId == "" then
+			log_warning("[MiniGameDebug] 슬롯에 미니게임이 없음 slot=" .. tostring(slot))
+			return
+		end
+		if _MiniGameManager == nil then
+			log_warning("[MiniGameDebug] MiniGameManager 없음")
+			return
+		end
+
+		_MiniGameManager:RequestStartMiniGame(miniGameId, _EMiniGameContextType.Standalone, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenDalgonaChallengeLobby()
+		-- F6 테스트용 달고나 판돈 선택 화면 표시
+		if _MiniGamePlayLogic ~= nil and _MiniGamePlayLogic.isPlaying == true then
+			log_warning("[MiniGameDebug] 진행 중 미니게임이 있어 달고나 테스트 시작 불가")
+			return
+		end
+		if _DalgonaChallengeUILogic == nil or _MiniGameUIRouter == nil then
+			log_warning("[MiniGameDebug] Dalgona Challenge UI 없음")
+			return
+		end
+
+		_MiniGameUIRouter:SetPresentation(_MiniGameUIRouter.PRESENTATION_DALGONA_CHALLENGE)
+		_DalgonaChallengeUILogic:OpenLobby()
+		log("[MiniGameDebug] Dalgona Challenge 테스트 로비 표시 miniGame=" .. self.MINI_GAME_DALGONA_CHALLENGE)
+	end
+
+end

@@ -1,0 +1,4316 @@
+@Logic
+script SmartPhoneUILogic extends Logic
+
+	property string RootPath = "/ui/SmartPhoneUI"
+
+	property string UI_TITLE_IDOL_LIST_KEY = "ui.smartphone.title.idol_list"
+
+	property string UI_TITLE_IDOL_STATS_KEY = "ui.smartphone.title.idol_stats"
+
+	property string UI_TITLE_ALBUM_KEY = "ui.smartphone.title.album"
+
+	property string UI_TITLE_COSTUME_KEY = "ui.smartphone.title.costume"
+
+	property string UI_TITLE_IDOL_PROFILE_KEY = "ui.smartphone.title.idol_profile"
+
+	property string UI_INTIMACY_LEVEL_KEY = "ui.smartphone.intimacy_level"
+
+	property string UI_BASE_COSTUME_OUTFIT_KEY = "ui.smartphone.base_costume.outfit"
+
+	property string UI_BASE_COSTUME_SHOES_KEY = "ui.smartphone.base_costume.shoes"
+
+	property string UI_BEHAVIOR_DEFAULT_KEY = "ui.shop.behavior.default"
+
+	property string UI_BEHAVIOR_WALK_KEY = "ui.shop.behavior.walk"
+
+	property string UI_BEHAVIOR_MOTION_KEY = "ui.shop.behavior.motion"
+
+	property string UI_OWNED_KEY = "ui.smartphone.item.equipped"
+
+	property string UI_PHOTO_FRONT_KEY = "ui.smartphone.item.front"
+
+	property string UI_PHOTO_BACK_KEY = "ui.smartphone.item.back"
+
+	property ButtonComponent OpenButton = "9a3bdfd8-6b52-4e00-a2f3-82b2eab4aa88"
+
+	property ButtonComponent CloseButton = "1cfbe402-ac2e-43b4-9702-1edca3607d3a"
+
+	property Entity LegacyOpenButtonEntity = "f4879bf0-9b8d-4324-bcb8-c6d66aa707ea"
+
+	property Entity DesignRootEntity = "e0f63c1d-efdb-4696-ad4c-beedc034930d"
+
+	property Entity DimmerEntity = "b72f719d-48f9-48ee-b681-81350776e71d"
+
+	property Entity PhoneEntity = "9a6fa10f-e78e-4b08-93c6-3f48207330ba"
+
+	property Entity MainPanelEntity = "551c0d87-21e9-4fe5-9d38-03a3519eccb7"
+
+	property Entity AlbumContentEntity = "76e1b7cf-6a9e-49f5-9b34-0835dd342dda"
+
+	property Entity CherishedItemContentEntity = "b0304c3b-3a1d-41fd-b5be-8eac0185feae"
+
+	property Entity FanPresentContentEntity = "db13a698-0df5-4ed6-acaa-ae3597e17720"
+
+	property Entity PhotoCardContentEntity = "1cf9a1c3-2421-489e-a3bc-bbea2de9714c"
+
+	property ButtonComponent CherishedItemTabButton = "509cae94-fde8-4cba-80d1-ba459c244ed7"
+
+	property ButtonComponent FanPresentTabButton = "833598fa-dd84-4e68-b181-24d3a55e0a2a"
+
+	property ButtonComponent PhotoCardTabButton = "4befcfad-959e-4d24-96ad-3d0794f951b9"
+
+	property Entity AlbumMenuNewBadgeEntity = "aabb640b-625a-42ec-af96-1bbcb439c8e2"
+
+	property Entity AlbumCherishedItemNewBadgeEntity = "81c7f5b5-fe21-47b4-a817-c46886e9fa35"
+
+	property Entity AlbumFanPresentNewBadgeEntity = "8e38326c-3a9e-4dae-99d0-62a026339b3f"
+
+	property Entity AlbumPhotoCardNewBadgeEntity = "93942ba9-1b23-4a21-b314-d74ca1f48254"
+
+	property Entity IdolMenuNewBadgeEntity = "bca5bad8-07e6-4da4-967b-f5f7ab651f09"
+
+	property Entity CherishedItemGridEntity = "fb48210d-18fd-4a84-ab20-78fe0c40791a"
+
+	property Entity CherishedItemTemplateEntity = "2d64952b-5337-4124-a7e4-356c2265353e"
+
+	property Entity FanPresentGridEntity = "3b0f328b-499d-4068-a101-40e668730ef7"
+
+	property Entity FanPresentTemplateEntity = "b6cb9524-c59c-4f78-97f9-c9a40b7d4093"
+
+	property Entity PhotoCardGridEntity = "f4e83b83-2fc9-487e-bdff-d8c495a01734"
+
+	property Entity PhotoCardTemplateEntity = "28ea5090-8881-448c-bc48-e8f68c7d75dd"
+
+	property SpriteGUIRendererComponent AlbumDetailIconImage = "8bc11319-9c2b-46f3-9f45-1f6a69f55216"
+
+	property TextGUIRendererComponent AlbumDetailNameText = "860392a0-d362-47dc-afa1-3cd614f3b885"
+
+	property TextGUIRendererComponent AlbumDetailDescText = "61916626-0dcf-4d01-a0f0-02e503bd34c2"
+
+	property SpriteGUIRendererComponent FanPresentDetailIconImage = "0d199ecc-c828-48e2-a85d-eeb78fa7bc88"
+
+	property TextGUIRendererComponent FanPresentDetailNameText = "ddccdb09-6427-4ea1-b839-57eed602c6ac"
+
+	property TextGUIRendererComponent FanPresentDetailDescText = "b04ecfc2-d139-4c25-a151-42c478b5bf40"
+
+	property TextGUIRendererComponent AlbumTitleText = "985680d8-1201-48b0-8e0f-fcd2f642d997"
+
+	property SpriteGUIRendererComponent AlbumTitleIconImage = "7060deed-e9c9-4142-bad2-5a6ec74f04a9"
+
+	property SpriteGUIRendererComponent PhotoCardDetailPortraitImage = "a52134f9-ed40-4536-a32b-fc86efbb59b7"
+
+	property SpriteGUIRendererComponent IdolProfilePortraitImage = "9c093101-3ff7-45db-82c5-9afe444d1ca6"
+
+	property TextGUIRendererComponent IdolProfileNameText = "83ca3c41-f228-4f9b-850a-67c35e679c76"
+
+	property TextGUIRendererComponent IdolProfileLevelText = "8ebf2785-60ae-4e56-bb02-1a059579ced0"
+
+	property SliderComponent IdolProfileGaugeSlider = "5e10dd01-dfeb-4796-8c43-5ca533788298"
+
+	property TextGUIRendererComponent PhotoCardDetailCharacterNameText = "3ac0e5bc-ccf0-461b-952f-758d1acde0fc"
+
+	property TextGUIRendererComponent PhotoCardDetailCardNameText = "b5ff6a20-119c-430c-a829-ecb6d18cf52a"
+
+	property TextGUIRendererComponent PhotoCardDetailCardDescText = "cb73b01c-be91-47f7-987d-d43e72691b4d"
+
+	property SpriteGUIRendererComponent PhotoCardDetailFrontImage = "fd0c67ba-1a16-4d42-9684-dc6df3ff21e9"
+
+	property SpriteGUIRendererComponent PhotoCardDetailBackImage = "79391500-d33b-4c94-b1fe-a928dca75089"
+
+	property Entity PhotoCardFrontBackDisplayEntity = "74385b7a-de3d-41a0-bb34-fd7dd9141ec5"
+
+	property TextGUIRendererComponent PhotoCardFrontBackButtonText = "d209a27f-6332-4178-bd50-3c0cd86b5892"
+
+	property ButtonComponent PhotoCardFrontBackClickButton = "6bb5ea0c-87d4-44ee-8e19-dd0e83d0c224"
+
+	property Entity PhotoCardBackMoveTargetEntity = "839d65a8-02e1-4528-9c3c-cb397649fd6e"
+
+	property string CurrentPage = "stat"
+
+	property string IconStatRuid = "72b3aceac349488f92c96106ccf321a4"
+
+	property string IconIdolRuid = "307c843a931d409fbaf4480fe687782d"
+
+	property string IconAlbumRuid = "207998ae11eb48f5bc4134cd0a63403d"
+
+	property string PlaceholderRuid = "67d9ae562627455e8b0f6bc6037f6911"
+
+	property any statClickHandler = nil
+
+	property any idolClickHandler = nil
+
+	property any albumClickHandler = nil
+
+	property any costumeClickHandler = nil
+
+	property any cherishedItemTabClickHandler = nil
+
+	property any fanPresentTabClickHandler = nil
+
+	property any photoCardTabClickHandler = nil
+
+	property any openClickHandler = nil
+
+	property any closeClickHandler = nil
+
+	property any characterChangedHandler = nil
+
+	property any idolRuntimeCards = {}
+
+	property any idolCardClickHandlers = {}
+
+	property any idolNewCharacterSnapshotSet = {}
+
+	property any idolNewBadgeByCharacterId = {}
+
+	property any idolEpisodeClickHandlers = {}
+
+	property string idolEpisodeNewSnapshotCharacterId = ""
+
+	property any idolEpisodeNewSnapshotSet = {}
+
+	property string selectedIdolCharacterId = ""
+
+	property any albumRuntimeCards = {}
+
+	property any fanPresentRuntimeCards = {}
+
+	property any photoCardRuntimeCards = {}
+
+	property string currentAlbumTabKey = "photoCard"
+
+	property string albumNewSnapshotCategory = ""
+
+	property any albumNewItemSnapshotSet = {}
+
+	property any albumNewBadgeByItemId = {}
+
+	property any albumCardClickHandlers = {}
+
+	property any albumCardScrollHandlers = {}
+
+	property string selectedAlbumItemId = ""
+
+	property string selectedFanPresentItemId = ""
+
+	property string selectedPhotoCardItemId = ""
+
+	property Entity CostumeItemGridEntity = "91b8fc82-d94d-4b02-b83d-8d7d2f852e61"
+
+	property Entity CostumeItemTemplateEntity = "808f6391-f6f4-4514-a200-29827a9b73a8"
+
+	property ButtonComponent CostumeHairButton = "431aeb33-a358-426a-b3c4-a55ff045c3d6"
+
+	property ButtonComponent CostumeClothesButton = "9021c2a2-6968-4792-904f-673c39df7c6b"
+
+	property ButtonComponent CostumeShoesButton = "ced2f9d3-9517-4785-ba67-6959cc31dd4e"
+
+	property ButtonComponent CostumeHatButton = "00f0f039-4596-495b-9c16-3e4debe1543d"
+
+	property ButtonComponent CostumeGoodsButton = "fa7d9d77-9687-432f-b943-8ecab84d1948"
+
+	property ButtonComponent CostumeSaveButton = "59574766-df5f-422c-b68e-b17d0b3edd9f"
+
+	property Entity DefaultSmartPhoneNewBadgeEntity = "e61b1e2c-7268-433b-92d2-b93de464e51e"
+
+	property Entity CostumeMenuNewBadgeEntity = "f6a450a9-86e0-43f8-88b5-d4415815e1ef"
+
+	property Entity CostumeHairNewBadgeEntity = "efa40607-fde0-49ef-9240-33f9afb03f90"
+
+	property Entity CostumeClothesNewBadgeEntity = "744a7647-4526-493d-a94f-7803f210c8fe"
+
+	property Entity CostumeShoesNewBadgeEntity = "b2b1e711-b3c9-4e97-9153-4f4b4b148600"
+
+	property Entity CostumeHatNewBadgeEntity = "57bde78c-3c19-4002-90e2-1cdbd510c653"
+
+	property Entity CostumeGoodsNewBadgeEntity = "89125fc6-dd8f-441f-b695-2b2c05153ddb"
+
+	property ButtonComponent CostumeHairSelectedButton = "d71f41f3-364d-4324-8ccc-9ab07d60a682"
+
+	property ButtonComponent CostumeClothesSelectedButton = "488d6cca-8153-43a1-8c6a-089c1cfb5667"
+
+	property ButtonComponent CostumeShoesSelectedButton = "b28034ab-28fe-471c-be82-41923ea11ade"
+
+	property ButtonComponent CostumeHatSelectedButton = "a272ac4a-8273-438f-bbdb-da7e251f85c3"
+
+	property ButtonComponent CostumeGoodsSelectedButton = "52f67692-cf9d-467f-862c-c9ce3e17f421"
+
+	property TextGUIRendererComponent CostumeHairSelectedText = "a0a797ba-9d01-452f-898a-bf0462c1ba75"
+
+	property TextGUIRendererComponent CostumeClothesSelectedText = "298f83f4-a86b-497e-bc49-bd648416fd42"
+
+	property TextGUIRendererComponent CostumeShoesSelectedText = "40afe664-b175-4d55-9d08-15ee12979f49"
+
+	property TextGUIRendererComponent CostumeHatSelectedText = "f99e2a77-b710-4ebc-a6e9-ae40b8aac474"
+
+	property TextGUIRendererComponent CostumeGoodsSelectedText = "6d81ffdd-1932-488f-87c3-922afe3e2cfd"
+
+	property Entity CostumeAvatarEntity = "74b38aeb-3735-49f5-861f-44d26e872d75"
+
+	property SpriteGUIRendererComponent CostumePortrait1Image = "d4a2cff4-1216-4eb4-89f6-3e64e760302e"
+
+	property SpriteGUIRendererComponent CostumePortrait2Image = "6d3ccfa6-aa4c-48ca-a013-26b55b55f446"
+
+	property SpriteGUIRendererComponent CostumePortrait3Image = "450faa86-5fc6-4206-a2d7-22bc7a8854b5"
+
+	property ButtonComponent CostumePortraitFrame1Button = "df5594c0-0bce-4ff7-8118-f23c7f1c7aaf"
+
+	property ButtonComponent CostumePortraitFrame2Button = "a9d4d780-2e9c-4e37-878e-38390da03449"
+
+	property ButtonComponent CostumePortraitFrame3Button = "76060ca2-5f20-4974-820d-a3b4f2238ebe"
+
+	property ButtonComponent CostumeBehaviorLeftButton = "cadcf904-70bf-4a6d-bdf2-fc62e0499ad8"
+
+	property ButtonComponent CostumeBehaviorRightButton = "85c967f0-ad5c-4361-878e-fb5407f1c5b1"
+
+	property TextGUIRendererComponent CostumeBehaviorText = "758b14dc-e8ad-4a26-a117-2984c429b199"
+
+	property string currentCostumeCategory = "hair"
+
+	property string previewCostumeCharacterId = ""
+
+	property integer costumeBehaviorIndex = 1
+
+	property any costumeRuntimeSlots = {}
+
+	property any costumeSlotClickHandlers = {}
+
+	property any costumeCategoryClickHandlers = {}
+
+	property any costumeSelectedItemClickHandlers = {}
+
+	property any costumePortraitFrameHandlers = {}
+
+	property any costumeBehaviorButtonHandlers = {}
+
+	property any costumeSaveClickHandler = nil
+
+	property any costumeSelectedByCategory = {}
+
+	property any costumeDraftByCharacterId = {}
+
+	property any shopItemChangedHandler = nil
+
+	property any newContentChangedHandler = nil
+
+	property string costumeNewSnapshotCategory = ""
+
+	property any costumeNewItemSnapshotSet = {}
+
+	property boolean isPhotoCardBackVisible = false
+
+	property any photoCardFrontBackClickHandler = nil
+
+	property integer photoCardToggleTweenTimerId = 0
+
+	property integer photoCardFlipTweenTimerId = 0
+
+	property Vector2 photoCardFrontButtonBasePosition = Vector2(0, 0)
+
+	property boolean isPhotoCardFrontButtonPositionReady = false
+
+	property number PhotoCardToggleTweenDuration = 0.18
+
+	property number PhotoCardFlipTweenDuration = 0.24
+
+	property integer MinIdolCardCount = 14
+
+	property integer IdolCardColumnCount = 3
+
+	property number IdolCardStartX = 74
+
+	property number IdolCardStartY = -92.5
+
+	property number IdolCardStepX = 162
+
+	property number IdolCardStepY = 201
+
+	property string LockedPortraitRuid = "efd29925505946719c34d8fe8007838f"
+
+	property integer MinAlbumSlotCount = 35
+
+	property integer AlbumCardColumnCount = 5
+
+	property integer PhotoCardColumnCount = 4
+
+	property number AlbumCardStartX = 55.5
+
+	property number AlbumCardStartY = -55.5
+
+	property number AlbumCardStepX = 123
+
+	property number AlbumCardStepY = 123
+
+	property number AlbumViewportHeight = 595
+
+	property number AlbumCardHeight = 111
+
+	property number albumScrollOffsetY = 0
+
+	property number albumMaxScrollOffsetY = 0
+
+	property any albumBeginDragHandler = nil
+
+	property any albumDragHandler = nil
+
+	property any albumEndDragHandler = nil
+
+	property Entity albumScrollEntity = nil
+
+	property any languageChangedHandler = nil
+
+	property boolean IsOpen = false
+
+	property boolean IsInitialized = false
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 화면 루트 경로를 잡고 스마트폰 메뉴 전환 이벤트를 연결합니다.
+		if self.IsInitialized then
+			return
+		end
+
+		self.RootPath = "/ui/SmartPhoneUI"
+		self:DisableLegacyOpenButton()
+		if self.OpenButton == nil or self.OpenButton.Entity == nil then
+			return
+		end
+
+		self.IsInitialized = true
+		self:PrepareIdolTemplate()
+		self:PrepareAlbumTemplate()
+		self:PrepareCostumeTemplate()
+		self:ConnectOpenButton()
+		self:ConnectCloseButton()
+		self:ConnectMenuButtons()
+		self:ConnectAlbumTabButtons()
+		self:ConnectPhotoCardFrontBackButton()
+		self:ConnectIdolEpisodeButtons()
+		self:ConnectCostumeCategoryButtons()
+		self:ConnectCostumeSelectedItemButtons()
+		self:ConnectCostumePortraitFrames()
+		self:ConnectCostumeBehaviorButtons()
+		self:ConnectCostumeSaveButton()
+		self:ConnectShopItemChanged()
+		self:ConnectNewContentChanged()
+		self:RefreshNewContentBadges()
+		self:ApplyCostumeBehavior()
+		
+		if _CharacterManager ~= nil then
+			self.characterChangedHandler = _CharacterManager:ConnectEvent(CharacterChangedEvent, self.OnCharacterChanged)
+		end
+		self:ConnectLanguageChanged()
+		
+		self:HideSmartPhone()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- UI 엔티티가 늦게 준비되는 경우 초기화를 다시 시도합니다.
+		if self.IsInitialized == false then
+			self:OnBeginPlay()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 화면이 내려갈 때 연결했던 이벤트 핸들러를 정리합니다.
+		self:ClearIdolRuntimeCards()
+		self:ClearAlbumRuntimeCards()
+		self:ClearCostumeRuntimeSlots()
+		self:DisconnectOpenButton()
+		self:DisconnectCloseButton()
+		self:DisconnectMenuButtons()
+		self:DisconnectAlbumTabButtons()
+		self:DisconnectPhotoCardFrontBackButton()
+		self:DisconnectIdolEpisodeButtons()
+		self:DisconnectCostumeCategoryButtons()
+		self:DisconnectCostumeSelectedItemButtons()
+		self:DisconnectCostumePortraitFrames()
+		self:DisconnectCostumeBehaviorButtons()
+		self:DisconnectCostumeSaveButton()
+		self:DisconnectShopItemChanged()
+		self:DisconnectNewContentChanged()
+		self:ClearPhotoCardToggleTween()
+		self:ClearPhotoCardFlipTween()
+		
+		if self.characterChangedHandler ~= nil and _CharacterManager ~= nil then
+			_CharacterManager:DisconnectEvent(CharacterChangedEvent, self.characterChangedHandler)
+			self.characterChangedHandler = nil
+		end
+		self:DisconnectLanguageChanged()
+
+		self.IsInitialized = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectOpenButton()
+		-- DefaultUI의 스마트폰 버튼을 스마트폰과 메인 패널 열기 동작에 연결합니다.
+		if self.OpenButton ~= nil and self.OpenButton.Entity ~= nil then
+			self.openClickHandler = self.OpenButton.Entity:ConnectEvent(ButtonClickEvent, self.OnOpenButtonClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectOpenButton()
+		-- DefaultUI 스마트폰 버튼에 연결했던 클릭 핸들러를 해제합니다.
+		if self.OpenButton ~= nil and self.OpenButton.Entity ~= nil and self.openClickHandler ~= nil then
+			self.OpenButton.Entity:DisconnectEvent(ButtonClickEvent, self.openClickHandler)
+			self.openClickHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisableLegacyOpenButton()
+		-- SmartPhoneUI에 남아 있는 이전 실행 버튼을 항상 비활성화합니다.
+		if self.LegacyOpenButtonEntity ~= nil then
+			self.LegacyOpenButtonEntity.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCloseButton()
+		-- 메인 패널의 닫기 버튼을 스마트폰 닫기 동작에 연결합니다.
+		if self.CloseButton ~= nil and self.CloseButton.Entity ~= nil and self.closeClickHandler == nil then
+			self.closeClickHandler = self.CloseButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCloseButtonClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCloseButton()
+		-- 메인 패널 닫기 버튼에 연결했던 클릭 핸들러를 해제합니다.
+		if self.CloseButton ~= nil and self.CloseButton.Entity ~= nil and self.closeClickHandler ~= nil then
+			self.CloseButton.Entity:DisconnectEvent(ButtonClickEvent, self.closeClickHandler)
+			self.closeClickHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCloseButtonClicked(ButtonClickEvent event)
+		-- 메인 패널 닫기 버튼을 누르면 스마트폰 UI를 닫습니다.
+		self:HideSmartPhone()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnOpenButtonClicked(ButtonClickEvent event)
+		-- 실행 버튼을 누를 때 스마트폰과 우측 패널을 열거나 닫습니다.
+		if self.IsOpen then
+			self:HideSmartPhone()
+			return
+		end
+		
+		self:ShowSmartPhone()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowSmartPhone()
+		-- 스마트폰 컨테이너를 켜고 마지막으로 보던 페이지를 복원합니다.
+		self.IsOpen = true
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "smartphone", true)
+		end
+		self:SetEntityEnable("DesignRoot", true)
+		self:SetEntityEnable("DesignRoot/Dimmer", true)
+		self:SetEntityEnable("DesignRoot/Phone", true)
+		self:SetEntityEnable("DesignRoot/MainPanel", true)
+		self:ConnectMenuButtons()
+		
+		if self.CurrentPage == "stat" then
+			self:ShowStatPage()
+		elseif self.CurrentPage == "album" then
+			self:ShowAlbumPage()
+		elseif self.CurrentPage == "costume" then
+			self:ShowCostumePage()
+		else
+			self:ShowIdolPage()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideSmartPhone()
+		-- 실행 버튼은 유지한 채 스마트폰과 패널 하위 영역만 숨깁니다.
+		self:DiscardCostumeDraftsIfLeavingCostume()
+		self:ClearAlbumNewItemSnapshot()
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		self.IsOpen = false
+		if _UIVisibilityNotifierLogic ~= nil then
+			_UIVisibilityNotifierLogic:SendFrom(self, "smartphone", false)
+		end
+		self:SetEntityEnable("DesignRoot/Dimmer", false)
+		self:SetEntityEnable("DesignRoot/Phone", false)
+		self:SetEntityEnable("DesignRoot/MainPanel", false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisibleRoot(boolean visible)
+		-- 공연 중에는 열린 스마트폰과 DefaultUI 실행 버튼을 숨기고, 종료 시 실행 버튼을 복구합니다.
+		if visible == false then
+			self:HideSmartPhone()
+		end
+		self:DisableLegacyOpenButton()
+		if self.OpenButton ~= nil and self.OpenButton.Entity ~= nil then
+			self.OpenButton.Entity.Enable = visible
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectMenuButtons()
+		-- 왼쪽 스마트폰의 스탯/아이돌/앨범 아이콘 터치 이벤트를 연결합니다.
+		local statButton = self:GetEntity("DesignRoot/Phone/MenuStat/ButtonBg")
+		if statButton ~= nil and self.statClickHandler == nil then
+			self.statClickHandler = statButton:ConnectEvent(ButtonClickEvent, self.OnStatClicked)
+		end
+		
+		local idolButton = self:GetEntity("DesignRoot/Phone/MenuIdol/ButtonBg")
+		if idolButton ~= nil and self.idolClickHandler == nil then
+			self.idolClickHandler = idolButton:ConnectEvent(ButtonClickEvent, self.OnIdolClicked)
+		end
+		
+		local albumButton = self:GetEntity("DesignRoot/Phone/MenuAlbum/ButtonBg")
+		if albumButton ~= nil and self.albumClickHandler == nil then
+			self.albumClickHandler = albumButton:ConnectEvent(ButtonClickEvent, self.OnAlbumClicked)
+		end
+
+		local costumeButton = self:GetEntity("DesignRoot/Phone/MenuCosutme/ButtonBg")
+		if costumeButton ~= nil and self.costumeClickHandler == nil then
+			self.costumeClickHandler = costumeButton:ConnectEvent(ButtonClickEvent, self.OnCostumeClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectMenuButtons()
+		-- 메뉴 버튼 이벤트 연결을 해제해 중복 호출을 방지합니다.
+		local statButton = self:GetEntity("DesignRoot/Phone/MenuStat/ButtonBg")
+		if statButton ~= nil and self.statClickHandler ~= nil then
+			statButton:DisconnectEvent(ButtonClickEvent, self.statClickHandler)
+			self.statClickHandler = nil
+		end
+		
+		local idolButton = self:GetEntity("DesignRoot/Phone/MenuIdol/ButtonBg")
+		if idolButton ~= nil and self.idolClickHandler ~= nil then
+			idolButton:DisconnectEvent(ButtonClickEvent, self.idolClickHandler)
+			self.idolClickHandler = nil
+		end
+		
+		local albumButton = self:GetEntity("DesignRoot/Phone/MenuAlbum/ButtonBg")
+		if albumButton ~= nil and self.albumClickHandler ~= nil then
+			albumButton:DisconnectEvent(ButtonClickEvent, self.albumClickHandler)
+			self.albumClickHandler = nil
+		end
+
+		local costumeButton = self:GetEntity("DesignRoot/Phone/MenuCosutme/ButtonBg")
+		if costumeButton ~= nil and self.costumeClickHandler ~= nil then
+			costumeButton:DisconnectEvent(ButtonClickEvent, self.costumeClickHandler)
+			self.costumeClickHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectAlbumTabButtons()
+		-- 앨범 내부 탭 버튼을 애장품/팬선물/포토카드 컨텐츠 전환에 연결합니다.
+		if self.CherishedItemTabButton ~= nil and self.CherishedItemTabButton.Entity ~= nil and self.cherishedItemTabClickHandler == nil then
+			self.cherishedItemTabClickHandler = self.CherishedItemTabButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCherishedItemTabClicked)
+		end
+
+		if self.FanPresentTabButton ~= nil and self.FanPresentTabButton.Entity ~= nil and self.fanPresentTabClickHandler == nil then
+			self.fanPresentTabClickHandler = self.FanPresentTabButton.Entity:ConnectEvent(ButtonClickEvent, self.OnFanPresentTabClicked)
+		end
+
+		if self.PhotoCardTabButton ~= nil and self.PhotoCardTabButton.Entity ~= nil and self.photoCardTabClickHandler == nil then
+			self.photoCardTabClickHandler = self.PhotoCardTabButton.Entity:ConnectEvent(ButtonClickEvent, self.OnPhotoCardTabClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectAlbumTabButtons()
+		-- 앨범 내부 탭 버튼 클릭 핸들러를 해제합니다.
+		if self.CherishedItemTabButton ~= nil and self.CherishedItemTabButton.Entity ~= nil and self.cherishedItemTabClickHandler ~= nil then
+			self.CherishedItemTabButton.Entity:DisconnectEvent(ButtonClickEvent, self.cherishedItemTabClickHandler)
+			self.cherishedItemTabClickHandler = nil
+		end
+
+		if self.FanPresentTabButton ~= nil and self.FanPresentTabButton.Entity ~= nil and self.fanPresentTabClickHandler ~= nil then
+			self.FanPresentTabButton.Entity:DisconnectEvent(ButtonClickEvent, self.fanPresentTabClickHandler)
+			self.fanPresentTabClickHandler = nil
+		end
+
+		if self.PhotoCardTabButton ~= nil and self.PhotoCardTabButton.Entity ~= nil and self.photoCardTabClickHandler ~= nil then
+			self.PhotoCardTabButton.Entity:DisconnectEvent(ButtonClickEvent, self.photoCardTabClickHandler)
+			self.photoCardTabClickHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectPhotoCardFrontBackButton()
+		-- 포토카드 앞/뒤 전환 클릭 버튼을 연결하고 표시 버튼의 현재 위치를 앞면 기준 위치로 저장합니다.
+		self:PreparePhotoCardFrontBackButton()
+		if self.PhotoCardFrontBackClickButton ~= nil and self.PhotoCardFrontBackClickButton.Entity ~= nil and self.photoCardFrontBackClickHandler == nil then
+			self.photoCardFrontBackClickHandler = self.PhotoCardFrontBackClickButton.Entity:ConnectEvent(ButtonClickEvent, self.OnPhotoCardFrontBackButtonClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectPhotoCardFrontBackButton()
+		-- 포토카드 앞/뒤 전환 클릭 버튼 핸들러를 해제합니다.
+		if self.PhotoCardFrontBackClickButton ~= nil and self.PhotoCardFrontBackClickButton.Entity ~= nil and self.photoCardFrontBackClickHandler ~= nil then
+			self.PhotoCardFrontBackClickButton.Entity:DisconnectEvent(ButtonClickEvent, self.photoCardFrontBackClickHandler)
+			self.photoCardFrontBackClickHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCherishedItemTabClicked(ButtonClickEvent event)
+		-- 체리쉬드 아이템 탭을 선택합니다.
+		self:ShowAlbumTab("cherishedItem")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnFanPresentTabClicked(ButtonClickEvent event)
+		-- 팬 선물 탭을 선택합니다.
+		self:ShowAlbumTab("fanPresent")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPhotoCardTabClicked(ButtonClickEvent event)
+		-- 포토카드 탭을 선택합니다.
+		self:ShowAlbumTab("photoCard")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPhotoCardFrontBackButtonClicked(ButtonClickEvent event)
+		-- 포토카드 앞/뒤 표시 상태를 전환합니다.
+		if self.photoCardFlipTweenTimerId ~= nil and self.photoCardFlipTweenTimerId ~= 0 then
+			return
+		end
+
+		self:SetPhotoCardBackVisible(self.isPhotoCardBackVisible == false, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowAlbumTab(string tabKey)
+		-- 앨범 내부 컨텐츠 중 선택된 탭의 계열만 표시합니다.
+		local isCherishedItem = tabKey == "cherishedItem"
+		local isFanPresent = tabKey == "fanPresent"
+		local isPhotoCard = tabKey == "photoCard"
+		self:SetBoundEntityEnable(self.CherishedItemContentEntity, isCherishedItem)
+		self:SetBoundEntityEnable(self.FanPresentContentEntity, isFanPresent)
+		self:SetBoundEntityEnable(self.PhotoCardContentEntity, isPhotoCard)
+		self.currentAlbumTabKey = tabKey
+
+		if self.IsOpen and self.CurrentPage == "album" and self.albumNewSnapshotCategory ~= tabKey then
+			self:BeginAlbumTabVisit(tabKey)
+			self:RefreshAlbumItems()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectIdolEpisodeButtons()
+		-- 프로필 에피소드 버튼을 선택된 아이돌의 친밀도 다이얼로그와 연결합니다.
+		self:DisconnectIdolEpisodeButtons()
+
+		for index = 1, 5 do
+			local episodeButton = self:GetEntity("DesignRoot/MainPanel/IdolContent/ProfilePreview/Episode/Episode" .. tostring(index))
+			if episodeButton ~= nil then
+				local storyIndex = index
+				local clickHandler = episodeButton:ConnectEvent(ButtonClickEvent, function()
+					self:OnIdolEpisodeClicked(storyIndex)
+				end)
+
+				table.insert(self.idolEpisodeClickHandlers, { entity = episodeButton, eventHandler = clickHandler })
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectIdolEpisodeButtons()
+		-- 프로필 에피소드 버튼에 연결된 클릭 핸들러를 해제합니다.
+		if self.idolEpisodeClickHandlers == nil then
+			self.idolEpisodeClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.idolEpisodeClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.idolEpisodeClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdolEpisodeClicked(integer storyIndex)
+		-- 선택된 아이돌의 해금된 친밀도 에피소드 다이얼로그를 엽니다.
+		if self.selectedIdolCharacterId == "" then
+			return
+		end
+
+		if _CharacterManager == nil or _IntimacyLevelMaster == nil or _IntimacyEpisodeMaster == nil or _DialogUILogic == nil then
+			log_warning("[SmartPhoneUILogic] Cannot open idol episode. Required logic is missing.")
+			return
+		end
+
+		local character = _CharacterManager:ClientGetCharacterById(self.selectedIdolCharacterId)
+		if character == nil or self:IsLockedIdolCharacter(character) then
+			return
+		end
+
+		local maxIntimacyLevel = self:GetCharacterMaxIntimacyLevel(character)
+		if self:IsIdolStoryUnlocked(maxIntimacyLevel, storyIndex) == false then
+			return
+		end
+
+		local episodeLevel = _IntimacyLevelMaster:GetUnlockLevel("story", storyIndex)
+		if episodeLevel <= 0 then
+			log_warning("[SmartPhoneUILogic] Intimacy story unlock level not found. storyIndex=" .. tostring(storyIndex))
+			return
+		end
+
+		local dialogId = _IntimacyEpisodeMaster:GetDialogId(character.id or "", episodeLevel)
+		if dialogId == "" then
+			log_warning("[SmartPhoneUILogic] Intimacy episode dialog not found. characterId=" .. tostring(character.id or "") .. ", level=" .. tostring(episodeLevel))
+			return
+		end
+
+		local backgroundId = _IntimacyEpisodeMaster:GetBackground(character.id or "", episodeLevel)
+		self:DismissIdolEpisodeNewBadge(character.id or "", storyIndex)
+		if _ScreenEffectUILogic ~= nil then
+			_ScreenEffectUILogic:Transition(0.5, function()
+				self:OpenIdolEpisodeDialog(dialogId, backgroundId)
+			end)
+			return
+		end
+
+		self:OpenIdolEpisodeDialog(dialogId, backgroundId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenIdolEpisodeDialog(string dialogId, string backgroundId)
+		-- 친밀도 에피소드 다이얼로그를 배경 옵션과 함께 엽니다.
+		local options = DialogOpenOptions()
+		options.dialogId = dialogId or ""
+		options.backgroundId = backgroundId or ""
+		options.closeWithFade = true
+		_DialogUILogic:Open(options)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStatClicked(ButtonClickEvent event)
+		-- 스탯 아이콘을 누르면 스탯 콘텐츠로 전환합니다.
+		if self.CurrentPage == "stat" then
+			return
+		end
+
+		self:ShowStatPage()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdolClicked(ButtonClickEvent event)
+		-- 아이돌 아이콘을 누르면 기존 아이돌 목록 콘텐츠로 되돌립니다.
+		if self.CurrentPage == "idol" then
+			return
+		end
+
+		self:ShowIdolPage()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAlbumClicked(ButtonClickEvent event)
+		-- 앨범 아이콘을 누르면 팬선물/애장품 앨범 콘텐츠로 전환합니다.
+		if self.CurrentPage == "album" then
+			return
+		end
+
+		self:ShowAlbumPage()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumeClicked(ButtonClickEvent event)
+		-- 치장 아이콘을 누르면 치장 콘텐츠로 전환합니다.
+		if self.CurrentPage == "costume" then
+			return
+		end
+
+		self:ShowCostumePage()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectLanguageChanged()
+		-- 언어 변경 이벤트 구독
+		if _LocalizationLogic ~= nil and self.languageChangedHandler == nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectLanguageChanged()
+		-- 언어 변경 이벤트 구독 해제
+		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
+			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+		end
+		self.languageChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnLanguageChanged(LanguageChangedEvent event)
+		-- 현재 페이지의 동적 이름·상태 문구 갱신
+		if self.CurrentPage == "stat" then
+			self:RefreshStatCharacters()
+		elseif self.CurrentPage == "idol" then
+			self:RefreshIdolCharacters()
+		elseif self.CurrentPage == "album" then
+			self:RefreshAlbumItems()
+		elseif self.CurrentPage == "costume" then
+			self:RebuildCostumeSlots()
+			self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCharacterChanged(any characterChangedEvent)
+		-- 캐릭터 데이터가 바뀌면 현재 열린 스탯 페이지를 최신 값으로 갱신합니다.
+		if self.CurrentPage == "stat" then
+			self:RefreshStatCharacters()
+		elseif self.CurrentPage == "idol" then
+			self:RefreshIdolCharacters()
+		elseif self.CurrentPage == "album" then
+			self:RefreshAlbumItems()
+		elseif self.CurrentPage == "costume" then
+			self:RefreshCostumeCharacters()
+			self:RebuildCostumeSlots()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowIdolPage()
+		-- 기존 아이돌 목록/프로필 영역을 켜고 스탯 영역을 숨깁니다.
+		self:ClearAlbumNewItemSnapshot()
+		self:DiscardCostumeDraftsIfLeavingCostume()
+		self.CurrentPage = "idol"
+		self:BeginIdolPageVisit()
+		self:SetTitle(self:GetLocalizedText(self.UI_TITLE_IDOL_LIST_KEY, ""), self:GetIdolIconRuid())
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolContent", true)
+		self:SetEntityEnable("DesignRoot/MainPanel/ProfilePreview", true)
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolScroll", true)
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolContent/ProfilePreview", true)
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolContent/IdolScroll", true)
+		self:SetEntityEnable("DesignRoot/MainPanel/StatContent", false)
+		self:SetBoundEntityEnable(self.AlbumContentEntity, false)
+		self:SetEntityEnable("DesignRoot/MainPanel/CostumeContent", false)
+		self:RefreshIdolCharacters()
+		self:BeginIdolEpisodeVisit(self.selectedIdolCharacterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowStatPage()
+		-- 기존 스마트폰 위치는 유지한 채 메인 패널 콘텐츠만 스탯 영역으로 바꿉니다.
+		self:ClearAlbumNewItemSnapshot()
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		self:DiscardCostumeDraftsIfLeavingCostume()
+		self.CurrentPage = "stat"
+		self:SetTitle(self:GetLocalizedText(self.UI_TITLE_IDOL_STATS_KEY, ""), self:GetStatIconRuid())
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolContent", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/ProfilePreview", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolScroll", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/StatContent", true)
+		self:SetBoundEntityEnable(self.AlbumContentEntity, false)
+		self:SetEntityEnable("DesignRoot/MainPanel/CostumeContent", false)
+		self:RefreshStatCharacters()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowAlbumPage()
+		-- 기존 스마트폰 위치는 유지한 채 메인 패널 콘텐츠만 앨범 영역으로 바꿉니다.
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		self:DiscardCostumeDraftsIfLeavingCostume()
+		self.CurrentPage = "album"
+		self:SetTitle(self:GetLocalizedText(self.UI_TITLE_ALBUM_KEY, ""), self:GetAlbumIconRuid())
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolContent", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/ProfilePreview", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolScroll", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/StatContent", false)
+		self:SetBoundEntityEnable(self.AlbumContentEntity, true)
+		self:SetEntityEnable("DesignRoot/MainPanel/CostumeContent", false)
+		self:ShowAlbumTab("photoCard")
+		self:RefreshAlbumItems()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCostumePage()
+		-- 메인 패널 콘텐츠를 치장 영역으로 바꾸고 헤어 카테고리에서 시작합니다.
+		self:ClearAlbumNewItemSnapshot()
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		self.CurrentPage = "costume"
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolContent", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/ProfilePreview", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/IdolScroll", false)
+		self:SetEntityEnable("DesignRoot/MainPanel/StatContent", false)
+		self:SetBoundEntityEnable(self.AlbumContentEntity, false)
+		self:SetEntityEnable("DesignRoot/MainPanel/CostumeContent", true)
+		self:RefreshCostumeCharacters()
+		self:ShowCostumeCategory("hair")
+		self:ApplyCostumeBehavior()
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareAlbumTemplate()
+		-- 앨범의 정적 슬롯을 숨기고 Item01을 런타임 복제용 템플릿으로 사용합니다.
+		self:ClearAlbumRuntimeCards()
+		self:ShowAlbumTab("photoCard")
+		
+		local albumGrid = self.CherishedItemGridEntity
+		if albumGrid ~= nil and albumGrid.ScrollLayoutGroupComponent ~= nil then
+			albumGrid.ScrollLayoutGroupComponent.Enable = true
+		end
+
+		local fanPresentGrid = self.FanPresentGridEntity
+		if fanPresentGrid ~= nil and fanPresentGrid.ScrollLayoutGroupComponent ~= nil then
+			fanPresentGrid.ScrollLayoutGroupComponent.Enable = true
+		end
+
+		local photoCardGrid = self.PhotoCardGridEntity
+		if photoCardGrid ~= nil and photoCardGrid.ScrollLayoutGroupComponent ~= nil then
+			photoCardGrid.ScrollLayoutGroupComponent.Enable = true
+		end
+		
+		local template = self:GetAlbumTemplate()
+		if template ~= nil then
+			template.Enable = false
+		end
+
+		local fanPresentTemplate = self:GetFanPresentTemplate()
+		if fanPresentTemplate ~= nil then
+			fanPresentTemplate.Enable = false
+		end
+
+		local photoCardTemplate = self:GetPhotoCardTemplate()
+		if photoCardTemplate ~= nil then
+			photoCardTemplate.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareCostumeTemplate()
+		self:ClearCostumeRuntimeSlots()
+
+		if self.CostumeItemGridEntity ~= nil and self.CostumeItemGridEntity.ScrollLayoutGroupComponent ~= nil then
+			self.CostumeItemGridEntity.ScrollLayoutGroupComponent.Enable = true
+		end
+
+		if self.CostumeItemTemplateEntity ~= nil then
+			self.CostumeItemTemplateEntity.Enable = false
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeCategoryButtons()
+		self:ConnectCostumeCategoryButton(self.CostumeHairButton, "hair")
+		self:ConnectCostumeCategoryButton(self.CostumeClothesButton, "clothes")
+		self:ConnectCostumeCategoryButton(self.CostumeShoesButton, "shoes")
+		self:ConnectCostumeCategoryButton(self.CostumeHatButton, "hat")
+		self:ConnectCostumeCategoryButton(self.CostumeGoodsButton, "goods")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeCategoryButton(ButtonComponent button, string category)
+		if button == nil or button.Entity == nil then
+			return
+		end
+
+		local capturedCategory = category
+		local clickHandler = button.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:ShowCostumeCategory(capturedCategory)
+		end)
+		table.insert(self.costumeCategoryClickHandlers, { entity = button.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumeCategoryButtons()
+		if self.costumeCategoryClickHandlers == nil then
+			self.costumeCategoryClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.costumeCategoryClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.costumeCategoryClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSelectedItemButtons()
+		self:ConnectCostumeSelectedItemButton(self.CostumeHairSelectedButton, "hair")
+		self:ConnectCostumeSelectedItemButton(self.CostumeClothesSelectedButton, "clothes")
+		self:ConnectCostumeSelectedItemButton(self.CostumeShoesSelectedButton, "shoes")
+		self:ConnectCostumeSelectedItemButton(self.CostumeHatSelectedButton, "hat")
+		self:ConnectCostumeSelectedItemButton(self.CostumeGoodsSelectedButton, "goods")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSelectedItemButton(ButtonComponent button, string category)
+		if button == nil or button.Entity == nil then
+			return
+		end
+
+		local capturedCategory = category
+		local clickHandler = button.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:RestoreCostumeCategorySelection(capturedCategory)
+		end)
+		table.insert(self.costumeSelectedItemClickHandlers, { entity = button.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumeSelectedItemButtons()
+		if self.costumeSelectedItemClickHandlers == nil then
+			self.costumeSelectedItemClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.costumeSelectedItemClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.costumeSelectedItemClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumePortraitFrames()
+		self:ConnectCostumePortraitFrame(self.CostumePortraitFrame1Button, 1)
+		self:ConnectCostumePortraitFrame(self.CostumePortraitFrame2Button, 2)
+		self:ConnectCostumePortraitFrame(self.CostumePortraitFrame3Button, 3)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumePortraitFrame(ButtonComponent frameButton, integer index)
+		if frameButton == nil or frameButton.Entity == nil then
+			return
+		end
+
+		local capturedIndex = index
+		local clickHandler = frameButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:OnCostumePortraitFrameClicked(capturedIndex)
+		end)
+		table.insert(self.costumePortraitFrameHandlers, { entity = frameButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumePortraitFrames()
+		if self.costumePortraitFrameHandlers == nil then
+			self.costumePortraitFrameHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.costumePortraitFrameHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.costumePortraitFrameHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeBehaviorButtons()
+		-- 스마트폰 치장 미리보기의 좌우 동작 버튼을 순환 전환에 연결합니다.
+		self:ConnectCostumeBehaviorButton(self.CostumeBehaviorLeftButton, -1)
+		self:ConnectCostumeBehaviorButton(self.CostumeBehaviorRightButton, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeBehaviorButton(ButtonComponent behaviorButton, integer delta)
+		-- 개별 동작 버튼 클릭 시 현재 동작 인덱스를 지정 방향으로 이동합니다.
+		if behaviorButton == nil or behaviorButton.Entity == nil then
+			return
+		end
+
+		local capturedDelta = delta
+		local clickHandler = behaviorButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:CycleCostumeBehavior(capturedDelta)
+		end)
+		table.insert(self.costumeBehaviorButtonHandlers, { entity = behaviorButton.Entity, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumeBehaviorButtons()
+		-- 스마트폰 치장 미리보기의 동작 버튼 클릭 핸들러를 해제합니다.
+		if self.costumeBehaviorButtonHandlers == nil then
+			self.costumeBehaviorButtonHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.costumeBehaviorButtonHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.costumeBehaviorButtonHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CycleCostumeBehavior(integer delta)
+		-- 스마트폰 치장 미리보기 동작을 기본, 걷기, 모션 순서로 순환합니다.
+		local count = self:GetCostumeBehaviorCount()
+		if count <= 0 then
+			return
+		end
+
+		self.costumeBehaviorIndex = self.costumeBehaviorIndex + delta
+		if self.costumeBehaviorIndex < 1 then
+			self.costumeBehaviorIndex = count
+		elseif self.costumeBehaviorIndex > count then
+			self.costumeBehaviorIndex = 1
+		end
+
+		self:ApplyCostumeBehavior()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumeBehavior()
+		-- 현재 동작의 라벨을 표시하고 스마트폰 치장 미리보기 아바타에 재생합니다.
+		if self.CostumeBehaviorText ~= nil then
+			self.CostumeBehaviorText.Text = self:GetCostumeBehaviorLabel(self.costumeBehaviorIndex)
+		end
+
+		self:PlayCurrentCostumeBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCurrentCostumeBehaviorAction()
+		-- 현재 동작 인덱스에 해당하는 액션을 스마트폰 치장 미리보기에서 재생합니다.
+		self:PlayCostumeAvatarAction(self:GetCostumeBehaviorAction(self.costumeBehaviorIndex))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCostumeAvatarAction(string actionName)
+		-- UI 아바타의 body 엔티티에 지정 액션을 루프로 재생합니다.
+		if actionName == nil or actionName == "" or self.CostumeAvatarEntity == nil then
+			return
+		end
+
+		local avatarRenderer = self.CostumeAvatarEntity.AvatarGUIRendererComponent
+		if isvalid(avatarRenderer) == false then
+			return
+		end
+
+		local bodyEntity = avatarRenderer:GetBodyEntity()
+		if isvalid(bodyEntity) == false then
+			return
+		end
+
+		local event = ActionStateChangedEvent()
+		event.CoreActionName = actionName
+		event.PartsActionName = actionName
+		event.PlayRate = 1
+		event.PlayType = SpriteAnimClipPlayType.Loop
+		bodyEntity:SendEvent(event)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCostumeBehaviorCount()
+		-- 스마트폰 치장 미리보기에서 지원하는 동작 개수를 반환합니다.
+		return 3
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeBehaviorAction(integer index)
+		-- 동작 인덱스에 대응하는 스프라이트 액션 ID를 반환합니다.
+		if index == 1 then
+			return "stand1"
+		elseif index == 2 then
+			return "walk1"
+		elseif index == 3 then
+			return "swingO2"
+		end
+
+		return "stand1"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeBehaviorLabel(integer index)
+		-- 동작 인덱스에 대응하는 스마트폰 치장 미리보기 표시 라벨을 반환합니다.
+		if index == 1 then
+			return self:GetLocalizedText(self.UI_BEHAVIOR_DEFAULT_KEY, "")
+		elseif index == 2 then
+			return self:GetLocalizedText(self.UI_BEHAVIOR_WALK_KEY, "")
+		elseif index == 3 then
+			return self:GetLocalizedText(self.UI_BEHAVIOR_MOTION_KEY, "")
+		end
+
+		return self:GetLocalizedText(self.UI_BEHAVIOR_DEFAULT_KEY, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSaveButton()
+		-- 치장 저장 버튼을 캐릭터 코스튬 영구 저장 요청에 연결합니다.
+		if self.CostumeSaveButton ~= nil and self.CostumeSaveButton.Entity ~= nil and self.costumeSaveClickHandler == nil then
+			self.costumeSaveClickHandler = self.CostumeSaveButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCostumeSaveButtonClicked)
+		end
+
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumeSaveButton()
+		-- 치장 저장 버튼에 연결했던 클릭 핸들러를 해제합니다.
+		if self.CostumeSaveButton ~= nil and self.CostumeSaveButton.Entity ~= nil and self.costumeSaveClickHandler ~= nil then
+			self.CostumeSaveButton.Entity:DisconnectEvent(ButtonClickEvent, self.costumeSaveClickHandler)
+			self.costumeSaveClickHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumeSaveButtonClicked(ButtonClickEvent event)
+		-- 현재 스마트폰 세션에서 편집한 모든 캐릭터의 치장을 한 번에 반영하고 저장하도록 요청합니다.
+		if self.previewCostumeCharacterId == "" or _CharacterCostumeManager == nil then
+			return
+		end
+
+		self:SaveCurrentCostumeDraft()
+		local tCostumePlainByCharacterId = {}
+		local draftCount = 0
+		for characterId, tCostumeDataPlain in pairs(self.costumeDraftByCharacterId) do
+			if characterId ~= nil and characterId ~= "" and tCostumeDataPlain ~= nil then
+				tCostumePlainByCharacterId[characterId] = tCostumeDataPlain
+				draftCount += 1
+			end
+		end
+
+		if draftCount <= 0 then
+			return
+		end
+
+		_CharacterCostumeManager:RequestSetCostumesAndSave(tCostumePlainByCharacterId)
+		self.costumeDraftByCharacterId = {}
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method any BuildCostumePreviewPlainTable()
+		-- 스마트폰 프리뷰 아바타의 17개 장착 슬롯을 서버 전송용 plain table로 만듭니다.
+		local costumeManager = nil
+		if self.CostumeAvatarEntity ~= nil then
+			costumeManager = self.CostumeAvatarEntity.CostumeManagerComponent
+		end
+		if isvalid(costumeManager) == false then
+			return nil
+		end
+
+		local tCostumeDataPlain = {}
+		tCostumeDataPlain.body = costumeManager.CustomBodyEquip or ""
+		tCostumeDataPlain.hair = costumeManager.CustomHairEquip or ""
+		tCostumeDataPlain.face = costumeManager.CustomFaceEquip or ""
+		tCostumeDataPlain.cap = costumeManager.CustomCapEquip or ""
+		tCostumeDataPlain.cape = costumeManager.CustomCapeEquip or ""
+		tCostumeDataPlain.coat = costumeManager.CustomCoatEquip or ""
+		tCostumeDataPlain.longcoat = costumeManager.CustomLongcoatEquip or ""
+		tCostumeDataPlain.pants = costumeManager.CustomPantsEquip or ""
+		tCostumeDataPlain.glove = costumeManager.CustomGloveEquip or ""
+		tCostumeDataPlain.shoes = costumeManager.CustomShoesEquip or ""
+		tCostumeDataPlain.oneHandedWeapon = costumeManager.CustomOneHandedWeaponEquip or ""
+		tCostumeDataPlain.twoHandedWeapon = costumeManager.CustomTwoHandedWeaponEquip or ""
+		tCostumeDataPlain.subWeapon = costumeManager.CustomSubWeaponEquip or ""
+		tCostumeDataPlain.faceAccessory = costumeManager.CustomFaceAccessoryEquip or ""
+		tCostumeDataPlain.eyeAccessory = costumeManager.CustomEyeAccessoryEquip or ""
+		tCostumeDataPlain.earAccessory = costumeManager.CustomEarAccessoryEquip or ""
+		tCostumeDataPlain.ear = costumeManager.CustomEarEquip or ""
+		return tCostumeDataPlain
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectShopItemChanged()
+		if _ShopItemManager ~= nil and self.shopItemChangedHandler == nil then
+			self.shopItemChangedHandler = _ShopItemManager:ConnectEvent(ShopItemChangedEvent, self.OnShopItemChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectShopItemChanged()
+		if self.shopItemChangedHandler ~= nil and _ShopItemManager ~= nil then
+			_ShopItemManager:DisconnectEvent(ShopItemChangedEvent, self.shopItemChangedHandler)
+		end
+		self.shopItemChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectNewContentChanged()
+		if _NewContentManager ~= nil and self.newContentChangedHandler == nil then
+			self.newContentChangedHandler = _NewContentManager:ConnectEvent(NewContentChangedEvent, self.OnNewContentChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectNewContentChanged()
+		if self.newContentChangedHandler ~= nil and _NewContentManager ~= nil then
+			_NewContentManager:DisconnectEvent(NewContentChangedEvent, self.newContentChangedHandler)
+		end
+		self.newContentChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnNewContentChanged(NewContentChangedEvent event)
+		-- 새 콘텐츠 동기화 시 현재 열어 둔 페이지의 방문 스냅샷과 배지를 갱신합니다.
+		if self.IsOpen and self.CurrentPage == "album" then
+			self:CaptureAlbumNewItemsForCurrentTab()
+		elseif self.IsOpen and self.CurrentPage == "idol" then
+			self:CaptureIdolNewCharactersWhileOpen()
+			self:CaptureIdolEpisodeNewContentForSelectedCharacter()
+		end
+		self:RefreshNewContentBadges()
+		if self.IsOpen and self.CurrentPage == "album" then
+			self:RefreshAlbumItems()
+		elseif self.IsOpen and self.CurrentPage == "idol" then
+			self:RefreshIdolCharacters()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureIdolNewCharactersWhileOpen()
+		-- 아이돌 페이지를 보고 있는 중 새로 해금된 캐릭터도 현재 방문 스냅샷에 합칩니다.
+		if _NewContentManager == nil then
+			return
+		end
+
+		local characterIds = _NewContentManager:ClientGetNewContentIds("character", "idol")
+		for _, characterId in ipairs(characterIds) do
+			if characterId ~= nil and characterId ~= "" then
+				self.idolNewCharacterSnapshotSet[characterId] = true
+			end
+		end
+
+		if #characterIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("character", "idol")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginIdolPageVisit()
+		-- 아이돌 페이지 진입 시 신규 캐릭터를 스냅샷으로 보존하고 서버의 미확인 상태는 읽음 처리합니다.
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		if _NewContentManager == nil then
+			return
+		end
+
+		local characterIds = _NewContentManager:ClientGetNewContentIds("character", "idol")
+		for _, characterId in ipairs(characterIds) do
+			if characterId ~= nil and characterId ~= "" then
+				self.idolNewCharacterSnapshotSet[characterId] = true
+			end
+		end
+		self:RefreshNewContentBadges()
+
+		if #characterIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("character", "idol")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdolNewCharacterSnapshot()
+		-- 아이돌 페이지를 벗어나거나 스마트폰을 닫을 때 방문 중 신규 표시를 정리합니다.
+		self.idolNewCharacterSnapshotSet = {}
+		self.idolNewBadgeByCharacterId = {}
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasIdolNewCharacterSnapshot()
+		-- 현재 아이돌 페이지 방문 스냅샷에 신규 캐릭터가 남아 있는지 반환합니다.
+		for _, isNew in pairs(self.idolNewCharacterSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsIdolCharacterNewInSnapshot(any character)
+		-- 지정 캐릭터가 현재 아이돌 방문에서 신규 표시 대상인지 반환합니다.
+		if character == nil or self:IsLockedIdolCharacter(character) then
+			return false
+		end
+
+		local characterId = character.id or ""
+		return characterId ~= "" and self.idolNewCharacterSnapshotSet[characterId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissIdolCharacterNewBadge(string characterId)
+		-- 캐릭터 카드를 직접 확인하면 해당 카드의 방문 중 신규 표시만 즉시 제거합니다.
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		self.idolNewCharacterSnapshotSet[characterId] = nil
+		self:RefreshIdolCharacterNewBadge(characterId)
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginIdolEpisodeVisit(string characterId)
+		-- 선택 캐릭터의 신규 에피소드를 방문 스냅샷으로 보존하고 서버의 미확인 상태는 읽음 처리합니다.
+		self:ClearIdolEpisodeNewSnapshot()
+		if characterId == nil or characterId == "" or _NewContentManager == nil then
+			return
+		end
+
+		self.idolEpisodeNewSnapshotCharacterId = characterId
+		self:CaptureIdolEpisodeNewContentForSelectedCharacter()
+		self:RefreshIdolEpisodeNewBadges()
+		self:RefreshIdolCharacterNewBadge(characterId)
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureIdolEpisodeNewContentForSelectedCharacter()
+		-- 현재 선택 캐릭터에서 새로 동기화된 친밀도 에피소드를 방문 스냅샷에 합칩니다.
+		local characterId = self.selectedIdolCharacterId or ""
+		if characterId == "" or _NewContentManager == nil then
+			return
+		end
+
+		if self.idolEpisodeNewSnapshotCharacterId ~= characterId then
+			self.idolEpisodeNewSnapshotCharacterId = characterId
+			self.idolEpisodeNewSnapshotSet = {}
+		end
+
+		local contentIds = _NewContentManager:ClientGetNewContentIds("intimacyEpisode", characterId)
+		for _, contentId in ipairs(contentIds) do
+			if contentId ~= nil and contentId ~= "" then
+				self.idolEpisodeNewSnapshotSet[contentId] = true
+			end
+		end
+
+		if #contentIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("intimacyEpisode", characterId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdolEpisodeNewSnapshot()
+		-- 아이돌 페이지 또는 선택 캐릭터를 벗어날 때 방문 중 에피소드 신규 표시를 정리합니다.
+		local previousCharacterId = self.idolEpisodeNewSnapshotCharacterId
+		self.idolEpisodeNewSnapshotCharacterId = ""
+		self.idolEpisodeNewSnapshotSet = {}
+		self:RefreshIdolEpisodeNewBadges()
+		self:RefreshIdolCharacterNewBadge(previousCharacterId)
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasIdolEpisodeNewSnapshot()
+		for _, isNew in pairs(self.idolEpisodeNewSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ShouldShowIdolCharacterNewBadge(string characterId)
+		-- 신규 캐릭터이거나 확인하지 않은 친밀도 에피소드가 있으면 캐릭터 카드에도 빨간점을 표시합니다.
+		if characterId == nil or characterId == "" then
+			return false
+		end
+
+		if self.idolNewCharacterSnapshotSet[characterId] == true then
+			return true
+		end
+
+		if self.idolEpisodeNewSnapshotCharacterId == characterId and self:HasIdolEpisodeNewSnapshot() then
+			return true
+		end
+
+		return _NewContentManager ~= nil
+			and _NewContentManager:ClientHasAnyNewContent("intimacyEpisode", characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolCharacterNewBadge(string characterId)
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		local badge = self.idolNewBadgeByCharacterId[characterId]
+		if badge ~= nil and isvalid(badge) then
+			badge.Enable = self:ShouldShowIdolCharacterNewBadge(characterId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolEpisodeNewBadges()
+		-- 현재 선택 캐릭터의 에피소드 행별 신규 표시를 갱신합니다.
+		local isSelectedSnapshot = self.selectedIdolCharacterId ~= ""
+			and self.idolEpisodeNewSnapshotCharacterId == self.selectedIdolCharacterId
+		for storyIndex = 1, 5 do
+			local contentId = tostring(storyIndex)
+			local isNew = isSelectedSnapshot and self.idolEpisodeNewSnapshotSet[contentId] == true
+			local badgePath = "DesignRoot/MainPanel/IdolContent/ProfilePreview/Episode/Episode"
+				.. contentId .. "/NewBadge"
+			self:SetEntityEnable(badgePath, isNew)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissIdolEpisodeNewBadge(string characterId, integer storyIndex)
+		-- 에피소드를 직접 열면 해당 행의 방문 중 신규 표시를 제거합니다.
+		if characterId == nil or characterId == ""
+			or self.idolEpisodeNewSnapshotCharacterId ~= characterId then
+			return
+		end
+
+		self.idolEpisodeNewSnapshotSet[tostring(storyIndex)] = nil
+		self:RefreshIdolEpisodeNewBadges()
+		self:RefreshIdolCharacterNewBadge(characterId)
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureAlbumNewItemsForCurrentTab()
+		-- 현재 보고 있는 앨범 탭에서 새로 동기화된 항목을 방문 스냅샷에 합칩니다.
+		if _NewContentManager == nil or self.currentAlbumTabKey == "" then
+			return
+		end
+
+		local contentIds = _NewContentManager:ClientGetNewContentIds("album", self.currentAlbumTabKey)
+		if #contentIds > 0 then
+			self.albumNewSnapshotCategory = self.currentAlbumTabKey
+		end
+		for _, contentId in ipairs(contentIds) do
+			if contentId ~= nil and contentId ~= "" then
+				self.albumNewItemSnapshotSet[contentId] = true
+			end
+		end
+
+		if #contentIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("album", self.currentAlbumTabKey)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshNewContentBadges()
+		-- 전체 미확인 상태와 현재 방문 스냅샷을 합쳐 스마트폰 계층별 빨간점을 표시합니다.
+		local hasCostumeNew = false
+		local hasHairNew = false
+		local hasClothesNew = false
+		local hasShoesNew = false
+		local hasHatNew = false
+		local hasGoodsNew = false
+		local hasAlbumNew = false
+		local hasCherishedItemNew = false
+		local hasFanPresentNew = false
+		local hasPhotoCardNew = false
+		local hasCharacterNew = false
+		local hasIntimacyEpisodeNew = false
+
+		if _NewContentManager ~= nil then
+			hasCostumeNew = _NewContentManager:ClientHasAnyNewContent("costume", "")
+			hasHairNew = _NewContentManager:ClientHasAnyNewContent("costume", "hair")
+			hasClothesNew = _NewContentManager:ClientHasAnyNewContent("costume", "clothes")
+			hasShoesNew = _NewContentManager:ClientHasAnyNewContent("costume", "shoes")
+			hasHatNew = _NewContentManager:ClientHasAnyNewContent("costume", "hat")
+			hasGoodsNew = _NewContentManager:ClientHasAnyNewContent("costume", "goods")
+			hasAlbumNew = _NewContentManager:ClientHasAnyNewContent("album", "")
+			hasCherishedItemNew = _NewContentManager:ClientHasAnyNewContent("album", "cherishedItem")
+			hasFanPresentNew = _NewContentManager:ClientHasAnyNewContent("album", "fanPresent")
+			hasPhotoCardNew = _NewContentManager:ClientHasAnyNewContent("album", "photoCard")
+			hasCharacterNew = _NewContentManager:ClientHasAnyNewContent("character", "idol")
+			hasIntimacyEpisodeNew = _NewContentManager:ClientHasAnyNewContent("intimacyEpisode", "")
+		end
+
+		if self:HasCostumeNewItemSnapshot() then
+			hasCostumeNew = true
+			if self.costumeNewSnapshotCategory == "hair" then
+				hasHairNew = true
+			elseif self.costumeNewSnapshotCategory == "clothes" then
+				hasClothesNew = true
+			elseif self.costumeNewSnapshotCategory == "shoes" then
+				hasShoesNew = true
+			elseif self.costumeNewSnapshotCategory == "hat" then
+				hasHatNew = true
+			elseif self.costumeNewSnapshotCategory == "goods" then
+				hasGoodsNew = true
+			end
+		end
+
+		if self:HasAlbumNewItemSnapshot() then
+			hasAlbumNew = true
+			if self.albumNewSnapshotCategory == "cherishedItem" then
+				hasCherishedItemNew = true
+			elseif self.albumNewSnapshotCategory == "fanPresent" then
+				hasFanPresentNew = true
+			elseif self.albumNewSnapshotCategory == "photoCard" then
+				hasPhotoCardNew = true
+			end
+		end
+
+		if self:HasIdolNewCharacterSnapshot() then
+			hasCharacterNew = true
+		end
+		
+		if self:HasIdolEpisodeNewSnapshot() then
+			hasIntimacyEpisodeNew = true
+		end
+
+		self:SetBoundEntityEnable(self.DefaultSmartPhoneNewBadgeEntity, hasCostumeNew or hasAlbumNew or hasCharacterNew or hasIntimacyEpisodeNew)
+		self:SetBoundEntityEnable(self.CostumeMenuNewBadgeEntity, hasCostumeNew)
+		self:SetBoundEntityEnable(self.CostumeHairNewBadgeEntity, hasHairNew)
+		self:SetBoundEntityEnable(self.CostumeClothesNewBadgeEntity, hasClothesNew)
+		self:SetBoundEntityEnable(self.CostumeShoesNewBadgeEntity, hasShoesNew)
+		self:SetBoundEntityEnable(self.CostumeHatNewBadgeEntity, hasHatNew)
+		self:SetBoundEntityEnable(self.CostumeGoodsNewBadgeEntity, hasGoodsNew)
+		self:SetBoundEntityEnable(self.AlbumMenuNewBadgeEntity, hasAlbumNew)
+		self:SetBoundEntityEnable(self.AlbumCherishedItemNewBadgeEntity, hasCherishedItemNew)
+		self:SetBoundEntityEnable(self.AlbumFanPresentNewBadgeEntity, hasFanPresentNew)
+		self:SetBoundEntityEnable(self.AlbumPhotoCardNewBadgeEntity, hasPhotoCardNew)
+		self:SetBoundEntityEnable(self.IdolMenuNewBadgeEntity, hasCharacterNew or hasIntimacyEpisodeNew)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasCostumeNewItemSnapshot()
+		for _, isNew in pairs(self.costumeNewItemSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasAlbumNewItemSnapshot()
+		for _, isNew in pairs(self.albumNewItemSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginAlbumTabVisit(string category)
+		self:ClearAlbumNewItemSnapshot()
+		self.albumNewSnapshotCategory = category or ""
+		if self.albumNewSnapshotCategory == "" or _NewContentManager == nil then
+			return
+		end
+
+		local contentIds = _NewContentManager:ClientGetNewContentIds("album", self.albumNewSnapshotCategory)
+		for _, contentId in ipairs(contentIds) do
+			if contentId ~= nil and contentId ~= "" then
+				self.albumNewItemSnapshotSet[contentId] = true
+			end
+		end
+		self:RefreshNewContentBadges()
+
+		if #contentIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("album", self.albumNewSnapshotCategory)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearAlbumNewItemSnapshot()
+		self.albumNewSnapshotCategory = ""
+		self.albumNewItemSnapshotSet = {}
+		self.albumNewBadgeByItemId = {}
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsAlbumItemNewInSnapshot(any tItem)
+		if tItem == nil then
+			return false
+		end
+
+		local itemId = tItem.itemId or ""
+		return itemId ~= "" and self.albumNewItemSnapshotSet[itemId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissAlbumItemNewBadge(string itemId)
+		if itemId == nil or itemId == "" then
+			return
+		end
+
+		self.albumNewItemSnapshotSet[itemId] = nil
+		local badge = self.albumNewBadgeByItemId[itemId]
+		if badge ~= nil and isvalid(badge) then
+			badge.Enable = false
+		end
+		self.albumNewBadgeByItemId[itemId] = nil
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnShopItemChanged(any shopItemChangedEvent)
+		if self.CurrentPage == "costume" then
+			self:RebuildCostumeSlots()
+			self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCostumeCategory(string category)
+		if category == nil or category == "" then
+			return
+		end
+		if self.costumeNewSnapshotCategory == category then
+			return
+		end
+
+		self:BeginCostumeCategoryVisit(category)
+		self.currentCostumeCategory = category
+		self:RefreshCostumeCategoryButtonVisuals()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginCostumeCategoryVisit(string category)
+		self:ClearCostumeNewItemSnapshot()
+		self.costumeNewSnapshotCategory = category or ""
+		if self.costumeNewSnapshotCategory == "" or _NewContentManager == nil then
+			return
+		end
+
+		local contentIds = _NewContentManager:ClientGetNewContentIds("costume", self.costumeNewSnapshotCategory)
+		for _, contentId in ipairs(contentIds) do
+			if contentId ~= nil and contentId ~= "" then
+				self.costumeNewItemSnapshotSet[contentId] = true
+			end
+		end
+		self:RefreshNewContentBadges()
+
+		if #contentIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("costume", self.costumeNewSnapshotCategory)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCostumeNewItemSnapshot()
+		self.costumeNewSnapshotCategory = ""
+		self.costumeNewItemSnapshotSet = {}
+		self:RefreshNewContentBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCostumeCategoryButtonVisuals()
+		-- 현재 카테고리에는 SelectedColor, 나머지 카테고리에는 NormalColor를 적용합니다.
+		self:SetCostumeCategoryButtonActive(self.CostumeHairButton, self.currentCostumeCategory == "hair")
+		self:SetCostumeCategoryButtonActive(self.CostumeClothesButton, self.currentCostumeCategory == "clothes")
+		self:SetCostumeCategoryButtonActive(self.CostumeShoesButton, self.currentCostumeCategory == "shoes")
+		self:SetCostumeCategoryButtonActive(self.CostumeHatButton, self.currentCostumeCategory == "hat")
+		self:SetCostumeCategoryButtonActive(self.CostumeGoodsButton, self.currentCostumeCategory == "goods")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCostumeCategoryButtonActive(ButtonComponent button, boolean isActive)
+		if button == nil or button.Entity == nil or button.Colors == nil then
+			return
+		end
+
+		local renderer = button.Entity.SpriteGUIRendererComponent
+		if renderer == nil then
+			return
+		end
+
+		local targetColor = button.Colors.NormalColor
+		if isActive then
+			targetColor = button.Colors.SelectedColor
+		end
+
+		if targetColor ~= nil then
+			renderer.Color = targetColor
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RebuildCostumeSlots()
+		self:ClearCostumeRuntimeSlots()
+
+		local template = self.CostumeItemTemplateEntity
+		if template == nil then
+			log_warning("[SmartPhoneUI] costume item template is nil")
+			return
+		end
+
+		template.Enable = false
+
+		local items = self:GetDisplayCostumeItemsByCategory(self.currentCostumeCategory)
+		for index = 1, #items do
+			local tShopItem = items[index]
+			local slot = template:Clone(self:GetCostumeRuntimeSlotName(index))
+			if slot ~= nil then
+				slot.Enable = true
+				self:SetCostumeSlot(slot, tShopItem)
+				self:ConnectCostumeSlotClick(slot, tShopItem)
+				table.insert(self.costumeRuntimeSlots, slot)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetDisplayCostumeItemsByCategory(string category)
+		local items = {}
+		self:AddUnlockedCharacterBaseCostumeItems(items, category)
+		self:AddOwnedShopCostumeItems(items, category)
+		return items
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddUnlockedCharacterBaseCostumeItems(any items, string category)
+		if items == nil or _CharacterManager == nil or _CharacterBaseCostumeMaster == nil then
+			return
+		end
+
+		local characters = _CharacterManager:ClientGetCharacters()
+		if characters == nil then
+			return
+		end
+
+		if category == "clothes" or category == "shoes" then
+			for _, character in ipairs(characters) do
+				if self:IsUnlockedCostumeCharacter(character) then
+					local characterId = character.id or ""
+					local ruid = self:GetBaseCostumeRuid(characterId, category)
+					if ruid ~= nil and ruid ~= "" then
+						local tBaseItem = {}
+						tBaseItem.shopItemId = "__base_shared_" .. tostring(category or "")
+						tBaseItem.name = self:GetBaseCostumeDisplayName(character, category)
+						tBaseItem.category = category or ""
+						tBaseItem.ruid = ruid
+						tBaseItem.isBaseCostume = true
+						tBaseItem.sourceCharacterId = characterId
+						table.insert(items, tBaseItem)
+						return
+					end
+				end
+			end
+
+			return
+		end
+
+		for _, character in ipairs(characters) do
+			if self:IsUnlockedCostumeCharacter(character) then
+				local characterId = character.id or ""
+				local ruid = self:GetBaseCostumeRuid(characterId, category)
+				if ruid ~= nil and ruid ~= "" then
+					local tBaseItem = {}
+					tBaseItem.shopItemId = self:GetBaseCostumeItemId(characterId, category)
+					tBaseItem.name = self:GetBaseCostumeDisplayName(character, category)
+					tBaseItem.category = category or ""
+					tBaseItem.ruid = ruid
+					tBaseItem.isBaseCostume = true
+					tBaseItem.sourceCharacterId = characterId
+					table.insert(items, tBaseItem)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsUnlockedCostumeCharacter(any character)
+		if character == nil then
+			return false
+		end
+
+		if character.isDiscovered == false then
+			return false
+		end
+
+		local characterId = character.id or ""
+		if characterId == "" then
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddOwnedShopCostumeItems(any items, string category)
+		if items == nil then
+			return
+		end
+		if _ShopItemManager == nil or _ShopItemMaster == nil then
+			return
+		end
+
+		local ownedIds = _ShopItemManager:ClientGetOwnedShopItemIds()
+		if ownedIds == nil then
+			return
+		end
+
+		for _, shopItemId in ipairs(ownedIds) do
+			local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+			if tShopItem ~= nil and (category == nil or category == "" or (tShopItem.category or "") == category) then
+				table.insert(items, tShopItem)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetOwnedCostumeItemsByCategory(string category)
+		local items = {}
+		self:AddOwnedShopCostumeItems(items, category)
+		return items
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeRuid(string characterId, string category)
+		local mapleCategory = self:GetMapleAvatarItemCategory(category)
+		if characterId == "" or mapleCategory == nil or _CharacterBaseCostumeMaster == nil then
+			return ""
+		end
+
+		return _CharacterBaseCostumeMaster:GetRuid(characterId, mapleCategory)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetMapleAvatarItemCategory(string category)
+		if category == "hair" then
+			return MapleAvatarItemCategory.Hair
+		elseif category == "clothes" then
+			return MapleAvatarItemCategory.Longcoat
+		elseif category == "shoes" then
+			return MapleAvatarItemCategory.Shoes
+		elseif category == "hat" then
+			return MapleAvatarItemCategory.Cap
+		elseif category == "goods" then
+			return MapleAvatarItemCategory.OneHandedWeapon
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeItemId(string characterId, string category)
+		return "__base_" .. tostring(characterId or "") .. "_" .. tostring(category or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeDisplayName(any character, string category)
+		if category == "clothes" then
+			return self:FormatLocalized(self.UI_BASE_COSTUME_OUTFIT_KEY, "", self:GetCostumeCategoryDisplayName(category), nil, nil)
+		elseif category == "shoes" then
+			return self:FormatLocalized(self.UI_BASE_COSTUME_SHOES_KEY, "", self:GetCostumeCategoryDisplayName(category), nil, nil)
+		end
+
+		local characterName = ""
+		if character ~= nil then
+			characterName = character.name or ""
+		end
+		if characterName == "" and character ~= nil then
+			characterName = character.id or ""
+		end
+
+		return characterName .. " " .. self:GetCostumeCategoryDisplayName(category)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeCategoryDisplayName(string category)
+		if category == "hair" then
+		return self:GetLocalizedText("ui.shop.category.hair", "")
+		elseif category == "clothes" then
+		return self:GetLocalizedText("ui.shop.category.clothes", "")
+		elseif category == "shoes" then
+		return self:GetLocalizedText("ui.shop.category.shoes", "")
+		elseif category == "hat" then
+		return self:GetLocalizedText("ui.shop.category.hat", "")
+		elseif category == "goods" then
+		return self:GetLocalizedText("ui.smartphone.category.weapon", "")
+		end
+
+		return self:GetLocalizedText("ui.smartphone.category.cosmetic", "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCostumeRuntimeSlots()
+		self:DisconnectCostumeSlotClicks()
+
+		if self.costumeRuntimeSlots == nil then
+			self.costumeRuntimeSlots = {}
+			return
+		end
+
+		for _, slot in ipairs(self.costumeRuntimeSlots) do
+			if isvalid(slot) then
+				slot:Destroy()
+			end
+		end
+
+		self.costumeRuntimeSlots = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeRuntimeSlotName(integer index)
+		if index < 10 then
+			return "RuntimeCostumeItem0" .. tostring(index)
+		end
+
+		return "RuntimeCostumeItem" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCostumeSlot(Entity slot, any tShopItem)
+		if slot == nil or tShopItem == nil then
+			return
+		end
+
+		self:SetCostumeSlotIcon(slot, tShopItem)
+		self:SetCostumeSlotText(slot, self:GetCostumeSlotStatusText(tShopItem))
+		local newBadge = slot:GetChildByName("NewBadge", true)
+		if newBadge ~= nil then
+			newBadge.Enable = self:IsCostumeItemNewInSnapshot(tShopItem)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCostumeItemNewInSnapshot(any tShopItem)
+		if tShopItem == nil or tShopItem.isBaseCostume == true then
+			return false
+		end
+
+		local shopItemId = tShopItem.shopItemId or ""
+		return shopItemId ~= "" and self.costumeNewItemSnapshotSet[shopItemId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCostumeSlotIcon(Entity slot, any tShopItem)
+		local icon = slot:GetChildByName("Icon", true)
+		if icon == nil or icon.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		local ruid = tShopItem.ruid or ""
+		if ruid == "" then
+			icon.SpriteGUIRendererComponent.ImageRUID = DataRef("")
+			icon.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		icon.SpriteGUIRendererComponent.ImageRUID = DataRef("thumbnail://" .. ruid)
+		icon.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCostumeSlotText(Entity slot, string text)
+		local textEntity = slot:GetChildByName("UIText", true)
+		if textEntity ~= nil and textEntity.TextGUIRendererComponent ~= nil then
+			textEntity.TextGUIRendererComponent.Text = text or ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSlotClick(Entity slot, any tShopItem)
+		if slot == nil or tShopItem == nil then
+			return
+		end
+
+		local shopItemId = tShopItem.shopItemId or ""
+		if shopItemId == "" then
+			return
+		end
+
+		local capturedItem = tShopItem
+		local clickHandler = slot:ConnectEvent(ButtonClickEvent, function()
+			self:OnCostumeSlotClicked(capturedItem)
+		end)
+		table.insert(self.costumeSlotClickHandlers, { entity = slot, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumeSlotClicks()
+		if self.costumeSlotClickHandlers == nil then
+			self.costumeSlotClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.costumeSlotClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.costumeSlotClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumeSlotClicked(any tCostumeItem)
+		if tCostumeItem == nil then
+			return
+		end
+		if tCostumeItem.isBaseCostume ~= true and _ShopItemManager ~= nil and _ShopItemManager:ClientHasShopItem(tCostumeItem.shopItemId or "") == false then
+			return
+		end
+
+		self:DismissCostumeItemNewBadge(tCostumeItem)
+		local category = tCostumeItem.category or ""
+		if self:IsCostumeItemEquipped(tCostumeItem) then
+			self:RestoreCostumeCategorySelection(category)
+			return
+		end
+
+		self.costumeSelectedByCategory[category] = tCostumeItem.shopItemId or ""
+		self:UpdateCostumeSelectedText(category, tCostumeItem.name or "")
+		self:ApplyCostumeOverrideForCategory(category, tCostumeItem.ruid or "")
+		self:PlayCurrentCostumeBehaviorAction()
+		self:SaveCurrentCostumeDraft()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissCostumeItemNewBadge(any tCostumeItem)
+		if tCostumeItem == nil then
+			return
+		end
+
+		local shopItemId = tCostumeItem.shopItemId or ""
+		if shopItemId ~= "" then
+			self.costumeNewItemSnapshotSet[shopItemId] = nil
+			self:RefreshNewContentBadges()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeSlotStatusText(any tCostumeItem)
+		if self:IsCostumeItemEquipped(tCostumeItem) then
+			return self:GetLocalizedText(self.UI_OWNED_KEY, "")
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCostumeItemEquipped(any tCostumeItem)
+		-- 현재 선택된 캐릭터의 프리뷰 아바타 장착값과 슬롯 아이템을 비교합니다.
+		if tCostumeItem == nil then
+			return false
+		end
+
+		local category = tCostumeItem.category or ""
+		if self.previewCostumeCharacterId == "" or category == "" then
+			return false
+		end
+
+		local currentRuid = self:GetCurrentCostumeRuid(category)
+		return currentRuid ~= "" and currentRuid == (tCostumeItem.ruid or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentCostumeRuid(string category)
+		-- 현재 선택된 캐릭터가 적용된 프리뷰 아바타에서 카테고리별 장착 RUID를 반환합니다.
+		if self.previewCostumeCharacterId == "" or self.CostumeAvatarEntity == nil then
+			return ""
+		end
+
+		local costumeManager = self.CostumeAvatarEntity.CostumeManagerComponent
+		if isvalid(costumeManager) == false then
+			return ""
+		end
+
+		if category == "hair" then
+			return costumeManager.CustomHairEquip or ""
+		elseif category == "clothes" then
+			return costumeManager.CustomLongcoatEquip or ""
+		elseif category == "shoes" then
+			return costumeManager.CustomShoesEquip or ""
+		elseif category == "hat" then
+			return costumeManager.CustomCapEquip or ""
+		elseif category == "goods" then
+			return costumeManager.CustomOneHandedWeaponEquip or ""
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCostumeSelectedText(string category, string name)
+		local selectedText = self:GetCostumeSelectedTextComponent(category)
+		if selectedText ~= nil then
+			selectedText.Text = name or ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method TextGUIRendererComponent GetCostumeSelectedTextComponent(string category)
+		if category == "hair" then
+			return self.CostumeHairSelectedText
+		elseif category == "clothes" then
+			return self.CostumeClothesSelectedText
+		elseif category == "shoes" then
+			return self.CostumeShoesSelectedText
+		elseif category == "hat" then
+			return self.CostumeHatSelectedText
+		elseif category == "goods" then
+			return self.CostumeGoodsSelectedText
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCostumeCharacters()
+		local activeIds = {}
+		if _CharacterManager ~= nil then
+			activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		end
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		self:SetBoundImage(self.CostumePortrait1Image, self:GetCharacterPortraitRuid(activeIds[1] or ""), activeIds[1] ~= nil and activeIds[1] ~= "")
+		self:SetBoundImage(self.CostumePortrait2Image, self:GetCharacterPortraitRuid(activeIds[2] or ""), activeIds[2] ~= nil and activeIds[2] ~= "")
+		self:SetBoundImage(self.CostumePortrait3Image, self:GetCharacterPortraitRuid(activeIds[3] or ""), activeIds[3] ~= nil and activeIds[3] ~= "")
+
+		if self.previewCostumeCharacterId == "" or self:ContainsString(activeIds, self.previewCostumeCharacterId) == false then
+			self:SelectCostumePreviewCharacter(activeIds[1] or "")
+			return
+		end
+
+		self:ApplyCostumePreviewForCharacter(self.previewCostumeCharacterId)
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:PlayCurrentCostumeBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumePortraitFrameClicked(integer index)
+		local activeIds = {}
+		if _CharacterManager ~= nil then
+			activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		end
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		self:SelectCostumePreviewCharacter(activeIds[index] or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectCostumePreviewCharacter(string characterId)
+		self:SaveCurrentCostumeDraft()
+		self.previewCostumeCharacterId = characterId or ""
+		self.costumeSelectedByCategory = {}
+		self:ApplyCostumePreviewForCharacter(self.previewCostumeCharacterId)
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:RebuildCostumeSlots()
+		self:PlayCurrentCostumeBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SaveCurrentCostumeDraft()
+		-- 캐릭터 전환 전 현재 프리뷰의 17개 슬롯을 캐릭터별 임시 상태로 보관합니다.
+		if self.previewCostumeCharacterId == "" then
+			return
+		end
+
+		local tCostumeDataPlain = self:BuildCostumePreviewPlainTable()
+		if tCostumeDataPlain ~= nil then
+			local tSavedCostume = nil
+			if _CharacterCostumeManager ~= nil then
+				tSavedCostume = _CharacterCostumeManager:ClientGetCostume(self.previewCostumeCharacterId)
+			end
+
+			if self:AreCostumeDataEqual(tCostumeDataPlain, tSavedCostume) then
+				self.costumeDraftByCharacterId[self.previewCostumeCharacterId] = nil
+			else
+				self.costumeDraftByCharacterId[self.previewCostumeCharacterId] = tCostumeDataPlain
+			end
+		end
+
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean AreCostumeDataEqual(any left, any right)
+		if left == nil or right == nil then
+			return false
+		end
+
+		return (left.body or "") == (right.body or "")
+			and (left.hair or "") == (right.hair or "")
+			and (left.face or "") == (right.face or "")
+			and (left.cap or "") == (right.cap or "")
+			and (left.cape or "") == (right.cape or "")
+			and (left.coat or "") == (right.coat or "")
+			and (left.longcoat or "") == (right.longcoat or "")
+			and (left.pants or "") == (right.pants or "")
+			and (left.glove or "") == (right.glove or "")
+			and (left.shoes or "") == (right.shoes or "")
+			and (left.oneHandedWeapon or "") == (right.oneHandedWeapon or "")
+			and (left.twoHandedWeapon or "") == (right.twoHandedWeapon or "")
+			and (left.subWeapon or "") == (right.subWeapon or "")
+			and (left.faceAccessory or "") == (right.faceAccessory or "")
+			and (left.eyeAccessory or "") == (right.eyeAccessory or "")
+			and (left.earAccessory or "") == (right.earAccessory or "")
+			and (left.ear or "") == (right.ear or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasCostumeDraftChanges()
+		for _, tCostumeDataPlain in pairs(self.costumeDraftByCharacterId) do
+			if tCostumeDataPlain ~= nil then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCostumeSaveButtonState()
+		if self.CostumeSaveButton == nil or self.CostumeSaveButton.Entity == nil then
+			return
+		end
+
+		self.CostumeSaveButton.Entity.Enable = true
+		self.CostumeSaveButton.Enable = self:HasCostumeDraftChanges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumePreviewForCharacter(string characterId)
+		-- 저장 코스튬을 먼저 적용하고, 현재 스마트폰 세션의 캐릭터별 임시 치장을 덮어씁니다.
+		self:ApplyBaseCostumeToCostumePreview()
+
+		local tDraft = self.costumeDraftByCharacterId[characterId or ""]
+		if tDraft == nil or _CharacterCostumeManager == nil or self.CostumeAvatarEntity == nil then
+			return
+		end
+
+		local costumeManager = self.CostumeAvatarEntity.CostumeManagerComponent
+		if isvalid(costumeManager) then
+			_CharacterCostumeManager:ClientApplyCostumeToManagerComponent(tDraft, costumeManager)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DiscardCostumeDraftsIfLeavingCostume()
+		-- 치장 탭을 벗어나거나 스마트폰을 닫을 때만 모든 캐릭터의 미저장 임시 치장을 폐기합니다.
+		if self.CurrentPage ~= "costume" then
+			return
+		end
+
+		self:ClearCostumeNewItemSnapshot()
+		self.costumeDraftByCharacterId = {}
+		self.costumeSelectedByCategory = {}
+		self:RefreshCostumeSaveButtonState()
+		self:ApplyBaseCostumeToCostumePreview()
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyBaseCostumeToCostumePreview()
+		local applier = self:GetCostumePreviewApplier()
+		if applier ~= nil then
+			applier:SetCharacterId(self.previewCostumeCharacterId or "")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCostumePreviewApplier()
+		if self.CostumeAvatarEntity == nil then
+			return nil
+		end
+
+		return self.CostumeAvatarEntity:GetComponent("script.CharacterCostumeApplierComponent")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:ClearCostumeSelectedTexts()
+		if self.previewCostumeCharacterId == "" then
+			return
+		end
+
+		self:SetSelectedCostumeFromRuid("hair", self:GetCurrentCostumeRuid("hair"))
+		self:SetSelectedCostumeFromRuid("clothes", self:GetCurrentCostumeRuid("clothes"))
+		self:SetSelectedCostumeFromRuid("shoes", self:GetCurrentCostumeRuid("shoes"))
+		self:SetSelectedCostumeFromRuid("hat", self:GetCurrentCostumeRuid("hat"))
+		self:SetSelectedCostumeFromRuid("goods", self:GetCurrentCostumeRuid("goods"))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCostumeSelectedTexts()
+		self:UpdateCostumeSelectedText("hair", "")
+		self:UpdateCostumeSelectedText("clothes", "")
+		self:UpdateCostumeSelectedText("shoes", "")
+		self:UpdateCostumeSelectedText("hat", "")
+		self:UpdateCostumeSelectedText("goods", "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSelectedCostumeFromRuid(string category, string ruid)
+		local tShopItem = self:FindOwnedCostumeItemByRuid(category, ruid)
+		if tShopItem == nil then
+			return
+		end
+
+		self.costumeSelectedByCategory[category] = tShopItem.shopItemId or ""
+		self:UpdateCostumeSelectedText(category, tShopItem.name or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method any FindOwnedCostumeItemByRuid(string category, string ruid)
+		if ruid == nil or ruid == "" then
+			return nil
+		end
+
+		local items = self:GetDisplayCostumeItemsByCategory(category)
+		for _, tShopItem in ipairs(items) do
+			if tShopItem ~= nil and (tShopItem.ruid or "") == ruid then
+				return tShopItem
+			end
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreCostumeCategorySelection(string category)
+		if self.previewCostumeCharacterId == "" or category == "" then
+			return
+		end
+
+		self.costumeSelectedByCategory[category] = ""
+		self:RestoreCostumeCategoryToCurrent(category)
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:PlayCurrentCostumeBehaviorAction()
+		self:SaveCurrentCostumeDraft()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreCostumeCategoryToCurrent(string category)
+		if self.previewCostumeCharacterId == "" or _CharacterCostumeManager == nil then
+			return
+		end
+
+		local tCurrentCostume = _CharacterCostumeManager:ClientGetCostume(self.previewCostumeCharacterId)
+		local currentRuid = self:GetCostumeDataRuidByCategory(tCurrentCostume, category)
+		self:ApplyCostumeOverrideForCategory(category, currentRuid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeDataRuidByCategory(any tCostumeData, string category)
+		if tCostumeData == nil then
+			return ""
+		end
+
+		if category == "hair" then
+			return tCostumeData.hair or ""
+		elseif category == "clothes" then
+			return tCostumeData.longcoat or ""
+		elseif category == "shoes" then
+			return tCostumeData.shoes or ""
+		elseif category == "hat" then
+			return tCostumeData.cap or ""
+		elseif category == "goods" then
+			return tCostumeData.oneHandedWeapon or ""
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumeOverrideForCategory(string category, string ruid)
+		local costumeManager = nil
+		if self.CostumeAvatarEntity ~= nil then
+			costumeManager = self.CostumeAvatarEntity.CostumeManagerComponent
+		end
+		if isvalid(costumeManager) == false then
+			return
+		end
+
+		if category == "hair" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Hair, ruid)
+		elseif category == "clothes" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Longcoat, ruid)
+			costumeManager:SetEquip(MapleAvatarItemCategory.Coat, "")
+			costumeManager:SetEquip(MapleAvatarItemCategory.Pants, "")
+		elseif category == "shoes" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Shoes, ruid)
+		elseif category == "hat" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.Cap, ruid)
+		elseif category == "goods" then
+			costumeManager:SetEquip(MapleAvatarItemCategory.OneHandedWeapon, ruid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ContainsString(any values, string target)
+		if values == nil or target == nil or target == "" then
+			return false
+		end
+
+		for _, value in ipairs(values) do
+			if value == target then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshAlbumItems()
+		-- ItemManager의 보유 아이템 수와 최소 35칸 조건을 기준으로 앨범 슬롯을 다시 구성합니다.
+		local items = {}
+		if _ItemManager ~= nil then
+			items = _ItemManager:ClientGetOwnedItems()
+		end
+		
+		local cherishedItems = self:FilterAlbumItemsByType(items, "cherished")
+		local fanPresentItems = self:FilterAlbumItemsByType(items, "fanPresent")
+		local photoCardItems = self:FilterAlbumItemsByType(items, "photoCard")
+
+		self:ClearAlbumRuntimeCards()
+		self:RebuildAlbumCards(cherishedItems, self:GetAlbumCardCount(cherishedItems), self:GetAlbumTemplate(), self.albumRuntimeCards, self.AlbumCardColumnCount)
+		self:RebuildAlbumCards(fanPresentItems, self:GetAlbumCardCount(fanPresentItems), self:GetFanPresentTemplate(), self.fanPresentRuntimeCards, self.AlbumCardColumnCount)
+		self:RebuildAlbumCards(photoCardItems, self:GetAlbumCardCount(photoCardItems), self:GetPhotoCardTemplate(), self.photoCardRuntimeCards, self.PhotoCardColumnCount)
+		self:RefreshSelectedAlbumInfo(cherishedItems)
+		self:RefreshSelectedFanPresentInfo(fanPresentItems)
+		self:RefreshSelectedPhotoCardInfo(photoCardItems)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetAlbumCardCount(any items)
+		-- 목록 개수를 기준으로 최소 앨범 슬롯 개수를 보장합니다.
+		local cardCount = #items
+		if cardCount < self.MinAlbumSlotCount then
+			cardCount = self.MinAlbumSlotCount
+		end
+
+		return cardCount
+	end
+
+	@ExecSpace("ClientOnly")
+	method any FilterAlbumItemsByType(any items, string gridType)
+		-- 아이템 타입에 따라 애장품/팬선물/포토카드 그리드에 들어갈 목록을 분리합니다.
+		local filteredItems = {}
+		if items == nil then
+			return filteredItems
+		end
+
+		for _, tItem in ipairs(items) do
+			if self:IsAlbumItemForGrid(tItem, gridType) then
+				table.insert(filteredItems, tItem)
+			end
+		end
+
+		return filteredItems
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsAlbumItemForGrid(any tItem, string gridType)
+		-- 애장품, 팬선물, 포토카드 그리드가 담당하는 아이템 타입인지 확인합니다.
+		if tItem == nil then
+			return false
+		end
+
+		local itemType = tItem.type or ""
+		if gridType == "photoCard" then
+			return itemType == "photoCard" or itemType == "photocard"
+		end
+		if gridType == "fanPresent" then
+			return itemType == "present" or itemType == "fan"
+		end
+
+		return itemType == "cherished"
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RebuildAlbumCards(any items, integer cardCount, Entity template, any runtimeCards, integer columnCount)
+		-- items: ItemRow[]
+		-- Item01/Item04 템플릿을 런타임 카드로 복제하고 아이템 또는 잠금 슬롯 정보를 채웁니다.
+		if template == nil then
+			log_warning("[SmartPhoneUI] Album Item01 template not found")
+			return
+		end
+		
+		template.Enable = false
+		
+		for index = 1, cardCount do
+			local tItem = items[index]
+			local card = template:Clone(self:GetAlbumRuntimeCardName(index))
+			if card ~= nil then
+				card.Enable = true
+				self:SetAlbumCardPosition(card, index, columnCount)
+				self:SetAlbumCard(card, tItem)
+				if tItem ~= nil then
+					self:ConnectAlbumCardClick(card, tItem)
+				end
+				table.insert(runtimeCards, card)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearAlbumRuntimeCards()
+		-- 앨범 런타임 슬롯과 클릭 핸들러를 모두 정리합니다.
+		self:DisconnectAlbumCardClicks()
+		
+		if self.albumRuntimeCards == nil then
+			self.albumRuntimeCards = {}
+		end
+
+		if self.photoCardRuntimeCards == nil then
+			self.photoCardRuntimeCards = {}
+		end
+
+		if self.fanPresentRuntimeCards == nil then
+			self.fanPresentRuntimeCards = {}
+		end
+		
+		for _, card in ipairs(self.albumRuntimeCards) do
+			if isvalid(card) then
+				card:Destroy()
+			end
+		end
+
+		for _, card in ipairs(self.fanPresentRuntimeCards) do
+			if isvalid(card) then
+				card:Destroy()
+			end
+		end
+
+		for _, card in ipairs(self.photoCardRuntimeCards) do
+			if isvalid(card) then
+				card:Destroy()
+			end
+		end
+		
+		self.albumRuntimeCards = {}
+		self.fanPresentRuntimeCards = {}
+		self.photoCardRuntimeCards = {}
+		self.albumNewBadgeByItemId = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectAlbumCardClick(Entity card, any tItem)
+		-- tItem: ItemRow
+		-- 아이템이 있는 슬롯만 클릭 가능하게 연결합니다.
+		if card == nil or tItem == nil or tItem.itemId == nil or tItem.itemId == "" then
+			return
+		end
+		
+		local capturedItemId = tItem.itemId
+		local clickHandler = card:ConnectEvent(ButtonClickEvent, function()
+			self:OnAlbumCardClicked(capturedItemId)
+		end)
+		
+		table.insert(self.albumCardClickHandlers, { entity = card, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectAlbumCardClicks()
+		-- 앨범 슬롯에 연결한 클릭 핸들러를 해제합니다.
+		if self.albumCardClickHandlers == nil then
+			self.albumCardClickHandlers = {}
+			return
+		end
+		
+		for _, item in ipairs(self.albumCardClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+		
+		self.albumCardClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectAlbumCardScroll(Entity card)
+		-- 카드 자체가 터치된 경우에도 앨범 스크롤 드래그를 받을 수 있게 연결합니다.
+		if card == nil or card.UITouchReceiveComponent == nil then
+			return
+		end
+		
+		local beginHandler = card:ConnectEvent(UITouchBeginDragEvent, self.OnAlbumBeginDrag)
+		local dragHandler = card:ConnectEvent(UITouchDragEvent, self.OnAlbumDrag)
+		local endHandler = card:ConnectEvent(UITouchEndDragEvent, self.OnAlbumEndDrag)
+		table.insert(self.albumCardScrollHandlers, { entity = card, beginHandler = beginHandler, dragHandler = dragHandler, endHandler = endHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectAlbumCardScrolls()
+		-- 런타임 카드에 연결한 드래그 입력 핸들러를 해제합니다.
+		if self.albumCardScrollHandlers == nil then
+			self.albumCardScrollHandlers = {}
+			return
+		end
+		
+		for _, item in ipairs(self.albumCardScrollHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) then
+				if item.beginHandler ~= nil then
+					item.entity:DisconnectEvent(UITouchBeginDragEvent, item.beginHandler)
+				end
+				if item.dragHandler ~= nil then
+					item.entity:DisconnectEvent(UITouchDragEvent, item.dragHandler)
+				end
+				if item.endHandler ~= nil then
+					item.entity:DisconnectEvent(UITouchEndDragEvent, item.endHandler)
+				end
+			end
+		end
+		
+		self.albumCardScrollHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectAlbumScroll()
+		-- 앨범 그리드의 드래그 입력을 직접 스크롤 처리에 연결합니다.
+		local scrollEntity = self:GetAlbumScrollTouchTarget()
+		if scrollEntity == nil then
+			return
+		end
+		
+		if self.albumBeginDragHandler == nil then
+			self.albumBeginDragHandler = scrollEntity:ConnectEvent(UITouchBeginDragEvent, self.OnAlbumBeginDrag)
+		end
+		if self.albumDragHandler == nil then
+			self.albumDragHandler = scrollEntity:ConnectEvent(UITouchDragEvent, self.OnAlbumDrag)
+		end
+		if self.albumEndDragHandler == nil then
+			self.albumEndDragHandler = scrollEntity:ConnectEvent(UITouchEndDragEvent, self.OnAlbumEndDrag)
+		end
+		
+		self.albumScrollEntity = scrollEntity
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectAlbumScroll()
+		-- 앨범 그리드에 연결했던 드래그 입력 핸들러를 해제합니다.
+		local scrollEntity = self.albumScrollEntity
+		if scrollEntity == nil or isvalid(scrollEntity) == false then
+			scrollEntity = self:GetAlbumScrollTouchTarget()
+		end
+		if scrollEntity == nil then
+			self.albumBeginDragHandler = nil
+			self.albumDragHandler = nil
+			self.albumEndDragHandler = nil
+			self.albumScrollEntity = nil
+			return
+		end
+		
+		if self.albumBeginDragHandler ~= nil then
+			scrollEntity:DisconnectEvent(UITouchBeginDragEvent, self.albumBeginDragHandler)
+			self.albumBeginDragHandler = nil
+		end
+		if self.albumDragHandler ~= nil then
+			scrollEntity:DisconnectEvent(UITouchDragEvent, self.albumDragHandler)
+			self.albumDragHandler = nil
+		end
+		if self.albumEndDragHandler ~= nil then
+			scrollEntity:DisconnectEvent(UITouchEndDragEvent, self.albumEndDragHandler)
+			self.albumEndDragHandler = nil
+		end
+		
+		self.albumScrollEntity = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAlbumBeginDrag(UITouchBeginDragEvent event)
+		-- 앨범 영역 드래그 시작 시 현재 스크롤 위치를 유지합니다.
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAlbumDrag(UITouchDragEvent event)
+		-- 앨범 영역을 위아래로 드래그하면 생성된 카드들의 스크롤 오프셋을 갱신합니다.
+		if self.CurrentPage ~= "album" or event == nil then
+			return
+		end
+		if self.albumMaxScrollOffsetY <= 0 then
+			return
+		end
+		
+		self.albumScrollOffsetY = self:ClampNumber(self.albumScrollOffsetY + event.TouchDelta.y, 0, self.albumMaxScrollOffsetY)
+		self:ApplyAlbumCardPositions()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAlbumEndDrag(UITouchEndDragEvent event)
+		-- 앨범 영역 드래그 종료 시 현재 오프셋을 그대로 보존합니다.
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnAlbumCardClicked(string itemId)
+		-- 선택한 앨범 아이템의 상세 정보를 오른쪽 패널에 반영합니다.
+		if itemId == "" or _ItemMaster == nil then
+			return
+		end
+		
+		local tItem = _ItemMaster:GetItemById(itemId)
+		if tItem == nil then
+			return
+		end
+
+		self:DismissAlbumItemNewBadge(itemId)
+		
+		if self:IsAlbumItemForGrid(tItem, "photoCard") then
+			self:SetPhotoCardInfo(tItem)
+			return
+		end
+		if self:IsAlbumItemForGrid(tItem, "fanPresent") then
+			self:SetFanPresentInfo(tItem)
+			return
+		end
+
+		self:SetAlbumInfo(tItem)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedAlbumInfo(any items)
+		-- items: ItemRow[]
+		-- 기존 선택을 유지하고, 없으면 첫 번째 아이템을 상세 패널에 표시합니다.
+		local selectedItem = nil
+		if self.selectedAlbumItemId ~= "" then
+			selectedItem = self:FindAlbumItemInList(items, self.selectedAlbumItemId)
+		end
+		
+		if selectedItem == nil then
+			selectedItem = items[1]
+		end
+		
+		self:SetAlbumInfo(selectedItem)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedFanPresentInfo(any items)
+		-- 팬선물 목록에서 기존 선택을 유지하고, 없으면 첫 번째 아이템을 상세 패널에 표시합니다.
+		local selectedItem = nil
+		if self.selectedFanPresentItemId ~= "" then
+			selectedItem = self:FindAlbumItemInList(items, self.selectedFanPresentItemId)
+		end
+
+		if selectedItem == nil then
+			selectedItem = items[1]
+		end
+
+		self:SetFanPresentInfo(selectedItem)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any FindAlbumItemInList(any items, string itemId)
+		-- items: ItemRow[]
+		-- 목록에서 itemId에 해당하는 ItemRow를 찾습니다.
+		if items == nil or itemId == "" then
+			return nil
+		end
+		
+		for _, tItem in ipairs(items) do
+			if tItem ~= nil and tItem.itemId == itemId then
+				return tItem
+			end
+		end
+		
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAlbumCard(Entity card, any tItem)
+		-- tItem: ItemRow
+		-- 앨범 슬롯에 아이템 이미지 또는 잠금 이미지를 표시합니다.
+		if card == nil then
+			return
+		end
+
+		local newBadge = card:GetChildByName("NewBadge", true)
+		
+		if tItem == nil then
+			if newBadge ~= nil then
+				newBadge.Enable = false
+			end
+			self:SetImageByCardChild(card, "Icon", "", false)
+			self:SetCardChildEnable(card, "Locked", true)
+			if card.ButtonComponent ~= nil then
+				card.ButtonComponent.Enable = false
+			end
+			return
+		end
+		
+		self:SetCardChildEnable(card, "Locked", false)
+		if card.ButtonComponent ~= nil then
+			card.ButtonComponent.Enable = true
+		end
+		self:SetImageByCardChild(card, "Icon", self:GetAlbumItemImageRuid(tItem), true)
+		if newBadge ~= nil then
+			local isNew = self:IsAlbumItemNewInSnapshot(tItem)
+			newBadge.Enable = isNew
+			if isNew then
+				self.albumNewBadgeByItemId[tItem.itemId or ""] = newBadge
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAlbumInfo(any tItem)
+		-- tItem: ItemRow
+		-- 선택한 앨범 아이템의 이미지, 이름, 설명, 타입 배지를 갱신합니다.
+		if tItem == nil then
+			self.selectedAlbumItemId = ""
+			self:SetBoundText(self.AlbumDetailNameText, "")
+			self:SetBoundText(self.AlbumDetailDescText, "")
+			self:SetBoundImage(self.AlbumDetailIconImage, "", false)
+			return
+		end
+		
+		self.selectedAlbumItemId = tItem.itemId or ""
+		self:SetBoundText(self.AlbumDetailNameText, tItem.name or "")
+		self:SetBoundText(self.AlbumDetailDescText, tItem.description or "")
+		self:SetBoundImage(self.AlbumDetailIconImage, self:GetAlbumItemImageRuid(tItem), true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetFanPresentInfo(any tItem)
+		-- tItem: ItemRow
+		-- 선택한 팬선물 아이템의 이미지, 이름, 설명, 타입 배지를 갱신합니다.
+		if tItem == nil then
+			self.selectedFanPresentItemId = ""
+			self:SetBoundText(self.FanPresentDetailNameText, "")
+			self:SetBoundText(self.FanPresentDetailDescText, "")
+			self:SetBoundImage(self.FanPresentDetailIconImage, "", false)
+			return
+		end
+
+		self.selectedFanPresentItemId = tItem.itemId or ""
+		self:SetBoundText(self.FanPresentDetailNameText, tItem.name or "")
+		self:SetBoundText(self.FanPresentDetailDescText, tItem.description or "")
+		self:SetBoundImage(self.FanPresentDetailIconImage, self:GetAlbumItemImageRuid(tItem), true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedPhotoCardInfo(any items)
+		-- 포토카드 목록에서 기존 선택을 유지하고, 없으면 첫 번째 포토카드를 상세 영역에 표시합니다.
+		local selectedItem = nil
+		if self.selectedPhotoCardItemId ~= "" then
+			selectedItem = self:FindAlbumItemInList(items, self.selectedPhotoCardItemId)
+		end
+
+		if selectedItem == nil then
+			selectedItem = items[1]
+		end
+
+		self:SetPhotoCardInfo(selectedItem)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPhotoCardInfo(any tItem)
+		-- 선택된 포토카드 아이템과 PhotoCardTable 데이터를 합쳐 포토카드 상세 UI를 갱신합니다.
+		if tItem == nil then
+			self.selectedPhotoCardItemId = ""
+			self:SetBoundText(self.PhotoCardDetailCharacterNameText, "")
+			self:SetBoundGuiText(self.PhotoCardDetailCardNameText, "")
+			self:SetBoundText(self.PhotoCardDetailCardDescText, "")
+			self:SetBoundImage(self.PhotoCardDetailPortraitImage, "", false)
+			self:SetBoundImage(self.PhotoCardDetailFrontImage, "", false)
+			self:SetBoundImage(self.PhotoCardDetailBackImage, "", false)
+			self:SetPhotoCardBackVisible(false, false)
+			return
+		end
+
+		local itemId = tItem.itemId or ""
+		self.selectedPhotoCardItemId = itemId
+		local tMasterItem = self:GetItemById(itemId)
+		if tMasterItem ~= nil then
+			self:SetBoundGuiText(self.PhotoCardDetailCardNameText, tMasterItem.name or "")
+			self:SetBoundText(self.PhotoCardDetailCardDescText, tMasterItem.description or "")
+		else
+			self:SetBoundGuiText(self.PhotoCardDetailCardNameText, tItem.name or "")
+			self:SetBoundText(self.PhotoCardDetailCardDescText, tItem.description or "")
+		end
+
+		local tPhotoCard = nil
+		if _PhotoCardMaster ~= nil then
+			tPhotoCard = _PhotoCardMaster:GetPhotoCardByItemId(itemId)
+		end
+
+		if tPhotoCard == nil then
+			self:SetBoundText(self.PhotoCardDetailCharacterNameText, "")
+			self:SetBoundImage(self.PhotoCardDetailPortraitImage, "", false)
+			self:SetBoundImage(self.PhotoCardDetailFrontImage, "", false)
+			self:SetBoundImage(self.PhotoCardDetailBackImage, "", false)
+			self:SetPhotoCardBackVisible(false, false)
+			return
+		end
+
+		---@type PhotoCardRow
+		local photoCardRow = tPhotoCard
+		self:SetBoundText(self.PhotoCardDetailCharacterNameText, self:GetActorName(photoCardRow.characterId or ""))
+		self:SetBoundImage(self.PhotoCardDetailPortraitImage, self:GetCharacterVerticalPortraitRuid(photoCardRow.characterId or ""), true)
+		self:SetBoundImage(self.PhotoCardDetailFrontImage, self:ResolveResourceRuid(photoCardRow.cardFront or ""), true)
+		self:SetBoundImage(self.PhotoCardDetailBackImage, self:ResolveResourceRuid(photoCardRow.cardBack or ""), true)
+		self:SetPhotoCardBackVisible(false, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPhotoCardBackVisible(boolean isBackVisible, boolean useTween)
+		-- 포토카드 앞/뒤 이미지 표시와 전환 버튼 위치/텍스트를 갱신합니다.
+		self.isPhotoCardBackVisible = isBackVisible == true
+		self:SetPhotoCardFrontBackButtonText(self.isPhotoCardBackVisible)
+		self:MovePhotoCardFrontBackButton(self.isPhotoCardBackVisible, useTween)
+
+		if useTween == true then
+			self:TweenPhotoCardFlip(self.isPhotoCardBackVisible)
+			return
+		end
+
+		self:ClearPhotoCardFlipTween()
+		self:ApplyPhotoCardFaceVisibility(self.isPhotoCardBackVisible)
+		self:ResetPhotoCardFaceScale()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyPhotoCardFaceVisibility(boolean isBackVisible)
+		-- 포토카드 앞면/뒷면 이미지 엔티티의 표시 상태만 즉시 적용합니다.
+		local frontEntity = nil
+		local backEntity = nil
+		if self.PhotoCardDetailFrontImage ~= nil then
+			frontEntity = self.PhotoCardDetailFrontImage.Entity
+		end
+		if self.PhotoCardDetailBackImage ~= nil then
+			backEntity = self.PhotoCardDetailBackImage.Entity
+		end
+
+		self:SetBoundEntityEnable(frontEntity, isBackVisible == false)
+		self:SetBoundEntityEnable(backEntity, isBackVisible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TweenPhotoCardFlip(boolean isBackVisible)
+		-- 카드가 접히는 중간 지점에서 앞/뒤 이미지를 교체하고 다시 펼칩니다.
+		if self.PhotoCardDetailFrontImage == nil or self.PhotoCardDetailBackImage == nil then
+			self:ApplyPhotoCardFaceVisibility(isBackVisible)
+			return
+		end
+		local frontEntity = self.PhotoCardDetailFrontImage.Entity
+		local backEntity = self.PhotoCardDetailBackImage.Entity
+		if frontEntity == nil or backEntity == nil or frontEntity.UITransformComponent == nil or backEntity.UITransformComponent == nil then
+			self:ApplyPhotoCardFaceVisibility(isBackVisible)
+			return
+		end
+
+		self:ClearPhotoCardFlipTween()
+		local frontTransform = frontEntity.UITransformComponent
+		local backTransform = backEntity.UITransformComponent
+		local duration = self.PhotoCardFlipTweenDuration
+		if duration <= 0 then
+			self:ApplyPhotoCardFaceVisibility(isBackVisible)
+			self:ResetPhotoCardFaceScale()
+			return
+		end
+
+		local halfDuration = duration * 0.5
+		local tweenTime = 0
+		local previousTime = _UtilLogic.ElapsedSeconds
+		local isSwitched = false
+		self:ApplyPhotoCardFaceVisibility(isBackVisible == false)
+		self:SetPhotoCardFaceScaleX(1)
+
+		self.photoCardFlipTweenTimerId = _TimerService:SetTimerRepeat(function()
+			local currentTime = _UtilLogic.ElapsedSeconds
+			tweenTime = tweenTime + (currentTime - previousTime)
+			previousTime = currentTime
+
+			if tweenTime < halfDuration then
+				local closeTime = tweenTime
+				if closeTime > halfDuration then
+					closeTime = halfDuration
+				end
+				local scaleX = _TweenLogic:Ease(1, 0, halfDuration, EaseType.SineEaseIn, closeTime)
+				self:SetPhotoCardFaceScaleX(scaleX)
+				return
+			end
+
+			if isSwitched == false then
+				isSwitched = true
+				self:ApplyPhotoCardFaceVisibility(isBackVisible)
+			end
+
+			local openTime = tweenTime - halfDuration
+			if openTime > halfDuration then
+				openTime = halfDuration
+			end
+			local scaleX = _TweenLogic:Ease(0, 1, halfDuration, EaseType.SineEaseOut, openTime)
+			self:SetPhotoCardFaceScaleX(scaleX)
+
+			if tweenTime >= duration then
+				self:ApplyPhotoCardFaceVisibility(isBackVisible)
+				self:ResetPhotoCardFaceScale()
+				self:ClearPhotoCardFlipTween()
+			end
+		end, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPhotoCardFaceScaleX(number scaleX)
+		-- 앞/뒤 포토카드 이미지의 X 스케일을 같은 값으로 맞춥니다.
+		if self.PhotoCardDetailFrontImage ~= nil and self.PhotoCardDetailFrontImage.Entity ~= nil and self.PhotoCardDetailFrontImage.Entity.UITransformComponent ~= nil then
+			self.PhotoCardDetailFrontImage.Entity.UITransformComponent.UIScale = Vector3(scaleX, 1, 1)
+		end
+		if self.PhotoCardDetailBackImage ~= nil and self.PhotoCardDetailBackImage.Entity ~= nil and self.PhotoCardDetailBackImage.Entity.UITransformComponent ~= nil then
+			self.PhotoCardDetailBackImage.Entity.UITransformComponent.UIScale = Vector3(scaleX, 1, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetPhotoCardFaceScale()
+		-- 포토카드 이미지 스케일을 기본값으로 복원합니다.
+		self:SetPhotoCardFaceScaleX(1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPhotoCardFrontBackButtonText(boolean isBackVisible)
+		-- 전환 버튼의 현재 표시 면 텍스트를 갱신합니다.
+		if self.PhotoCardFrontBackButtonText == nil then
+			return
+		end
+
+		if isBackVisible == true then
+			self.PhotoCardFrontBackButtonText.Text = self:GetLocalizedText(self.UI_PHOTO_BACK_KEY, "뒷면")
+		else
+			self.PhotoCardFrontBackButtonText.Text = self:GetLocalizedText(self.UI_PHOTO_FRONT_KEY, "앞면")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PreparePhotoCardFrontBackButton()
+		-- 앞면 버튼의 원래 위치를 앞면 기준 위치로 한 번 저장합니다.
+		if self.isPhotoCardFrontButtonPositionReady == true then
+			return
+		end
+		if self.PhotoCardFrontBackDisplayEntity == nil or self.PhotoCardFrontBackDisplayEntity.UITransformComponent == nil then
+			return
+		end
+
+		self.photoCardFrontButtonBasePosition = self.PhotoCardFrontBackDisplayEntity.UITransformComponent.anchoredPosition
+		self.isPhotoCardFrontButtonPositionReady = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void MovePhotoCardFrontBackButton(boolean isBackVisible, boolean useTween)
+		-- 앞/뒤 상태에 맞춰 전환 버튼을 원래 위치 또는 MoveTarget 위치로 이동시킵니다.
+		self:PreparePhotoCardFrontBackButton()
+		if self.PhotoCardFrontBackDisplayEntity == nil or self.PhotoCardFrontBackDisplayEntity.UITransformComponent == nil then
+			return
+		end
+
+		local targetPosition = self.photoCardFrontButtonBasePosition
+		if isBackVisible == true and self.PhotoCardBackMoveTargetEntity ~= nil and self.PhotoCardBackMoveTargetEntity.UITransformComponent ~= nil then
+			targetPosition = self.PhotoCardBackMoveTargetEntity.UITransformComponent.anchoredPosition
+		end
+
+		if useTween ~= true then
+			self:ClearPhotoCardToggleTween()
+			self.PhotoCardFrontBackDisplayEntity.UITransformComponent.anchoredPosition = targetPosition
+			return
+		end
+
+		self:TweenPhotoCardFrontBackButton(targetPosition)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void TweenPhotoCardFrontBackButton(Vector2 targetPosition)
+		-- Timer 기반으로 버튼 anchoredPosition을 부드럽게 보간합니다.
+		if self.PhotoCardFrontBackDisplayEntity == nil or self.PhotoCardFrontBackDisplayEntity.UITransformComponent == nil then
+			return
+		end
+
+		self:ClearPhotoCardToggleTween()
+		local transform = self.PhotoCardFrontBackDisplayEntity.UITransformComponent
+		local startPosition = transform.anchoredPosition
+		local duration = self.PhotoCardToggleTweenDuration
+		if duration <= 0 then
+			transform.anchoredPosition = targetPosition
+			return
+		end
+
+		local tweenTime = 0
+		local previousTime = _UtilLogic.ElapsedSeconds
+		self.photoCardToggleTweenTimerId = _TimerService:SetTimerRepeat(function()
+			local currentTime = _UtilLogic.ElapsedSeconds
+			tweenTime = tweenTime + (currentTime - previousTime)
+			previousTime = currentTime
+
+			local x = _TweenLogic:Ease(startPosition.x, targetPosition.x, duration, EaseType.SineEaseOut, tweenTime)
+			local y = _TweenLogic:Ease(startPosition.y, targetPosition.y, duration, EaseType.SineEaseOut, tweenTime)
+			transform.anchoredPosition = Vector2(x, y)
+
+			if tweenTime >= duration then
+				transform.anchoredPosition = targetPosition
+				self:ClearPhotoCardToggleTween()
+			end
+		end, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearPhotoCardToggleTween()
+		-- 진행 중인 포토카드 전환 버튼 트윈 타이머를 정리합니다.
+		if self.photoCardToggleTweenTimerId ~= nil and self.photoCardToggleTweenTimerId ~= 0 then
+			_TimerService:ClearTimer(self.photoCardToggleTweenTimerId)
+			self.photoCardToggleTweenTimerId = 0
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearPhotoCardFlipTween()
+		-- 진행 중인 포토카드 플립 트윈 타이머를 정리하고 스케일을 복원합니다.
+		if self.photoCardFlipTweenTimerId ~= nil and self.photoCardFlipTweenTimerId ~= 0 then
+			_TimerService:ClearTimer(self.photoCardFlipTweenTimerId)
+			self.photoCardFlipTweenTimerId = 0
+		end
+		self:ResetPhotoCardFaceScale()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetAlbumItemImageRuid(any tItem)
+		-- tItem: ItemRow
+		-- ItemRow.image 값을 실제 UI ImageRUID로 변환합니다.
+		if tItem == nil then
+			return ""
+		end
+		
+		local image = tItem.image or ""
+		if _ResourceMaster ~= nil then
+			return _ResourceMaster:ResolveResourceId(image)
+		end
+		
+		return image
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveResourceRuid(string resourceId)
+		if resourceId == nil or resourceId == "" then
+			return ""
+		end
+
+		if _ResourceMaster ~= nil then
+			local ruid = _ResourceMaster:ResolveResourceId(resourceId)
+			if ruid ~= nil and ruid ~= "" then
+				return ruid
+			end
+		end
+
+		return resourceId
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetAlbumItemTypeName(string itemType)
+		-- 아이템 타입 키를 화면 표시용 이름으로 변환합니다.
+		if itemType == "present" then
+		return self:GetLocalizedText("ui.smartphone.category.fan_gift", "")
+		elseif itemType == "cherished" then
+		return self:GetLocalizedText("ui.smartphone.category.cherished_item", "")
+		end
+		
+		return itemType or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshStatCharacters()
+		-- 캐릭터 매니저의 보유 캐릭터 3명을 스탯 카드에 반영합니다.
+		local characters = {}
+		if _CharacterManager ~= nil then
+			characters = _CharacterManager:ClientGetActiveCharacters()
+		end
+		
+		for index = 1, 3 do
+			self:SetStatCard(index, characters[index])
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PrepareIdolTemplate()
+		-- 제작 시 배치된 아이돌 카드를 숨기고 Card01을 런타임 복제 템플릿으로만 사용합니다.
+		self:ClearIdolRuntimeCards()
+
+		local idolScroll = self:GetEntity("DesignRoot/MainPanel/IdolContent/IdolScroll")
+		if idolScroll ~= nil and idolScroll.ScrollLayoutGroupComponent ~= nil then
+			idolScroll.ScrollLayoutGroupComponent.Enable = true
+			idolScroll.ScrollLayoutGroupComponent.GridSpacing = Vector2(12, 16)
+		end
+		
+		for index = 1, self.MinIdolCardCount do
+			local card = self:GetEntity(self:GetIdolCardPath(index))
+			if card ~= nil then
+				card.Enable = false
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolCharacters()
+		-- 캐릭터 매니저 데이터로 아이돌 카드를 다시 만들되 최소 슬롯 수를 보장합니다.
+		local characters = {}
+		if _CharacterManager ~= nil then
+			characters = _CharacterManager:ClientGetCharacters()
+		end
+		
+		local cardCount = #characters
+		if cardCount < self.MinIdolCardCount then
+			cardCount = self.MinIdolCardCount
+		end
+		
+		self:RebuildIdolCards(characters, cardCount)
+		self:RefreshSelectedIdolInfo(characters)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RebuildIdolCards(any characters, integer cardCount)
+		-- 첫 번째 카드를 런타임 카드로 복제하고 보유 캐릭터 또는 잠금 슬롯 정보를 채웁니다.
+		self:ClearIdolRuntimeCards()
+		
+		local template = self:GetEntity(self:GetIdolCardPath(1))
+		if template == nil then
+			log_warning("[SmartPhoneUI] Idol Card01 template not found")
+			return
+		end
+		
+		template.Enable = false
+		for index = 1, cardCount do
+			local card = template:Clone(self:GetIdolRuntimeCardName(index))
+			if card ~= nil then
+				card.Enable = true
+				self:SetIdolCard(card, index, characters[index])
+				self:ConnectIdolCardClick(card, characters[index])
+				table.insert(self.idolRuntimeCards, card)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdolRuntimeCards()
+		-- 런타임 카드 삭제 전에 연결된 클릭 이벤트를 먼저 정리합니다.
+		self:DisconnectIdolCardClicks()
+		-- 목록을 다시 만들기 전에 런타임에서 생성한 아이돌 카드를 제거합니다.
+		if self.idolRuntimeCards == nil then
+			self.idolRuntimeCards = {}
+			return
+		end
+		
+		for _, card in ipairs(self.idolRuntimeCards) do
+			if isvalid(card) then
+				card:Destroy()
+			end
+		end
+		
+		self.idolRuntimeCards = {}
+		self.idolNewBadgeByCharacterId = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectIdolCardClick(Entity card, any character)
+		-- 보유 캐릭터 카드에 클릭 이벤트를 연결해 Info 패널을 해당 캐릭터 정보로 갱신합니다.
+		if card == nil or self:IsLockedIdolCharacter(character) then
+			return
+		end
+		
+		local characterId = character.id or ""
+		if characterId == "" then
+			return
+		end
+		
+		local capturedCharacterId = characterId
+		local clickHandler = card:ConnectEvent(ButtonClickEvent, function()
+			self:OnIdolCardClicked(capturedCharacterId)
+		end)
+		
+		table.insert(self.idolCardClickHandlers, { entity = card, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectIdolCardClicks()
+		-- 런타임 아이돌 카드에 연결했던 클릭 이벤트 핸들러를 모두 해제합니다.
+		if self.idolCardClickHandlers == nil then
+			self.idolCardClickHandlers = {}
+			return
+		end
+		
+		for _, item in ipairs(self.idolCardClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+		
+		self.idolCardClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdolCardClicked(string characterId)
+		-- 선택한 아이돌 카드의 캐릭터 정보를 Info 패널에 반영합니다.
+		if characterId == "" or _CharacterManager == nil then
+			return
+		end
+		
+		local character = _CharacterManager:ClientGetCharacterById(characterId)
+		if character == nil then
+			return
+		end
+
+		self.selectedIdolCharacterId = characterId
+		self:SetIdolInfo(character)
+		self:BeginIdolEpisodeVisit(characterId)
+		self:DismissIdolCharacterNewBadge(characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedIdolInfo(any characters)
+		-- 목록을 다시 만든 뒤 기존 선택 캐릭터를 유지하고, 없으면 첫 보유 캐릭터를 Info에 표시합니다.
+		local selectedCharacter = nil
+		if self.selectedIdolCharacterId ~= "" then
+			selectedCharacter = self:FindCharacterInList(characters, self.selectedIdolCharacterId)
+		end
+		
+		if selectedCharacter == nil then
+			selectedCharacter = characters[1]
+		end
+		
+		self:SetIdolInfo(selectedCharacter)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any FindCharacterInList(any characters, string characterId)
+		-- 캐릭터 목록에서 지정한 id의 캐릭터 데이터를 찾습니다.
+		if characters == nil or characterId == "" then
+			return nil
+		end
+		
+		for _, character in ipairs(characters) do
+			if character ~= nil and character.id == characterId then
+				return character
+			end
+		end
+		
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolInfo(any character)
+		-- 선택된 캐릭터의 초상화, 이름, 친밀도 레벨, 에피소드 잠금 상태를 Info 패널에 적용합니다.
+		self:RefreshIdolEpisodeLabels()
+		if self:IsLockedIdolCharacter(character) then
+			self.selectedIdolCharacterId = ""
+			self:SetBoundText(self.IdolProfileNameText, "???")
+			self:SetBoundText(self.IdolProfileLevelText, "Lv. 0")
+			self:SetBoundGaugeFill(self.IdolProfileGaugeSlider, 0)
+			self:SetBoundImage(self.IdolProfilePortraitImage, self.LockedPortraitRuid, true)
+			self:SetBoundImageColor(self.IdolProfilePortraitImage, Color(0.45, 0.45, 0.45, 1))
+			self:SetIdolEpisodeLocks(0)
+			self:RefreshIdolEpisodeNewBadges()
+			self:SetIdolPreviewCostumeCharacterId("")
+			return
+		end
+		
+		local intimacyLevel = self:GetCharacterIntimacyLevel(character)
+		local maxIntimacyLevel = self:GetCharacterMaxIntimacyLevel(character)
+		self.selectedIdolCharacterId = character.id or ""
+		self:SetBoundText(self.IdolProfileNameText, self:GetLocalizedCharacterName(character))
+		self:SetBoundText(self.IdolProfileLevelText, "Lv. " .. tostring(intimacyLevel))
+		self:SetBoundGaugeFill(self.IdolProfileGaugeSlider, self:GetCharacterIntimacyGaugeRatio(character))
+		self:SetBoundImage(self.IdolProfilePortraitImage, self:GetCharacterVerticalPortraitRuid(character.id), true)
+		self:SetIdolEpisodeLocks(maxIntimacyLevel)
+		self:RefreshIdolEpisodeNewBadges()
+		self:SetIdolPreviewCostumeCharacterId(self.selectedIdolCharacterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolPreviewCostumeCharacterId(string characterId)
+		-- 아이돌 Info 프리뷰 아래의 CharacterCostumeApplierComponent에 선택 캐릭터 ID를 전달합니다.
+		local costumeApplier = self:GetIdolPreviewCostumeApplier()
+		if costumeApplier == nil then
+			return
+		end
+
+		costumeApplier:SetCharacterId(characterId or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetIdolPreviewCostumeApplier()
+		-- ProfilePreview 영역 안에서 CharacterCostumeApplierComponent를 찾아 반환합니다.
+		local previewRoot = self:GetEntity("DesignRoot/MainPanel/IdolContent/ProfilePreview")
+		if previewRoot == nil then
+			previewRoot = self:GetEntity("DesignRoot/MainPanel/ProfilePreview")
+		end
+
+		if previewRoot == nil then
+			return nil
+		end
+
+		local costumeApplier = previewRoot:GetComponent("script.CharacterCostumeApplierComponent")
+		if costumeApplier ~= nil then
+			return costumeApplier
+		end
+
+		return previewRoot:GetFirstChildComponentByTypeName("script.CharacterCostumeApplierComponent", true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolEpisodeLocks(integer intimacyLevel)
+		-- 친밀도 story 해금 여부를 버튼 상태와 Lock 이미지에 함께 반영합니다.
+		for index = 1, 5 do
+			local episodePath = "DesignRoot/MainPanel/IdolContent/ProfilePreview/Episode/Episode" .. tostring(index)
+			local isUnlocked = self:IsIdolStoryUnlocked(intimacyLevel, index)
+			self:SetEntityEnable(episodePath .. "/Lock", isUnlocked == false)
+
+			local episodeButton = self:GetEntity(episodePath)
+			if episodeButton ~= nil and episodeButton.ButtonComponent ~= nil then
+				episodeButton.ButtonComponent.Enable = isUnlocked
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolEpisodeLabels()
+		-- 아이돌 프로필의 친밀도 레벨 라벨 갱신
+		local intimacyLevels = { 1, 3, 5, 7, 10 }
+		for index, level in ipairs(intimacyLevels) do
+			local path = "DesignRoot/MainPanel/IdolContent/ProfilePreview/Episode/Episode" .. tostring(index) .. "/UIText"
+			local text = self:FormatLocalized(self.UI_INTIMACY_LEVEL_KEY, "", level, nil, nil)
+			self:SetTextByPath(path, text)
+		end
+	end
+
+	method boolean IsIdolStoryUnlocked(integer intimacyLevel, integer storyIndex)
+		-- 친밀도 레벨 마스터에 등록된 story 해금 여부를 반환합니다.
+		if _IntimacyLevelMaster == nil then
+			return false
+		end
+
+		return _IntimacyLevelMaster:IsUnlockIndexUnlocked(intimacyLevel, "story", storyIndex)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolCard(Entity card, integer index, any character)
+		-- 아이돌 카드 복제본 하나에 캐릭터 정보 또는 잠금 슬롯 표시를 적용합니다.
+		if card == nil then
+			return
+		end
+
+		local newBadge = card:GetChildByName("NewBadge", true)
+		
+		if self:IsLockedIdolCharacter(character) then
+			if newBadge ~= nil then
+				newBadge.Enable = false
+			end
+			self:SetTextByCardChild(card, "Name", "???")
+			self:SetTextByCardChild(card, "Level", "Lv. 0")
+			self:SetGaugeFillByCardChild(card, "Gauge", 0)
+			self:SetImageByCardChild(card, "Portrait", self.LockedPortraitRuid, true)
+			self:SetImageColorByCardChild(card, "Portrait", Color(0.45, 0.45, 0.45, 1))
+			return
+		end
+		
+		local level = self:GetCharacterIntimacyLevel(character)
+		
+		self:SetTextByCardChild(card, "Name", self:GetLocalizedCharacterName(character))
+		self:SetTextByCardChild(card, "Level", "Lv. " .. tostring(level))
+		self:SetGaugeFillByCardChild(card, "Gauge", self:GetCharacterIntimacyGaugeRatio(character))
+		self:SetImageByCardChild(card, "Portrait", self:GetCharacterVerticalPortraitRuid(character.id), true)
+		if newBadge ~= nil then
+			local characterId = character.id or ""
+			local isNew = self:ShouldShowIdolCharacterNewBadge(characterId)
+			newBadge.Enable = isNew
+			if characterId ~= "" then
+				self.idolNewBadgeByCharacterId[characterId] = newBadge
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsLockedIdolCharacter(any character)
+		-- character: CharacterData. 미발견이거나 ???로 표시되는 아이돌 카드인지 확인합니다.
+		if character == nil then
+			return true
+		end
+
+		if character.isDiscovered == false then
+			return true
+		end
+
+		local characterName = character.name or ""
+		if characterName == "" or characterName == "???" then
+			return true
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedCharacterName(any character)
+		-- 캐릭터 ID에 대응하는 ActorTable 번역 이름 조회
+		if character == nil then
+			return ""
+		end
+
+		local fallbackName = character.name or ""
+		local characterId = character.id or ""
+		if _ActorMaster == nil or characterId == "" then
+			return fallbackName
+		end
+
+		local actor = _ActorMaster:GetActor(characterId)
+		if actor == nil then
+			return fallbackName
+		end
+
+		local actorFallback = actor.name or fallbackName
+		if _LocalizationLogic ~= nil and actor.nameKey ~= nil and actor.nameKey ~= "" then
+			return _LocalizationLogic:GetText(actor.nameKey, "")
+		end
+
+		return actor.name or fallbackName
+	end
+
+	method integer GetCharacterIntimacyLevel(any character)
+		-- CharacterData의 친밀도 수치를 IntimacyLevelMaster 기준 친밀도 레벨로 변환합니다.
+		if character == nil or _IntimacyLevelMaster == nil then
+			return 0
+		end
+		
+		return _IntimacyLevelMaster:GetCurrentLevel(character.intimacy or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCharacterMaxIntimacyLevel(any character)
+		-- CharacterData의 최고 친밀도 기록을 IntimacyLevelMaster 기준 친밀도 레벨로 변환합니다.
+		if character == nil or _IntimacyLevelMaster == nil then
+			return 0
+		end
+		
+		return _IntimacyLevelMaster:GetCurrentLevel(character.maxIntimacyReached or character.intimacy or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCharacterIntimacyGaugeRatio(any character)
+		-- character: CharacterData. 현재 친밀도 경험치가 현재 레벨 구간에서 차지하는 비율을 반환합니다.
+		if character == nil then
+			return 0
+		end
+
+		return self:GetIntimacyGaugeRatio(character.intimacy or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetIntimacyGaugeRatio(number intimacy)
+		-- 현재 친밀도 경험치를 다음 레벨까지의 게이지 비율로 변환합니다.
+		if _IntimacyLevelMaster == nil then
+			return 0
+		end
+
+		local safeIntimacy = intimacy or 0
+		local currentLevel = _IntimacyLevelMaster:GetCurrentLevel(safeIntimacy)
+		local currentLevelData = _IntimacyLevelMaster:GetLevelData(currentLevel)
+		local nextLevelData = _IntimacyLevelMaster:GetLevelData(currentLevel + 1)
+		if nextLevelData == nil then
+			return 1
+		end
+
+		local currentCut = 0
+		if currentLevelData ~= nil and currentLevelData.intimacyCut ~= nil then
+			currentCut = currentLevelData.intimacyCut
+		end
+
+		local nextCut = nextLevelData.intimacyCut or currentCut
+		if nextCut <= currentCut then
+			return 1
+		end
+
+		local ratio = (safeIntimacy - currentCut) / (nextCut - currentCut)
+		return self:Clamp01(ratio)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number Clamp01(number value)
+		-- 숫자를 0~1 사이 값으로 제한합니다.
+		if value == nil or value <= 0 then
+			return 0
+		end
+
+		if value > 1 then
+			return 1
+		end
+
+		return value
+	end
+
+	@ExecSpace("ClientOnly")
+	method number ClampNumber(number value, number minValue, number maxValue)
+		-- 숫자를 지정된 최소/최대 범위 안으로 제한합니다.
+		if value == nil then
+			return minValue
+		end
+		if value < minValue then
+			return minValue
+		end
+		if value > maxValue then
+			return maxValue
+		end
+		
+		return value
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateAlbumScrollBounds(integer cardCount)
+		-- 생성된 앨범 카드 수를 기준으로 수동 스크롤 가능한 최대 오프셋을 계산합니다.
+		local rowCount = math.floor((cardCount + self.AlbumCardColumnCount - 1) / self.AlbumCardColumnCount)
+		if rowCount < 1 then
+			rowCount = 1
+		end
+		
+		local contentHeight = self.AlbumCardHeight + (rowCount - 1) * self.AlbumCardStepY
+		self.albumMaxScrollOffsetY = contentHeight - self.AlbumViewportHeight
+		if self.albumMaxScrollOffsetY < 0 then
+			self.albumMaxScrollOffsetY = 0
+		end
+		
+		self.albumScrollOffsetY = self:ClampNumber(self.albumScrollOffsetY, 0, self.albumMaxScrollOffsetY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyAlbumCardPositions()
+		-- 현재 스크롤 오프셋을 기준으로 모든 런타임 앨범 카드 위치를 다시 적용합니다.
+		if self.albumRuntimeCards == nil then
+			return
+		end
+		
+		for index, card in ipairs(self.albumRuntimeCards) do
+			if isvalid(card) then
+				self:SetAlbumCardPosition(card, index, self.AlbumCardColumnCount)
+			end
+		end
+
+		if self.fanPresentRuntimeCards ~= nil then
+			for index, card in ipairs(self.fanPresentRuntimeCards) do
+				if isvalid(card) then
+					self:SetAlbumCardPosition(card, index, self.AlbumCardColumnCount)
+				end
+			end
+		end
+
+		if self.photoCardRuntimeCards ~= nil then
+			for index, card in ipairs(self.photoCardRuntimeCards) do
+				if isvalid(card) then
+					self:SetAlbumCardPosition(card, index, self.PhotoCardColumnCount)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolCardPosition(Entity card, integer index)
+		-- 런타임 아이돌 카드를 제작용 목업과 같은 3열 그리드 위치에 배치합니다.
+		if card == nil or card.UITransformComponent == nil then
+			return
+		end
+		
+		local zeroIndex = index - 1
+		local column = zeroIndex % self.IdolCardColumnCount
+		local row = math.floor(zeroIndex / self.IdolCardColumnCount)
+		card.UITransformComponent.anchoredPosition = Vector2(
+			self.IdolCardStartX + column * self.IdolCardStepX,
+			self.IdolCardStartY - row * self.IdolCardStepY
+		)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTextByCardChild(Entity card, string childName, string value)
+		-- 런타임 카드 하위의 지정된 이름 엔티티에 GUI 문자열을 적용합니다.
+		if card == nil then
+			return
+		end
+		
+		local child = card:GetChildByName(childName, true)
+		if child == nil then
+			return
+		end
+		
+		if child.TextGUIRendererComponent ~= nil then
+			child.TextGUIRendererComponent.Text = value or ""
+		elseif child.TextComponent ~= nil then
+			child.TextComponent.Text = value or ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImageByCardChild(Entity card, string childName, string ruid, boolean isFilled)
+		-- 런타임 카드 하위의 지정된 이름 엔티티에 SpriteGUIRendererComponent 이미지를 적용합니다.
+		if card == nil then
+			return
+		end
+		
+		local child = card:GetChildByName(childName, true)
+		if child == nil or child.SpriteGUIRendererComponent == nil then
+			return
+		end
+		
+		if isFilled ~= true or ruid == nil or ruid == "" then
+			child.SpriteGUIRendererComponent.ImageRUID = DataRef("")
+			child.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+		
+		child.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
+		child.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImageColorByCardChild(Entity card, string childName, Color color)
+		-- 카드 하위 이미지의 tint 색상을 변경합니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child == nil or child.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		child.SpriteGUIRendererComponent.Color = color
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCardChildEnable(Entity card, string childName, boolean enable)
+		-- 런타임 카드 하위의 지정된 이름 엔티티를 켜거나 끕니다.
+		if card == nil then
+			return
+		end
+		
+		local child = card:GetChildByName(childName, true)
+		if child ~= nil then
+			child.Enable = enable
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetGaugeFillByCardChild(Entity card, string childName, number fillAmount)
+		-- 런타임 카드 하위의 지정된 게이지 SliderComponent에 Value를 적용합니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child == nil then
+			return
+		end
+
+		if child.SliderComponent ~= nil then
+			child.SliderComponent.Value = self:Clamp01(fillAmount)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetStatCard(integer index, any character)
+		-- 한 캐릭터의 초상화, 스탯, 컨디션 텍스트를 카드 하나에 채웁니다.
+		local cardPath = self:GetStatCardPath(index)
+		local card = self:GetEntity(cardPath)
+		if card == nil then
+			return
+		end
+		
+		if character == nil then
+			card.Enable = false
+			return
+		end
+		
+		card.Enable = true
+		local localizedCharacterName = self:GetLocalizedCharacterName(character)
+		self:SetTextByPath(cardPath .. "/PortraitFrame/Character", localizedCharacterName)
+		self:SetTextByPath(cardPath .. "/PortraitFrame/Text_1", localizedCharacterName)
+		self:SetTextByPath(cardPath .. "/Vocal/Text", self:BuildStatValueText("vocal", character.vocal or 0))
+		self:SetTextByPath(cardPath .. "/Dance/Text", self:BuildStatValueText("dance", character.dance or 0))
+		self:SetTextByPath(cardPath .. "/Visual/Text", self:BuildStatValueText("visual", character.visual or 0))
+		self:SetTextByPath(cardPath .. "/Condition/Text", self:BuildStatValueText("fatigue", character.fatigue or 0))
+		self:SetImageByPath(cardPath .. "/PortraitFrame/Portrait", self:GetCharacterPortraitRuid(character.id), true)
+		self:SetImageByPath(cardPath .. "/PortraitFrame/FavoriteBadge/Condition", self:GetConditionIconRuid(character.fatigue or 0), true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetStatCardPath(integer index)
+		-- 카드 인덱스를 UI 경로의 Card01, Card02 형식으로 변환합니다.
+		if index < 10 then
+			return "DesignRoot/MainPanel/StatContent/Card0" .. tostring(index)
+		end
+		
+		return "DesignRoot/MainPanel/StatContent/Card" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetIdolCardPath(integer index)
+		-- 아이돌 카드 인덱스를 제작 시 배치한 Card01, Card02 형식의 경로로 변환합니다.
+		if index < 10 then
+			return "DesignRoot/MainPanel/IdolContent/IdolScroll/Card0" .. tostring(index)
+		end
+		
+		return "DesignRoot/MainPanel/IdolContent/IdolScroll/Card" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetIdolRuntimeCardName(integer index)
+		-- 아이돌 카드 인덱스를 런타임 전용 복제 카드 이름으로 변환합니다.
+		if index < 10 then
+			return "RuntimeCard0" .. tostring(index)
+		end
+		
+		return "RuntimeCard" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetAlbumTemplate()
+		-- 앨범 슬롯을 동적으로 만들 때 사용할 단일 템플릿을 반환합니다.
+		return self.CherishedItemTemplateEntity
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetFanPresentTemplate()
+		-- 팬선물 그리드에서 런타임 카드를 만들 때 사용할 템플릿을 반환합니다.
+		return self.FanPresentTemplateEntity
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetPhotoCardTemplate()
+		-- 포토카드 그리드에서 런타임 카드를 만들 때 사용할 템플릿을 반환합니다.
+		return self.PhotoCardTemplateEntity
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetAlbumScrollTouchTarget()
+		-- 앨범 스크롤 입력 기준점입니다. 투명 패널이 있으면 그쪽을 우선 사용합니다.
+		return self.CherishedItemGridEntity
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetAlbumRuntimeCardName(integer index)
+		-- 앨범 카드 인덱스를 런타임 전용 복제 카드 이름으로 변환합니다.
+		if index < 10 then
+			return "RuntimeAlbumItem0" .. tostring(index)
+		end
+		
+		return "RuntimeAlbumItem" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetAlbumCardPosition(Entity card, integer index, integer columnCount)
+		-- 런타임 앨범 카드를 각 앨범 그리드의 열 수에 맞춰 배치합니다.
+		if card == nil or card.UITransformComponent == nil then
+			return
+		end
+		if columnCount <= 0 then
+			columnCount = self.AlbumCardColumnCount
+		end
+		
+		local zeroIndex = index - 1
+		local column = zeroIndex % columnCount
+		local row = math.floor(zeroIndex / columnCount)
+		card.UITransformComponent.anchoredPosition = Vector2(
+			self.AlbumCardStartX + column * self.AlbumCardStepX,
+			self.AlbumCardStartY - row * self.AlbumCardStepY
+		)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetActorName(string characterId)
+		-- 캐릭터 id를 표시 이름으로 변환합니다.
+		if characterId == nil or characterId == "" then
+			return ""
+		end
+
+		if _ActorMaster ~= nil then
+			return _ActorMaster:GetActorName(characterId)
+		end
+
+		return characterId
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetItemById(string itemId)
+		-- ItemTable 기준 ItemRow를 조회합니다.
+		if itemId == nil or itemId == "" or _ItemMaster == nil then
+			return nil
+		end
+
+		return _ItemMaster:GetItemById(itemId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCharacterPortraitRuid(string characterId)
+		-- 스탯 카드에서는 런타임 액터 매니저의 가로 초상화 리소스를 우선 사용하고 없으면 플레이스홀더를 반환합니다.
+		if _RuntimeActorManager ~= nil then
+			local portraitRuid = _RuntimeActorManager:ClientGetActorPortraitHorizontalRuid(characterId, "")
+			if portraitRuid ~= nil and portraitRuid ~= "" then
+				return portraitRuid
+			end
+		end
+		
+		return self.PlaceholderRuid
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCharacterVerticalPortraitRuid(string characterId)
+		-- 아이돌 목록 카드에서는 런타임 액터 매니저의 세로 초상화 리소스를 우선 사용하고 없으면 플레이스홀더를 반환합니다.
+		if _RuntimeActorManager ~= nil then
+			local portraitRuid = _RuntimeActorManager:ClientGetActorPortraitRuid(characterId, "")
+			if portraitRuid ~= nil and portraitRuid ~= "" then
+				return portraitRuid
+			end
+		end
+		
+		return self.PlaceholderRuid
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetConditionIconRuid(number fatigue)
+		-- ConditionMaster/ResourceTable 기준으로 피로도에 해당하는 컨디션 아이콘 RUID를 반환합니다.
+		if _ConditionMaster == nil then
+			return self.PlaceholderRuid
+		end
+
+		local conditionRuid = _ConditionMaster:GetConditionIconRuidByFatigue(fatigue or 0)
+		if conditionRuid == nil or conditionRuid == "" then
+			return self.PlaceholderRuid
+		end
+
+		return conditionRuid
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedText(string key, string fallbackText)
+		-- 현재 locale의 UI 문구를 조회합니다.
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:GetText(key, fallbackText)
+		end
+
+		return fallbackText or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatLocalized(string key, string fallbackText, any value1, any value2, any value3)
+		-- 현재 locale의 UI 템플릿에 값을 반영
+		if _LocalizationLogic ~= nil then
+			return _LocalizationLogic:Format(key, fallbackText, value1, value2, value3, "")
+		end
+
+		return fallbackText or ""
+	end
+
+	method string BuildStatValueText(string statKey, number value)
+		-- 스마트폰 스탯 카드의 locale별 이름과 값을 조합합니다.
+		local statName = _ScheduleStatTextUtil ~= nil and _ScheduleStatTextUtil:GetLocalizedStatName(statKey, statKey) or statKey
+		return statName .. " : " .. tostring(math.floor(value or 0))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTitle(string title, string iconRuid)
+		-- 각 콘텐츠에 있는 타이틀 텍스트와 아이콘을 현재 탭에 맞게 바꿉니다.
+		self:SetTextByPath("DesignRoot/MainPanel/StatContent/Title/Band/Text", title)
+		self:SetTextByPath("DesignRoot/MainPanel/IdolContent/Title/Band/Text", title)
+		self:SetBoundText(self.AlbumTitleText, title)
+		self:SetImageByPath("DesignRoot/MainPanel/StatContent/Title/Icon", iconRuid, true)
+		self:SetImageByPath("DesignRoot/MainPanel/IdolContent/Title/Icon", iconRuid, true)
+		self:SetBoundImage(self.AlbumTitleIconImage, iconRuid, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetStatIconRuid()
+		-- 에디터에서 설정한 메뉴 아이콘을 우선 사용하고, 없으면 스크립트 기본값을 사용합니다.
+		return self:GetImageRuidByPath("DesignRoot/Phone/MenuStat/Icon", self.IconStatRuid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetIdolIconRuid()
+		-- 에디터에서 설정한 메뉴 아이콘을 우선 사용하고, 없으면 스크립트 기본값을 사용합니다.
+		return self:GetImageRuidByPath("DesignRoot/Phone/MenuIdol/Icon", self.IconIdolRuid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetAlbumIconRuid()
+		-- 에디터에서 설정한 메뉴 아이콘을 우선 사용하고, 없으면 스크립트 기본값을 사용합니다.
+		return self:GetImageRuidByPath("DesignRoot/Phone/MenuAlbum/Icon", self.IconAlbumRuid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetImageRuidByPath(string path, string fallbackRuid)
+		-- SpriteGUIRendererComponent의 현재 ImageRUID를 읽어옵니다.
+		local entity = self:GetEntity(path)
+		if entity == nil or entity.SpriteGUIRendererComponent == nil then
+			return fallbackRuid or ""
+		end
+
+		local imageRuid = entity.SpriteGUIRendererComponent.ImageRUID
+		if imageRuid ~= nil and imageRuid.DataId ~= nil and imageRuid.DataId ~= "" then
+			return imageRuid.DataId
+		end
+
+		return fallbackRuid or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTextByPath(string path, string value)
+		-- 경로로 찾은 TextComponent 또는 TextGUIRendererComponent에 문자열을 설정합니다.
+		local entity = self:GetEntity(path)
+		if entity == nil then
+			return
+		end
+
+		if entity.TextComponent ~= nil then
+			entity.TextComponent.Text = value or ""
+		elseif entity.TextGUIRendererComponent ~= nil then
+			entity.TextGUIRendererComponent.Text = value or ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImageByPath(string path, string ruid, boolean isFilled)
+		-- 경로로 찾은 SpriteGUIRendererComponent에 RUID 이미지를 설정합니다.
+		local entity = self:GetEntity(path)
+		if entity == nil or entity.SpriteGUIRendererComponent == nil then
+			return
+		end
+		
+		if isFilled ~= true or ruid == nil or ruid == "" then
+			entity.SpriteGUIRendererComponent.ImageRUID = DataRef("")
+			entity.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+		
+		entity.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
+		entity.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundText(TextGUIRendererComponent textComponent, string value)
+		-- UUID로 바인딩된 텍스트 컴포넌트에 표시 문자열을 설정합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = value or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundGuiText(TextGUIRendererComponent textComponent, string value)
+		-- UUID로 바인딩된 TextGUIRendererComponent에 표시 문자열을 설정합니다.
+		if textComponent == nil then
+			return
+		end
+
+		textComponent.Text = value or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundImage(SpriteGUIRendererComponent imageComponent, string ruid, boolean isFilled)
+		-- UUID로 바인딩된 이미지 컴포넌트에 RUID 이미지를 설정합니다.
+		if imageComponent == nil then
+			return
+		end
+
+		if isFilled ~= true or ruid == nil or ruid == "" then
+			imageComponent.ImageRUID = DataRef("")
+			imageComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		imageComponent.ImageRUID = DataRef(ruid)
+		imageComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundImageColor(SpriteGUIRendererComponent imageComponent, Color color)
+		-- UUID로 바인딩된 이미지 컴포넌트의 tint 색상을 설정합니다.
+		if imageComponent ~= nil then
+			imageComponent.Color = color
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundGaugeFill(SliderComponent sliderComponent, number fillAmount)
+		-- UUID로 바인딩된 게이지 SliderComponent에 Value를 설정합니다.
+		if sliderComponent ~= nil then
+			sliderComponent.Value = self:Clamp01(fillAmount)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundEntityEnable(Entity entity, boolean enable)
+		-- UUID로 바인딩된 UI 엔티티의 Enable을 설정합니다.
+		if entity ~= nil then
+			entity.Enable = enable
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImageColorByPath(string path, Color color)
+		-- 경로로 찾은 이미지의 tint 색상을 변경합니다.
+		local entity = self:GetEntity(path)
+		if entity == nil or entity.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		entity.SpriteGUIRendererComponent.Color = color
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetGaugeFillByPath(string path, number fillAmount)
+		-- 경로로 찾은 게이지 SliderComponent에 Value를 설정합니다.
+		local entity = self:GetEntity(path)
+		if entity == nil then
+			return
+		end
+
+		if entity.SliderComponent ~= nil then
+			entity.SliderComponent.Value = self:Clamp01(fillAmount)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityEnable(string path, boolean enable)
+		-- 경로로 찾은 UI 엔티티 전체를 켜거나 끕니다.
+		local entity = self:GetEntity(path)
+		if entity ~= nil then
+			entity.Enable = enable
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetEntity(string path)
+		-- 현재 UI 루트 기준 상대 경로로 엔티티를 찾습니다.
+		if path == "Button" then
+			if self.OpenButton ~= nil then
+				return self.OpenButton.Entity
+			end
+		end
+
+		if path == "DesignRoot" then
+			if self.DesignRootEntity ~= nil then
+				return self.DesignRootEntity
+			end
+		end
+
+		if path == "DesignRoot/Dimmer" then
+			return self.DimmerEntity
+		end
+
+		if path == "DesignRoot/Phone" then
+			return self.PhoneEntity
+		end
+
+		if path == "DesignRoot/MainPanel" then
+			return self.MainPanelEntity
+		end
+
+		if self.RootPath == "" then
+			return nil
+		end
+		
+		return _EntityService:GetEntityByPath(self.RootPath .. "/" .. path)
+	end
+
+end

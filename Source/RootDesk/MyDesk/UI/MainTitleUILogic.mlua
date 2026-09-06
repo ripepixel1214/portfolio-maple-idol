@@ -1,0 +1,1022 @@
+﻿@Logic
+script MainTitleUILogic extends Logic
+
+	property Entity titleRoot = "727ce267-6756-4f31-9867-2281e818bb84"
+
+	property ButtonComponent startButton = "48bc6c3c-b507-42cd-a21a-78a0fc11b253"
+
+	property ButtonComponent settingButton = "9965cf40-ec0d-4900-bf74-25c95a7f436e"
+
+	property Entity settingPanel = "8b7b77f4-9714-4c67-9377-52329d3511de"
+
+	property Entity settingWindow = "8e8cfa95-05dd-4338-87e3-0f5d7f00b3aa"
+
+	property ButtonComponent resetButton = "06c8ac35-7434-496d-80b4-7ef02955fa81"
+
+	property ButtonComponent cancelButton = "163e6da0-e91b-4213-a4c9-07743049598a"
+
+	property ButtonComponent confirmButton = "be5551e4-2b86-498b-928a-5494c9c37063"
+
+	property ButtonComponent exitButton = "c10289ba-3995-4bbe-a344-b7ec3b6ca0c4"
+
+	property ScrollLayoutGroupComponent settingsScrollLayout = "13e4e9ad-9b65-462a-a364-3898acd2a4a2"
+
+	property Entity settingDimmer = "2e71b757-5854-410b-b28a-e481865762ed"
+
+	property Entity resetEnsurePanel = "003feb4d-593e-473a-bb4c-536e392f8572"
+
+	property TextGUIRendererComponent masterText = "5e843d17-5687-41d1-8bbb-43b04c619d5a"
+
+	property TextGUIRendererComponent backgroundText = "4c1faf73-c129-44e4-aed4-1382c999f0a2"
+
+	property TextGUIRendererComponent effectText = "5c5712d7-fadb-4f7c-81b1-61ed7b8f0c51"
+
+	property SliderComponent masterBar = "97363b49-6f7d-46c3-8553-e2df7428cb71"
+
+	property SliderComponent backgroundBar = "1314479e-159b-427a-a13a-979c7de2514d"
+
+	property SliderComponent effectBar = "31788755-6668-46c7-85b2-2e82ad229c2a"
+
+	property any masterBarValueChangedHandler = nil
+
+	property any backgroundBarValueChangedHandler = nil
+
+	property any effectBarValueChangedHandler = nil
+
+	property SpriteGUIRendererComponent sparkleRenderer = "01938ba2-e487-4ed9-88f3-ec36b5e26fe7"
+
+	property UITransformComponent sparkleTransform = "01938ba2-e487-4ed9-88f3-ec36b5e26fe7"
+
+	property UITransformComponent cdTransform = "69de0ba3-f3b2-4ca6-a841-7e0aad083c53"
+
+	property UITransformComponent characterTransform = "c7a2cc0f-dece-4a6c-a0ab-04e35ce5d2b3"
+
+	property UITransformComponent logoTransform = "fd6555b6-b9cd-42f0-9cf6-735edf7f1a06"
+
+	property Entity effectModifierEntity = "727ce267-6756-4f31-9867-2281e818bb84"
+
+	property string titleMapId = "Map_MainTitle"
+
+	property string titleBgmRuid = "fb2ae50a8aeb49c29c04bc3db91e7e6a"
+
+	property number titleBgmBaseVolume = 1
+
+	property number titleBgmFadeOutDuration = 0.5
+
+	property boolean isTitleBgmPlaying = false
+
+	property integer sweepTimerId = 0
+
+	property number cdRotationAngle = 0
+
+	property Vector2 cdBaseSize = Vector2(0, 0)
+
+	property Vector2 cdBasePosition = Vector2(0, 0)
+
+	property number responsiveHeightScale = 1
+
+	property number characterTweenElapsed = 0
+
+	property Vector2 characterBasePosition = Vector2(0, 0)
+
+	property number logoTweenElapsed = 0
+
+	property Vector2 logoBasePosition = Vector2(0, 0)
+
+	property Vector3 logoBaseScale = Vector3(1, 1, 1)
+
+	property Vector2 sparkleBasePosition = Vector2(0, 0)
+
+	property number sweepElapsed = 0
+
+	property number sweepDelay = 0
+
+	property any startButtonClickHandler = nil
+
+	property any settingButtonClickHandler = nil
+
+	property any resetButtonClickHandler = nil
+
+	property any cancelButtonClickHandler = nil
+
+	property any confirmButtonClickHandler = nil
+
+	property any exitButtonClickHandler = nil
+
+	property boolean isStartingGame = false
+
+	property boolean isSettingPanelOpen = false
+
+	property string MASTER_VOLUME_TEXT_KEY = "ui.main_title.settings.master_volume"
+
+	property string BACKGROUND_VOLUME_TEXT_KEY = "ui.main_title.settings.background_volume"
+
+	property string EFFECT_VOLUME_TEXT_KEY = "ui.main_title.settings.effect_volume"
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 메인 타이틀 맵에서만 타이틀 UI를 표시하고 시작 입력을 준비합니다.
+		self:StopSweepTimer()
+		self:RefreshResponsiveHeightScale()
+		self:CacheSparkleBaseTransform()
+		self:ResetSparkle()
+		self:DisconnectStartButton()
+		self:DisconnectSettingButtons()
+		self.isSettingPanelOpen = false
+		self:SetSettingPanelOpen(false)
+		self.isStartingGame = false
+		self.isTitleBgmPlaying = false
+
+		if self:IsCurrentMap(self.titleMapId) == false then
+			self:SetVisibleRoot(false)
+			return
+		end
+
+		self:SetVisibleRoot(true)
+		self:CacheCdBaseTransform()
+		self:ApplyResponsiveCdLayout()
+		self:RefreshSettingUIFromSoundManager()
+		self:PlayTitleBgm()
+		self:ConnectSettingBars()
+		self:ConnectStartButton()
+		self:ConnectSettingButtons()
+		self:CacheCharacterBaseTransform()
+		self:ResetCharacterTween()
+		self:CacheLogoBaseTransform()
+		self:ResetLogoTween()
+		self.sweepDelay = self:GetSweepInitialDelay()
+		self:StartSweepTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 메인 타이틀 UI 입력과 광택 효과 타이머를 정리합니다.
+		self:DisconnectStartButton()
+		self:DisconnectSettingButtons()
+		self:DisconnectSettingBars()
+		self:StopSweepTimer()
+		self:ResetResponsiveCdLayout()
+		self:ResetCharacterTween()
+		self:ResetLogoTween()
+		self:StopTitleBgm(0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayTitleBgm()
+		-- 메인 타이틀 전용 BGM을 현재 사운드 설정이 반영된 볼륨으로 재생합니다.
+		if _SoundManager == nil then
+			log_warning("[MainTitleUI] SoundManager is nil")
+			return
+		end
+
+		_SoundManager:PlayBGM(self.titleBgmRuid, self.titleBgmBaseVolume)
+		self.isTitleBgmPlaying = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopTitleBgm(number fadeOutDuration)
+		-- 타이틀에서 시작한 BGM만 정리해 다른 화면의 사운드 흐름에 영향을 주지 않습니다.
+		if self.isTitleBgmPlaying == false then
+			return
+		end
+
+		if _SoundManager ~= nil then
+			_SoundManager:StopBGM(fadeOutDuration)
+		end
+		self.isTitleBgmPlaying = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectStartButton()
+		-- 시작 버튼 클릭 이벤트를 연결합니다.
+		if self.startButton == nil or self.startButton.Entity == nil then
+			log_warning("[MainTitleUI] StartButton is nil")
+			return
+		end
+
+		self.startButtonClickHandler = self.startButton.Entity:ConnectEvent(ButtonClickEvent, self.OnStartButtonClicked)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectStartButton()
+		-- 시작 버튼 클릭 이벤트 연결을 해제합니다.
+		if self.startButton ~= nil and self.startButton.Entity ~= nil and self.startButtonClickHandler ~= nil then
+			self.startButton.Entity:DisconnectEvent(ButtonClickEvent, self.startButtonClickHandler)
+		end
+
+		self.startButtonClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectSettingButtons()
+		-- 설정, 초기화, 취소, 확인, 닫기 버튼의 클릭 이벤트를 연결합니다.
+		if self.settingButton ~= nil and self.settingButton.Entity ~= nil then
+			self.settingButtonClickHandler = self.settingButton.Entity:ConnectEvent(ButtonClickEvent, self.OnSettingButtonClicked)
+		else
+			log_warning("[MainTitleUI] SettingButton is nil")
+		end
+
+		if self.resetButton ~= nil and self.resetButton.Entity ~= nil then
+			self.resetButtonClickHandler = self.resetButton.Entity:ConnectEvent(ButtonClickEvent, self.OnResetButtonClicked)
+		else
+			log_warning("[MainTitleUI] ResetButton is nil")
+		end
+
+		if self.cancelButton ~= nil and self.cancelButton.Entity ~= nil then
+			self.cancelButtonClickHandler = self.cancelButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCancelButtonClicked)
+		else
+			log_warning("[MainTitleUI] CancelButton is nil")
+		end
+
+		if self.confirmButton ~= nil and self.confirmButton.Entity ~= nil then
+			self.confirmButtonClickHandler = self.confirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnConfirmButtonClicked)
+		else
+			log_warning("[MainTitleUI] ConfirmButton is nil")
+		end
+
+		if self.exitButton ~= nil and self.exitButton.Entity ~= nil then
+			self.exitButtonClickHandler = self.exitButton.Entity:ConnectEvent(ButtonClickEvent, self.OnExitButtonClicked)
+		else
+			log_warning("[MainTitleUI] ExitButton is nil")
+		end
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectSettingButtons()
+		-- 설정, 초기화, 취소, 확인, 닫기 버튼의 클릭 이벤트 연결을 해제합니다.
+		if self.settingButton ~= nil and self.settingButton.Entity ~= nil and self.settingButtonClickHandler ~= nil then
+			self.settingButton.Entity:DisconnectEvent(ButtonClickEvent, self.settingButtonClickHandler)
+		end
+
+		if self.resetButton ~= nil and self.resetButton.Entity ~= nil and self.resetButtonClickHandler ~= nil then
+			self.resetButton.Entity:DisconnectEvent(ButtonClickEvent, self.resetButtonClickHandler)
+		end
+
+		if self.cancelButton ~= nil and self.cancelButton.Entity ~= nil and self.cancelButtonClickHandler ~= nil then
+			self.cancelButton.Entity:DisconnectEvent(ButtonClickEvent, self.cancelButtonClickHandler)
+		end
+
+		if self.confirmButton ~= nil and self.confirmButton.Entity ~= nil and self.confirmButtonClickHandler ~= nil then
+			self.confirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.confirmButtonClickHandler)
+		end
+
+		if self.exitButton ~= nil and self.exitButton.Entity ~= nil and self.exitButtonClickHandler ~= nil then
+			self.exitButton.Entity:DisconnectEvent(ButtonClickEvent, self.exitButtonClickHandler)
+		end
+
+		self.settingButtonClickHandler = nil
+		self.resetButtonClickHandler = nil
+		self.cancelButtonClickHandler = nil
+		self.confirmButtonClickHandler = nil
+		self.exitButtonClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnSettingButtonClicked(ButtonClickEvent event)
+		-- 설정 버튼을 누르면 일반 설정 패널만 열고 초기화 확인 UI는 닫아 둡니다.
+		self:SetSettingPanelOpen(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnResetButtonClicked(ButtonClickEvent event)
+		-- 초기화 버튼을 누르면 딤머와 초기화 확인 패널을 함께 표시합니다.
+		self:SetResetEnsureOpen(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCancelButtonClicked(ButtonClickEvent event)
+		-- 취소 버튼을 누르면 초기화 확인 패널과 딤머를 함께 닫습니다.
+		self:SetResetEnsureOpen(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirmButtonClicked(ButtonClickEvent event)
+		-- 확인 버튼을 누르면 사운드 설정을 포함한 현재 유저의 전체 저장 데이터 초기화를 서버에 요청합니다.
+		self:SetResetEnsureOpen(false)
+
+		if _ProgressManager == nil then
+			log_warning("[MainTitleUI] ProgressManager is nil")
+			return
+		end
+
+		_ProgressManager:RequestResetAllStorageData()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnExitButtonClicked(ButtonClickEvent event)
+		-- 닫기 버튼을 누르면 설정 패널 전체를 닫습니다.
+		self:SetSettingPanelOpen(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSettingPanelOpen(boolean isOpen)
+		-- 설정 패널 표시 상태를 변경하고, 열린 패널이 닫히는 순간 최신 사운드 설정을 한 번 저장합니다.
+		local wasOpen = self.isSettingPanelOpen
+		self:SetResetEnsureOpen(false)
+
+		if self.settingPanel ~= nil then
+			self.settingPanel.Enable = isOpen
+		end
+		if self.settingWindow ~= nil then
+			self.settingWindow.Enable = isOpen
+		end
+
+		self.isSettingPanelOpen = isOpen
+		if wasOpen == true and isOpen == false then
+			self:RequestSaveSettingVolumes()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetResetEnsureOpen(boolean isOpen)
+		-- 초기화 확인용 딤머와 확인 패널을 같은 상태로 전환합니다.
+		if self.settingDimmer ~= nil then
+			self.settingDimmer.Enable = isOpen
+		end
+
+		if self.resetEnsurePanel ~= nil then
+			self.resetEnsurePanel.Enable = isOpen
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectSettingBars()
+		-- 각 볼륨 슬라이더의 값 변경 이벤트를 연결합니다.
+		if self.masterBar ~= nil and self.masterBar.Entity ~= nil then
+			self.masterBarValueChangedHandler = self.masterBar.Entity:ConnectEvent(SliderValueChangedEvent, self.OnMasterBarValueChanged)
+		end
+
+		if self.backgroundBar ~= nil and self.backgroundBar.Entity ~= nil then
+			self.backgroundBarValueChangedHandler = self.backgroundBar.Entity:ConnectEvent(SliderValueChangedEvent, self.OnBackgroundBarValueChanged)
+		end
+
+		if self.effectBar ~= nil and self.effectBar.Entity ~= nil then
+			self.effectBarValueChangedHandler = self.effectBar.Entity:ConnectEvent(SliderValueChangedEvent, self.OnEffectBarValueChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectSettingBars()
+		-- 각 볼륨 슬라이더의 값 변경 이벤트 연결을 해제합니다.
+		if self.masterBar ~= nil and self.masterBar.Entity ~= nil and self.masterBarValueChangedHandler ~= nil then
+			self.masterBar.Entity:DisconnectEvent(SliderValueChangedEvent, self.masterBarValueChangedHandler)
+		end
+
+		if self.backgroundBar ~= nil and self.backgroundBar.Entity ~= nil and self.backgroundBarValueChangedHandler ~= nil then
+			self.backgroundBar.Entity:DisconnectEvent(SliderValueChangedEvent, self.backgroundBarValueChangedHandler)
+		end
+
+		if self.effectBar ~= nil and self.effectBar.Entity ~= nil and self.effectBarValueChangedHandler ~= nil then
+			self.effectBar.Entity:DisconnectEvent(SliderValueChangedEvent, self.effectBarValueChangedHandler)
+		end
+
+		self.masterBarValueChangedHandler = nil
+		self.backgroundBarValueChangedHandler = nil
+		self.effectBarValueChangedHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnMasterBarValueChanged(SliderValueChangedEvent event)
+		-- 마스터 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
+		self:ApplySettingValueToText(self.masterText, event.Value, self.MASTER_VOLUME_TEXT_KEY)
+		if _SoundManager ~= nil then
+			_SoundManager:SetMasterVolume(event.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBackgroundBarValueChanged(SliderValueChangedEvent event)
+		-- 배경음 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
+		self:ApplySettingValueToText(self.backgroundText, event.Value, self.BACKGROUND_VOLUME_TEXT_KEY)
+		if _SoundManager ~= nil then
+			_SoundManager:SetBackgroundVolume(event.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEffectBarValueChanged(SliderValueChangedEvent event)
+		-- 효과음 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
+		self:ApplySettingValueToText(self.effectText, event.Value, self.EFFECT_VOLUME_TEXT_KEY)
+		if _SoundManager ~= nil then
+			_SoundManager:SetEffectVolume(event.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSettingTextsFromBars()
+		-- 시작 시 각 슬라이더의 현재 값을 텍스트 괄호 안 수치에 맞춥니다.
+		self:RefreshSettingTextFromBar(self.masterText, self.masterBar, self.MASTER_VOLUME_TEXT_KEY)
+		self:RefreshSettingTextFromBar(self.backgroundText, self.backgroundBar, self.BACKGROUND_VOLUME_TEXT_KEY)
+		self:RefreshSettingTextFromBar(self.effectText, self.effectBar, self.EFFECT_VOLUME_TEXT_KEY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSettingUIFromSoundManager()
+		-- 로드된 사운드 설정이 있으면 슬라이더에 복원하고, 아직 없으면 에디터 기본값을 SoundManager에 적용합니다.
+		if _SoundManager ~= nil and _SoundManager:ClientHasLoadedSoundSettings() then
+			self:ApplyLoadedSoundSettings(
+				_SoundManager:GetMasterVolume(),
+				_SoundManager:GetBackgroundVolume(),
+				_SoundManager:GetEffectVolume())
+			return
+		end
+
+		self:RefreshSettingTextsFromBars()
+		self:ApplySettingVolumesToSoundManager()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyLoadedSoundSettings(number masterVolume, number backgroundVolume, number effectVolume)
+		-- 서버에서 로드한 0~1 사운드 설정을 0~100 슬라이더 값과 표시 텍스트로 복원합니다.
+		if self.masterBar ~= nil then
+			self.masterBar.Value = masterVolume * 100
+		end
+
+		if self.backgroundBar ~= nil then
+			self.backgroundBar.Value = backgroundVolume * 100
+		end
+
+		if self.effectBar ~= nil then
+			self.effectBar.Value = effectVolume * 100
+		end
+
+		self:RefreshSettingTextsFromBars()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestSaveSettingVolumes()
+		-- 설정 패널을 닫는 시점의 SoundManager 볼륨 세 값을 서버 저장으로 한 번 요청합니다.
+		if _SoundManager == nil or _SoundManager:ClientHasLoadedSoundSettings() == false then
+			return
+		end
+
+		_SoundManager:RequestSaveSoundSettings(
+			_SoundManager:GetMasterVolume(),
+			_SoundManager:GetBackgroundVolume(),
+			_SoundManager:GetEffectVolume())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplySettingVolumesToSoundManager()
+		-- 시작 시 각 슬라이더의 현재 값을 0~1로 정규화해 SoundManager에 초기 반영합니다.
+		if _SoundManager == nil then
+			return
+		end
+
+		if self.masterBar ~= nil then
+			_SoundManager:SetMasterVolume(self.masterBar.Value / 100)
+		end
+
+		if self.backgroundBar ~= nil then
+			_SoundManager:SetBackgroundVolume(self.backgroundBar.Value / 100)
+		end
+
+		if self.effectBar ~= nil then
+			_SoundManager:SetEffectVolume(self.effectBar.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSettingTextFromBar(TextGUIRendererComponent textComponent, SliderComponent sliderComponent, string localizationKey)
+		-- 슬라이더의 현재 값을 텍스트 괄호 안 수치로 반영합니다.
+		if textComponent == nil or sliderComponent == nil then
+			return
+		end
+
+		self:ApplySettingValueToText(textComponent, sliderComponent.Value, localizationKey)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplySettingValueToText(TextGUIRendererComponent textComponent, number value, string localizationKey)
+		-- 현재 언어의 볼륨 문구와 수치 포매팅
+		if textComponent == nil then
+			return
+		end
+
+		local intValue = math.floor(value + 0.5)
+		if _LocalizationLogic ~= nil then
+			textComponent.Text = _LocalizationLogic:Format(localizationKey, "", intValue, nil, nil, "")
+			return
+		end
+
+		textComponent.Text = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartButtonClicked(ButtonClickEvent event)
+		-- 메인 타이틀에서 게임 시작 입력을 받으면 현재 진행 상태의 게임 맵으로 이동합니다.
+		if self.isStartingGame == true then
+			return
+		end
+
+		if self:IsCurrentMap(self.titleMapId) == false then
+			return
+		end
+
+		self.isStartingGame = true
+		self:StopSweepTimer()
+		self:StopTitleBgm(self.titleBgmFadeOutDuration)
+
+		if _ScreenEffectUILogic ~= nil then
+			_ScreenEffectUILogic:FadeOut(0.5, function()
+				self:RunStartGameMiddleAction()
+			end)
+			return
+		end
+
+		self:RunStartGameMiddleAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RunStartGameMiddleAction()
+		-- 화면 전환 중간 지점에서 메인 타이틀을 끄고 현재 진행 맵으로 진입합니다.
+		self:SetVisibleRoot(false)
+		self:ResetSparkle()
+
+		-- 첫 진입(프롤로그 대기) 시에는 스튜디오 도착 후 자동 페이드인을 막고 검정을 유지한다(프롤로그 종료 후 TutorialManager가 페이드인)
+		if _TutorialManager ~= nil and _ScreenEffectUILogic ~= nil and _TutorialManager:IsProloguePending() == true then
+			_ScreenEffectUILogic:HoldBlack()
+		end
+
+		if _ProgressManager ~= nil then
+			_ProgressManager:RequestEnterCurrentProgressMap()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetVisibleRoot(boolean isVisible)
+		-- 메인 타이틀 UI 루트 표시 상태를 변경합니다.
+		if self.titleRoot == nil then
+			return
+		end
+
+		self.titleRoot.Enable = isVisible
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCurrentMap(string mapName)
+		-- 현재 로컬 플레이어가 지정한 맵에 있는지 확인합니다.
+		if mapName == nil or mapName == "" then
+			return false
+		end
+
+		local player = _UserService.LocalPlayer
+		if player == nil then
+			return false
+		end
+
+		local currentMap = player.CurrentMap
+		if isvalid(currentMap) == false then
+			return false
+		end
+
+		return currentMap.Name == mapName
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartSweepTimer()
+		-- 1/60초 주기로 메인 타이틀 UI 효과를 갱신합니다.
+		local previousTime = _UtilLogic.ElapsedSeconds
+
+		self.sweepTimerId = _TimerService:SetTimerRepeat(function()
+			local now = _UtilLogic.ElapsedSeconds
+			local delta = now - previousTime
+			previousTime = now
+
+			self:UpdateSparkleSweep(delta)
+			self:UpdateCdRotation(delta)
+			self:UpdateCharacterTween(delta)
+			self:UpdateLogoTween(delta)
+		end, 1 / 60)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopSweepTimer()
+		-- 진행 중인 반복 타이머가 있으면 해제합니다.
+		if self.sweepTimerId > 0 then
+			_TimerService:ClearTimer(self.sweepTimerId)
+			self.sweepTimerId = 0
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateSparkleSweep(number delta)
+		-- 대기 시간 이후 광택 이미지의 위치와 알파를 계산합니다.
+		if self.sparkleRenderer == nil or self.sparkleTransform == nil then
+			return
+		end
+
+		if self.sweepDelay > 0 then
+			self.sweepDelay = self.sweepDelay - delta
+			if self.sweepDelay > 0 then
+				return
+			end
+
+			self.sweepElapsed = 0
+		end
+
+		self.sweepElapsed = self.sweepElapsed + delta
+
+		local duration = math.max(self:GetSweepDuration(), 0.01)
+		local progress = math.min(self.sweepElapsed / duration, 1)
+		local alphaWeight = 1 - math.abs(progress * 2 - 1)
+		local alpha = self:GetSweepPeakAlpha() * alphaWeight
+
+		if self:GetSweepMoveEnabled() == true then
+			local x = _TweenLogic:Ease(self:GetSweepStartX(), self:GetSweepEndX(), duration, EaseType.SineEaseInOut, progress * duration)
+			local y = _TweenLogic:Ease(self:GetSweepStartY(), self:GetSweepEndY(), duration, EaseType.SineEaseInOut, progress * duration)
+			self.sparkleTransform.anchoredPosition = Vector2(x, y)
+		else
+			self.sparkleTransform.anchoredPosition = self.sparkleBasePosition
+		end
+
+		self.sparkleRenderer:SetAlpha(alpha)
+
+		if progress >= 1 then
+			self:ResetSparkle()
+			self.sweepElapsed = 0
+			self.sweepDelay = self:GetSweepInterval()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheSparkleBaseTransform()
+		-- 광택 이미지의 에디터 배치 기준 위치를 저장합니다.
+		if self.sparkleTransform == nil then
+			return
+		end
+
+		self.sparkleBasePosition = self.sparkleTransform.anchoredPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCdRotation(number delta)
+		-- CD 이미지를 모디파이어의 초당 각도 값만큼 계속 회전시킵니다.
+		if self.cdTransform == nil then
+			return
+		end
+
+		local rotationSpeed = self:GetCdRotationSpeed()
+		if rotationSpeed == 0 then
+			return
+		end
+
+		self.cdRotationAngle = (self.cdRotationAngle + rotationSpeed * delta) % 360
+		self.cdTransform.UIRotation = Vector3(0, 0, self.cdRotationAngle)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheCdBaseTransform()
+		-- 해상도 보정 전 CD의 원본 크기와 위치를 저장합니다.
+		if self.cdTransform == nil then
+			return
+		end
+
+		self.cdBaseSize = self.cdTransform.RectSize
+		self.cdBasePosition = self.cdTransform.anchoredPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshResponsiveHeightScale()
+		-- FHD보다 세로 공간이 많은 화면에서 사용할 공용 세로 보정 배율을 계산합니다.
+		self.responsiveHeightScale = 1
+		if _UILogic == nil then
+			return
+		end
+
+		local screenWidth = _UILogic.ScreenWidth
+		local screenHeight = _UILogic.ScreenHeight
+		if screenWidth <= 0 or screenHeight <= 0 then
+			return
+		end
+
+		local referenceAspectRatio = 1920 / 1080
+		local currentAspectRatio = screenWidth / screenHeight
+		if currentAspectRatio < referenceAspectRatio then
+			self.responsiveHeightScale = referenceAspectRatio / currentAspectRatio
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyResponsiveCdLayout()
+		-- 실제 화면 높이에 맞춰 CD를 균등 확대하고 세로 중앙을 화면 중앙에 맞춥니다.
+		if self.cdTransform == nil then
+			return
+		end
+
+		local scale = self.responsiveHeightScale
+		local targetPosition = self.cdBasePosition
+		local visibleBounds = nil
+		if _UIScreenUtil ~= nil and self.cdTransform.Entity ~= nil and self.cdTransform.Entity.Parent ~= nil then
+			local parentTransform = self.cdTransform.Entity.Parent.UITransformComponent
+			visibleBounds = _UIScreenUtil:GetScreenBoundsInLocal(parentTransform)
+		end
+		if visibleBounds ~= nil then
+			local visibleHeight = visibleBounds.top - visibleBounds.bottom
+			if visibleHeight > 0 and self.cdBaseSize.y > 0 then
+				scale = visibleHeight / self.cdBaseSize.y
+			end
+
+			local visibleCenterY = (visibleBounds.bottom + visibleBounds.top) * 0.5
+			targetPosition = Vector2(self.cdBasePosition.x, visibleCenterY)
+		end
+
+		local scaledWidth = self.cdBaseSize.x * scale
+		local scaledHeight = self.cdBaseSize.y * scale
+		self.cdTransform.RectSize = Vector2(scaledWidth, scaledHeight)
+		self.cdTransform.anchoredPosition = targetPosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetResponsiveCdLayout()
+		-- 종료 시 CD의 크기와 위치를 에디터에서 지정한 원본값으로 복구합니다.
+		if self.cdTransform == nil or self.cdBaseSize.x <= 0 or self.cdBaseSize.y <= 0 then
+			return
+		end
+
+		self.cdTransform.RectSize = self.cdBaseSize
+		self.cdTransform.anchoredPosition = self.cdBasePosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheCharacterBaseTransform()
+		-- 캐릭터 트윈의 기준 위치를 저장합니다.
+		if self.characterTransform == nil then
+			return
+		end
+
+		self.characterBasePosition = self.characterTransform.anchoredPosition
+		self.characterTweenElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCharacterTween(number delta)
+		-- 캐릭터가 기본 위치 주변에서 부드럽게 떠 있는 느낌을 내도록 갱신합니다.
+		if self.characterTransform == nil then
+			return
+		end
+
+		local bobAmplitude = self:GetCharacterBobAmplitude()
+		if bobAmplitude == 0 then
+			return
+		end
+
+		self.characterTweenElapsed = self.characterTweenElapsed + delta
+		local phase = self.characterTweenElapsed * self:GetCharacterTweenSpeed() * math.pi * 2
+		local offsetY = math.sin(phase) * bobAmplitude
+
+		self.characterTransform.anchoredPosition = Vector2(self.characterBasePosition.x, self.characterBasePosition.y + offsetY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetCharacterTween()
+		-- 캐릭터 트윈으로 변경된 위치를 기준값으로 되돌립니다.
+		if self.characterTransform == nil then
+			return
+		end
+
+		self.characterTweenElapsed = 0
+		self.characterTransform.anchoredPosition = self.characterBasePosition
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheLogoBaseTransform()
+		-- 로고 트윈의 기준 위치와 스케일을 저장합니다.
+		if self.logoTransform == nil then
+			return
+		end
+
+		self.logoBasePosition = self.logoTransform.anchoredPosition
+		self.logoBaseScale = self.logoTransform.UIScale
+		self.logoTweenElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateLogoTween(number delta)
+		-- 로고가 기준 위치에서 살짝 떠오르고 커지는 느낌을 내도록 갱신합니다.
+		if self.logoTransform == nil then
+			return
+		end
+
+		local bobAmplitude = self:GetLogoBobAmplitude()
+		local scaleAmplitude = self:GetLogoScaleAmplitude()
+		if bobAmplitude == 0 and scaleAmplitude == 0 then
+			return
+		end
+
+		self.logoTweenElapsed = self.logoTweenElapsed + delta
+		local phase = self.logoTweenElapsed * self:GetLogoTweenSpeed() * math.pi * 2
+		local wave = math.sin(phase)
+		local offsetY = wave * bobAmplitude
+		local scaleOffset = ((wave + 1) * 0.5) * scaleAmplitude
+
+		self.logoTransform.anchoredPosition = Vector2(self.logoBasePosition.x, self.logoBasePosition.y + offsetY)
+		self.logoTransform.UIScale = Vector3(self.logoBaseScale.x + scaleOffset, self.logoBaseScale.y + scaleOffset, self.logoBaseScale.z)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetLogoTween()
+		-- 로고 트윈으로 변경된 위치와 스케일을 기준값으로 되돌립니다.
+		if self.logoTransform == nil then
+			return
+		end
+
+		self.logoTweenElapsed = 0
+		self.logoTransform.anchoredPosition = self.logoBasePosition
+		self.logoTransform.UIScale = self.logoBaseScale
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetSparkle()
+		-- 광택 이미지를 현재 모드의 시작 위치와 투명 상태로 되돌립니다.
+		if self.sparkleTransform ~= nil then
+			if self:GetSweepMoveEnabled() == true then
+				self.sparkleTransform.anchoredPosition = Vector2(self:GetSweepStartX(), self:GetSweepStartY())
+			else
+				self.sparkleTransform.anchoredPosition = self.sparkleBasePosition
+			end
+		end
+
+		if self.sparkleRenderer ~= nil then
+			self.sparkleRenderer:SetAlpha(0)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepInitialDelay()
+		-- Effect Modifier 컴포넌트의 광택 스윕 초기 대기 시간을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepInitialDelay
+		end
+
+		return 0.4
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepDuration()
+		-- Effect Modifier 컴포넌트의 광택 이동 시간을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepDuration
+		end
+
+		return 1.2
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepInterval()
+		-- Effect Modifier 컴포넌트의 광택 반복 간격을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepInterval
+		end
+
+		return 4.5
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepStartX()
+		-- Effect Modifier 컴포넌트의 광택 시작 X 좌표를 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepStartX
+		end
+
+		return -1128
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepStartY()
+		-- 광택 시작 Y 좌표에 현재 화면의 세로 보정 배율을 적용해 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepStartY * self.responsiveHeightScale
+		end
+
+		return -140 * self.responsiveHeightScale
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepEndX()
+		-- Effect Modifier 컴포넌트의 광택 종료 X 좌표를 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepEndX
+		end
+
+		return 672
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepEndY()
+		-- 광택 종료 Y 좌표에 현재 화면의 세로 보정 배율을 적용해 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepEndY * self.responsiveHeightScale
+		end
+
+		return 140 * self.responsiveHeightScale
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSweepPeakAlpha()
+		-- Effect Modifier 컴포넌트의 광택 최대 알파 값을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepPeakAlpha
+		end
+
+		return 0.45
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean GetSweepMoveEnabled()
+		-- Effect Modifier 컴포넌트의 광택 위치 이동 사용 여부를 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.sweepMoveEnabled
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCdRotationSpeed()
+		-- Effect Modifier 컴포넌트에서 CD 회전 속도 값을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.cdRotationSpeed
+		end
+
+		return 18
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCharacterBobAmplitude()
+		-- Effect Modifier 컴포넌트에서 캐릭터 상하 이동 폭을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.characterBobAmplitude
+		end
+
+		return 10
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCharacterTweenSpeed()
+		-- Effect Modifier 컴포넌트에서 캐릭터 트윈 반복 속도를 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.characterTweenSpeed
+		end
+
+		return 0.45
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetLogoBobAmplitude()
+		-- Effect Modifier 컴포넌트에서 로고 상하 이동 폭을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.logoBobAmplitude
+		end
+
+		return 3
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetLogoTweenSpeed()
+		-- Effect Modifier 컴포넌트에서 로고 트윈 반복 속도를 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.logoTweenSpeed
+		end
+
+		return 0.55
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetLogoScaleAmplitude()
+		-- Effect Modifier 컴포넌트에서 로고 스케일 펄스 폭을 반환합니다.
+		local modifier = self:GetEffectModifier()
+		if modifier ~= nil then
+			return modifier.logoScaleAmplitude
+		end
+
+		return 0.02
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetEffectModifier()
+		-- 루트 UI에 붙은 메인 타이틀 Effect Modifier 컴포넌트를 반환합니다.
+		if self.effectModifierEntity == nil then
+			return nil
+		end
+
+		return self.effectModifierEntity:GetComponent("script.MainTitleEffectModifierComponent")
+	end
+
+end
+

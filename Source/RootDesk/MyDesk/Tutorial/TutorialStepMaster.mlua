@@ -1,0 +1,241 @@
+-- 튜토리얼 스텝 목록 정의 및 제공
+@Logic
+script TutorialStepMaster extends Logic
+
+	property boolean IsStepsLoaded = false
+
+	property string UI_TUTORIAL_STEP_PREFIX = "system.tutorial.step."
+
+	property any languageChangedHandler = nil
+
+	property Vector2 defaultCharacterPos = Vector2(-200, -480)
+
+	-- tutorialId -> { TutorialStepData ... }
+	property any tScenarios = {}
+
+	-- 현재 구성 중인 시나리오의 스텝 버퍼(Add* 대상)
+	property any tCurrentSteps = nil
+
+	property string tutorialCharacterPortrait = "portrait_may_horizontal"
+
+	-- 자주 사용되는 엔티티 id
+	property string entity_MoveButton = "e6037948-8764-4515-abaa-63bc264589a5"
+
+	method void OnBeginPlay()
+		self:LoadScenarios()
+		if self:IsClient() and _LocalizationLogic ~= nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+	end
+
+	method void OnEndPlay()
+		-- 언어 변경 구독 해제
+		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
+			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+			self.languageChangedHandler = nil
+		end
+	end
+
+	method void LoadScenarios()
+		-- 시나리오별 튜토리얼 스텝 목록을 구성. 새 시나리오는 BeginScenario("id") 뒤에 Add* 호출로 추가.
+		self.tScenarios = {}
+		self.IsStepsLoaded = false
+
+		--- 스튜디오 첫 진입 튜토리얼
+		self:BeginScenario("studio_intro")
+
+		self:AddNormalStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "01", self.defaultCharacterPos, false)
+
+		self:AddNormalStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "02", self.defaultCharacterPos, false)
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "03", Vector2(240, -240), false, "schedule", {
+			{ targetId = self.entity_MoveButton, clickable = true },
+			{ targetId = "aab0b4f4-8333-4297-b2f5-631ad636f690", clickable = true },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "04", Vector2(-700, -480), false, "", {
+			{ targetId = "c0b526ef-a7ec-4977-88dd-c8169f124182", clickable = false },
+			{ targetId = "4a7b2c43-0435-4f10-97ab-cf1a971a76c5", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "05", Vector2(100, -240), false, "", {
+			{ targetId = "bc0f9422-dd1b-4e44-88fa-cce78eb77d3b", clickable = true },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "06", Vector2(-550, -300), false, "", {
+			{ targetId = "a9be273b-23d1-4947-8c6a-8f5288221aea", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "07", Vector2(100, -10), false, "", {
+			{ targetId = "9754b340-0ef7-4e35-838e-1a59011ffae9", clickable = true },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "08", Vector2(0, 10), false, "", {
+			{ targetId = "c70c9a04-e933-448b-a040-7d74b3e5817b", clickable = false },
+			{ activityId = "training_basic_vocal", clickable = true },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "09", Vector2(640, -225), true, "", {
+			{ targetId = "3c2c14f3-d0a1-4e6a-9136-9c0cd149235b", clickable = true },
+			{ targetId = "b0b98678-5e3b-43fb-b583-c5ce6d5d1219", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "10", Vector2(-420, -70), false, "", {
+			{ targetId = "a16337c5-8210-4713-83b1-fc845df69e4a", clickable = false },
+			{ targetId = "6f81cb0e-2275-4e88-95b7-5efba82547dc", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "11", Vector2(300, -330), true, "", {
+			{ targetId = "ccc07877-5263-465f-8ba1-704228dd429b", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "12", Vector2(-480, -480), false, "", {
+			{ targetId = "fc08d60f-7dde-431a-a352-f6941957e074", clickable = false },
+			{ targetId = "1bf0ec01-66a5-4296-91a9-db22abb1a98a", clickable = false },
+			{ targetId = "938510c4-94be-496a-82c0-86dcd7c5fb69", clickable = false },
+			{ targetId = "d601b04e-db7d-44d4-afc1-eebb174299cd", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "13", Vector2(-700, -50), false, "", {
+			{ targetId = "aa1beed7-00b4-4090-94c3-9e952d646163", clickable = false },
+			{ targetId = "e1dffb63-7672-4369-9510-7984e3831e44", clickable = false },
+			{ targetId = "532b234b-d386-4923-84b2-74da3de4c891", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "14", Vector2(-540, -140), false, "", {
+			{ targetId = "f8257d53-0e14-476e-a7aa-510a996a3ab2", clickable = true },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "15", Vector2(-540, -140), false, "", {
+			{ targetId = "a9be273b-23d1-4947-8c6a-8f5288221aea", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "16", Vector2(-540, -140), false, "", {
+			{ targetId = "21366a52-0dc5-4b56-ac3e-326671eda113", clickable = true },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "17", Vector2(-540, -140), false, "", {
+			{ targetId = "a9be273b-23d1-4947-8c6a-8f5288221aea", clickable = false },
+		})
+
+		self:AddNormalStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "18", self.defaultCharacterPos, false)
+
+
+		--- 외출 튜토리얼(스튜디오 파트): 1주차 평일 완료 직후, 외출 버튼 안내
+		self:BeginScenario("weekend_intro")
+		--- 1
+		self:AddNormalStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "19", self.defaultCharacterPos, false)
+		--- 2
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "20", self.defaultCharacterPos, false, "", {
+			{ targetId = "3aa18146-25ce-40b1-9049-8877b435ee46", clickable = true },
+			{ targetId = self.entity_MoveButton, clickable = true },
+		})
+
+
+		--- 외출 튜토리얼(도시 파트): 도시 최초 도착 시 안내
+		self:BeginScenario("weekend_intro_downtown")
+		--- 1
+		self:AddNormalStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "21", self.defaultCharacterPos, false)
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "22", Vector2(-600, -480), false, "", {
+			{ targetId = "d1f89da6-8808-490b-a098-270815d32e49", clickable = false },
+			{ targetId = "a86ac961-5c02-4a65-aa8e-55db773b73c6", clickable = false },
+			{ targetId = "2ae2ce91-b350-4e1e-b1d8-840552fcde6e", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "23", Vector2(0, 200), true, "", {
+			{ targetId = "2a5c6f1e-216e-4cb2-b193-ca39757d6e9e", clickable = false },
+		})
+
+		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "24", Vector2(-50, -480), false, "", {
+			{ targetId = "96503397-0af2-4ef2-8d1e-d7e88dd8ab61", clickable = false },
+			{ targetId = self.entity_MoveButton, clickable = false },
+		})
+
+		self:AddNormalStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "25", self.defaultCharacterPos, false)
+
+		self.IsStepsLoaded = true
+	end
+
+	method void AddStep(string kind, string portrait, string textKey, Vector2 charPos, boolean flip)
+		-- 스텝 하나를 생성해 목록에 추가합니다.
+		local step = TutorialStepData()
+		step.kind = kind
+		step.portrait = portrait
+		step.textKey = textKey
+		step.text = self:GetLocalizedTutorialText(textKey)
+		step.charPos = charPos
+		step.flip = flip
+		table.insert(self.tCurrentSteps, step)
+	end
+
+	method void AddNormalStep(string portrait, string textKey, Vector2 charPos, boolean flip)
+		self:AddStep("normal", portrait, textKey, charPos, flip)
+	end
+
+	method void AddGuideStep(string portrait, string textKey, Vector2 charPos, boolean flip, string advanceEventId, any highlights)
+		local step = TutorialStepData()
+		step.kind = "guide"
+		step.portrait = portrait
+		step.textKey = textKey
+		step.text = self:GetLocalizedTutorialText(textKey)
+		step.charPos = charPos
+		step.flip = flip
+		step.advanceEventId = advanceEventId
+		step.highlights = highlights
+		table.insert(self.tCurrentSteps, step)
+	end
+
+	method void BeginScenario(string tutorialId)
+		-- 새 시나리오 구성을 시작한다. 이후 Add* 호출은 이 시나리오에 쌓인다.
+		self.tCurrentSteps = {}
+		self.tScenarios[tutorialId] = self.tCurrentSteps
+	end
+
+	method string GetLocalizedTutorialText(string localizationKey)
+		-- 튜토리얼 key 기준 locale 문구 조회
+		if localizationKey == nil or localizationKey == "" then
+			return ""
+		end
+		if _LocalizationLogic ~= nil and _LocalizationLogic.IsLoaded == true then
+			local localizedText = _LocalizationLogic:GetText(localizationKey, "")
+			if localizedText ~= "" then
+				return localizedText
+			end
+		end
+
+		return localizationKey
+	end
+
+	method void RefreshScenarioTexts()
+		-- 현재 locale 기준 튜토리얼 문구 갱신
+		for _, steps in pairs(self.tScenarios) do
+			for _, step in ipairs(steps) do
+				if step.textKey ~= nil and step.textKey ~= "" then
+					step.text = self:GetLocalizedTutorialText(step.textKey)
+				end
+			end
+		end
+	end
+
+	method void OnLanguageChanged(LanguageChangedEvent event)
+		-- 언어 변경 후 튜토리얼 스텝 문구 갱신
+		if event == nil then
+			return
+		end
+		self:RefreshScenarioTexts()
+	end
+
+	method any GetSteps(string tutorialId)
+		-- 지정 시나리오의 스텝 목록을 반환. 아직 로드 전이면 지연 로드.
+		if self:IsClient() and self.languageChangedHandler == nil and _LocalizationLogic ~= nil then
+			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		end
+		if self.IsStepsLoaded == false then
+			self:LoadScenarios()
+		end
+		self:RefreshScenarioTexts()
+		return self.tScenarios[tutorialId]
+	end
+
+end

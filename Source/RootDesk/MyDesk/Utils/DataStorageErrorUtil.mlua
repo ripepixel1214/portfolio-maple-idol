@@ -1,0 +1,90 @@
+-- DataStorage errorCode를 판정하고 사람이 읽기 쉬운 한글 메시지로 변환합니다.
+@Logic
+script DataStorageErrorUtil extends Logic
+
+	property integer Ok = 0
+
+	property integer NotFound = 1000002
+
+	property integer TimedOut = 1000004
+
+	property integer ResourceExhausted = 1000005
+
+	property integer PartialFailure = 1000006
+
+	method boolean IsOk(integer errorCode)
+		return errorCode == self.Ok
+	end
+
+	method boolean IsNotFound(integer errorCode)
+		return errorCode == self.NotFound
+	end
+
+	method boolean CanUseDefault(integer errorCode)
+		-- 정상 응답이나 최초 저장 전 상태는 기본 데이터를 사용해도 안전합니다.
+		return self:IsOk(errorCode) or self:IsNotFound(errorCode)
+	end
+
+	method boolean IsRetryable(integer errorCode)
+		-- 시간 초과는 이후 저장 시점이나 재요청에서 다시 시도할 수 있습니다.
+		return errorCode == self.TimedOut
+	end
+
+	method string GetName(integer errorCode)
+		if errorCode == self.Ok then
+			return "성공"
+		end
+
+		if errorCode == self.NotFound then
+			return "데이터 없음"
+		end
+
+		if errorCode == self.TimedOut then
+			return "요청 시간 초과"
+		end
+
+		if errorCode == self.ResourceExhausted then
+			return "요청 한도 초과"
+		end
+
+		if errorCode == self.PartialFailure then
+			return "일부 요청 실패"
+		end
+
+		return "알 수 없는 오류"
+	end
+
+	method string GetDescription(integer errorCode)
+		if errorCode == self.Ok then
+			return "DataStorage 요청이 정상 처리되었습니다."
+		end
+
+		if errorCode == self.NotFound then
+			return "해당 key에 저장된 데이터가 없습니다. 신규 유저나 최초 저장 전 상태일 수 있습니다."
+		end
+
+		if errorCode == self.TimedOut then
+			return "DataStorage 요청이 제한 시간 안에 완료되지 않았습니다. 이후 다시 시도할 수 있습니다."
+		end
+
+		if errorCode == self.ResourceExhausted then
+			return "DataStorage Credit 또는 요청 한도를 초과했습니다. 호출 빈도나 저장 크기를 줄여야 합니다."
+		end
+
+		if errorCode == self.PartialFailure then
+			return "배치 요청 중 일부 key 처리에 실패했습니다. 성공/실패 key를 나누어 처리해야 합니다."
+		end
+
+		return "정의되지 않은 DataStorage 오류입니다."
+	end
+
+	method string Format(integer errorCode)
+		return self:GetName(errorCode) .. "(code=" .. tostring(errorCode) .. ") - " .. self:GetDescription(errorCode)
+	end
+
+	method void LogWarning(integer errorCode, string userId)
+		-- DataStorage errorCode와 userId를 표준 경고 로그로 출력합니다.
+		log_warning("[DataStorage] " .. self:Format(errorCode) .. ", userId=" .. tostring(userId))
+	end
+
+end

@@ -1,0 +1,507 @@
+@Component
+script StaticActorSpeechComponent extends Component
+
+	@HideFromInspector
+	property ChatBalloonComponent chatBalloon = nil
+
+	@HideFromInspector
+	property TextComponent measureText = nil
+
+	@HideFromInspector
+	property number baseBalloonScale = 0
+
+	@Description("ActorSpeechTable의 actorId와 매칭되는 액터 식별자입니다.")
+	property string actorId = ""
+
+	@Description("true이면 액터 터치 시 touchType 대사를 재생합니다.")
+	property boolean enableTouchSpeech = true
+
+	@Description("true이면 액터가 가만히 있어도 일정 시간마다 idleType 대사를 자동 재생합니다.")
+	property boolean enableIdleSpeech = true
+
+	@Description("대사가 다시 나오기까지의 최소 대기 시간입니다.")
+	property number idleIntervalMin = 5
+
+	@Description("대사가 다시 나오기까지의 최대 대기 시간입니다.")
+	property number idleIntervalMax = 9
+
+	@Description("대사가 유지되는 시간입니다.")
+	property number defaultDuration = 3
+
+	@Description("텍스트를 한 글자씩 출력할 때 글자 사이에 기다리는 시간입니다.")
+	property number defaultCharInterval = 0.04
+
+	@HideFromInspector
+	property integer intimacyLevel = 0
+
+	@HideFromInspector
+	property any interactionEventHandler = nil
+
+	@HideFromInspector
+	property any touchEventHandler = nil
+
+	@HideFromInspector
+	property integer typingTimerId = 0
+
+	@HideFromInspector
+	property integer hideTimerId = 0
+
+	@HideFromInspector
+	property integer idleSpeechTimerId = 0
+
+	@HideFromInspector
+	property boolean isIdleSpeechTimerReady = false
+
+	@HideFromInspector
+	property any currentCharacters = {}
+
+	@HideFromInspector
+	property integer currentCharacterIndex = 1
+
+	@HideFromInspector
+	property string currentMessage = ""
+
+	@HideFromInspector
+	property string currentSpeechType = ""
+
+	@HideFromInspector
+	property integer currentMovementInteractionType = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 액터 이동 이벤트를 구독해 스피치 요청을 받을 준비를 합니다.
+		self:ConnectActorInteractionEvent()
+		self:ConnectLegacyTouchEvent()
+		self:CacheChatBalloon()
+		self:StartStaticIdleSpeechTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 액터 이동 이벤트 구독을 해제합니다.
+		self:DisconnectActorInteractionEvent()
+		self:DisconnectLegacyTouchEvent()
+		self:ClearTypingTimer()
+		self:ClearHideTimer()
+		self:ClearIdleSpeechTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectActorInteractionEvent()
+		-- 액터 상호작용 이벤트 핸들러를 연결합니다.
+		if self.interactionEventHandler == nil then
+			self.interactionEventHandler = self.Entity:ConnectEvent(ActorInteractionEvent, self.OnActorInteractionEvent)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectLegacyTouchEvent()
+		-- 새 상호작용 흐름이 없는 기존 액터의 터치를 직접 연결합니다.
+		if self.touchEventHandler ~= nil then
+			return
+		end
+
+		if self:HasModernInteractionComponent() == true then
+			return
+		end
+
+		self.touchEventHandler = self.Entity:ConnectEvent(TouchEvent, self.OnLegacyTouchEvent)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectLegacyTouchEvent()
+		-- 기존 액터 호환용 터치 이벤트 연결을 해제합니다.
+		if self.touchEventHandler ~= nil then
+			self.Entity:DisconnectEvent(TouchEvent, self.touchEventHandler)
+			self.touchEventHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnLegacyTouchEvent(TouchEvent event)
+		-- 기존 액터 터치를 touch 스피치로 처리합니다.
+		if self.enableTouchSpeech == false then
+			return
+		end
+
+		self:ResetIdleSpeechTimer()
+		self:PlaySpeech(_EActorInteractionType:GetTouchInteger())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectActorInteractionEvent()
+		-- 액터 상호작용 이벤트 핸들러 연결을 해제합니다.
+		if self.interactionEventHandler ~= nil then
+			self.Entity:DisconnectEvent(ActorInteractionEvent, self.interactionEventHandler)
+			self.interactionEventHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnActorInteractionEvent(ActorInteractionEvent event)
+		-- 액터 상호작용 타입에 대응하는 스피치를 요청합니다.
+		local interactionType = event.interactionType
+		if interactionType == _EActorInteractionType:GetNone() then
+			return
+		end
+		
+		local interactionTypes = _EActorInteractionType
+		if interactionType == interactionTypes:GetIdleInteger() or interactionType == interactionTypes:GetMoveInteger() then
+			self.currentMovementInteractionType = interactionType
+			self:HandleIdleOrMoveInteraction(interactionType)
+			return
+		end
+		
+		self:ResetIdleSpeechTimer()
+		
+		if interactionType == interactionTypes:GetTouchInteger() and self.enableTouchSpeech == false then
+			return
+		end
+		
+		self:PlaySpeech(interactionType)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleIdleOrMoveInteraction(integer interactionType)
+		-- idle 또는 move 상태 이벤트를 idle 스피치 타이머 규칙에 맞춰 처리합니다.
+		if self.enableIdleSpeech == false then
+			return
+		end
+		
+		local interactionTypes = _EActorInteractionType
+		if self.isIdleSpeechTimerReady == true then
+			if interactionType == interactionTypes:GetIdleInteger() then
+				self:ResetIdleSpeechTimer()
+				self:PlaySpeech(interactionTypes:GetIdleInteger())
+			end
+			return
+		end
+		
+		self:StartIdleSpeechTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartIdleSpeechTimer()
+		-- idle 스피치 대기 타이머가 없을 때만 새 타이머를 예약합니다.
+		if (self.idleSpeechTimerId or 0) > 0 or self.isIdleSpeechTimerReady == true then
+			return
+		end
+		
+		local delay = self.idleIntervalMin
+		if self.idleIntervalMax > self.idleIntervalMin then
+			delay = self.idleIntervalMin + (_UtilLogic:RandomDouble() * (self.idleIntervalMax - self.idleIntervalMin))
+		end
+		
+		self.idleSpeechTimerId = _TimerService:SetTimerOnce(function() self:OnIdleSpeechTimer() end, delay)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartStaticIdleSpeechTimer()
+		-- 상태머신과 이동 컴포넌트가 없는 기존 정적 액터의 idle 스피치 타이머를 시작합니다.
+		if self.enableIdleSpeech == false then
+			return
+		end
+
+		if self:HasModernInteractionComponent() == true then
+			return
+		end
+
+		if self:GetMovementComponent() ~= nil then
+			return
+		end
+
+		self.currentMovementInteractionType = _EActorInteractionType:GetIdleInteger()
+		self:StartIdleSpeechTimer()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdleSpeechTimer()
+		-- idle 스피치 대기 시간이 끝났음을 표시합니다.
+		self.idleSpeechTimerId = 0
+		local interactionTypes = _EActorInteractionType
+		if self.currentMovementInteractionType == interactionTypes:GetIdleInteger() then
+			self.isIdleSpeechTimerReady = false
+			self:PlaySpeech(interactionTypes:GetIdleInteger())
+			return
+		end
+		
+		self.isIdleSpeechTimerReady = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetIdleSpeechTimer()
+		-- idle 스피치 대기 타이머와 준비 상태를 초기화합니다.
+		self:ClearIdleSpeechTimer()
+		self.isIdleSpeechTimerReady = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdleSpeechTimer()
+		-- idle 스피치 대기 타이머를 해제합니다.
+		if (self.idleSpeechTimerId or 0) > 0 then
+			_TimerService:ClearTimer(self.idleSpeechTimerId)
+			self.idleSpeechTimerId = 0
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method number PlaySpeech(integer interactionType)
+		-- 스피치 타입에 맞는 대사를 찾아 챗벌룬으로 재생합니다.
+		local speechType = _EActorInteractionType:ToSpeechType(interactionType)
+		if speechType == "" then
+			return 0
+		end
+		if self.currentSpeechType == speechType then
+			return 0
+		end
+		
+		if self.actorId == "" then
+			log_warning("[StaticActorSpeechComponent] actorId is empty: " .. self.Entity.Name)
+			return 0
+		end
+		
+		local tSpeech = _ActorSpeechMaster:GetRandomSpeech(self.actorId, speechType, self.intimacyLevel)
+		if tSpeech == nil or tSpeech.message == "" then
+			return 0
+		end
+		
+		if self.chatBalloon == nil then
+			log_warning("[StaticActorSpeechComponent] ChatBalloonComponent not found: " .. self.Entity.Name)
+			return 0
+		end
+		
+		self:ClearTypingTimer()
+		self:ClearHideTimer()
+		self.currentSpeechType = speechType
+		self:InitializeChatBalloon()
+		self:ApplyBalloonScaleByMessage(tSpeech.message)
+
+		self:StartTyping(tSpeech.message)
+		log("[StaticActorSpeechComponent] play actorId=" .. tostring(self.actorId)
+			.. " speechType=" .. tostring(speechType)
+			.. " message=" .. tostring(tSpeech.message))
+		
+		return self:GetSpeechTotalDuration(tSpeech.message)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetSpeechTotalDuration(string message)
+		-- 타이핑 시간과 유지 시간을 합산한 전체 스피치 시간을 반환합니다.
+		local typingDuration = self:GetTypingDuration(message)
+		return typingDuration + self.defaultDuration
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetTypingDuration(string message)
+		-- 메시지 글자 수와 글자 출력 간격을 기준으로 타이핑 시간을 계산합니다.
+		if self.defaultCharInterval <= 0 then
+			return 0
+		end
+		
+		local characters = self:SplitCharacters(message)
+		return #characters * self.defaultCharInterval
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetMovementComponent()
+		-- 같은 엔티티에 붙은 액터 이동 컴포넌트를 반환합니다.
+		return self.Entity:GetComponent("script.ActorMovementComponent")
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasModernInteractionComponent()
+		-- 새 상호작용 흐름과 함께 붙었을 때 중복 이벤트를 막습니다.
+		if self.Entity:GetComponent("script.ActorInteractionComponent") ~= nil then
+			return true
+		end
+
+		if self.Entity:GetComponent("script.CharacterStateMachineComponent") ~= nil then
+			return true
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheChatBalloon()
+		-- 액터 엔티티의 네이티브 챗벌룬 컴포넌트 참조를 찾습니다.
+		if self.chatBalloon == nil then
+			self.chatBalloon = self.Entity.ChatBalloonComponent
+		end
+		
+		if self.chatBalloon ~= nil and (self.baseBalloonScale == nil or self.baseBalloonScale <= 0) then
+			self.baseBalloonScale = self.chatBalloon.BalloonScale or 0
+			if self.baseBalloonScale <= 0 then
+				self.baseBalloonScale = 1
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void InitializeChatBalloon()
+		-- 네이티브 챗벌룬의 표시 옵션과 유지 시간을 설정합니다.
+		self.chatBalloon.ChatModeEnabled = true
+		self.chatBalloon.AutoShowEnabled = true
+		self.chatBalloon.ShowDuration = self.defaultDuration
+		self.chatBalloon.Message = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyBalloonScaleByMessage(string message)
+		-- 측정용 TextComponent의 선호 너비를 이용해 챗벌룬 스케일을 조절합니다.
+		if self.chatBalloon == nil then
+			return
+		end
+		
+		local baseScale = self.baseBalloonScale or 0
+		if baseScale <= 0 then
+			baseScale = self.chatBalloon.BalloonScale or 0
+			if baseScale <= 0 then
+				baseScale = 1
+			end
+		end
+		
+		local measureText = self:GetMeasureTextComponent()
+		if measureText == nil or message == "" then
+			self.chatBalloon.BalloonScale = baseScale
+			return
+		end
+		
+		local preferredWidth = measureText:GetPreferredWidth(message)
+		if preferredWidth == nil or preferredWidth <= 0 then
+			self.chatBalloon.BalloonScale = baseScale
+			return
+		end
+		
+		local nativeBalloonTextWidth = 190
+		local fontSize = self.chatBalloon.FontSize or 1
+		local targetScale = preferredWidth / nativeBalloonTextWidth * fontSize
+		if targetScale < baseScale then
+			targetScale = baseScale
+		end
+		
+		self.chatBalloon.BalloonScale = targetScale
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetMeasureTextComponent()
+		-- 대사 폭 측정에 사용할 TextComponent를 반환합니다.
+		if self.measureText ~= nil then
+			return self.measureText
+		end
+		
+		if _DialogUILogic ~= nil and _DialogUILogic.panelMessageText ~= nil then
+			return _DialogUILogic.panelMessageText
+		end
+		
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartTyping(string message)
+		-- 메시지를 글자 단위로 나누고 시간차 출력 타이머를 시작합니다.
+		self.currentCharacters = self:SplitCharacters(message)
+		self.currentCharacterIndex = 1
+		self.currentMessage = ""
+		
+		if self.defaultCharInterval <= 0 then
+			self:SetMessageText(message)
+			self:PlayHideTimer()
+			return
+		end
+		
+		self.typingTimerId = _TimerService:SetTimerRepeat(function() self:OnTypingTick() end, self.defaultCharInterval)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnTypingTick()
+		-- 시간차 출력 타이머마다 다음 글자를 챗벌룬 메시지에 추가합니다.
+		if self.currentCharacterIndex > #self.currentCharacters then
+			self:ClearTypingTimer()
+			self:PlayHideTimer()
+			return
+		end
+		
+		self.currentMessage = self.currentMessage .. self.currentCharacters[self.currentCharacterIndex]
+		self.currentCharacterIndex = self.currentCharacterIndex + 1
+		self:SetMessageText(self.currentMessage)
+		
+		if self.currentCharacterIndex > #self.currentCharacters then
+			self:ClearTypingTimer()
+			self:PlayHideTimer()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any SplitCharacters(string text)
+		-- UTF-8 문자열을 글자 단위 테이블로 분리합니다.
+		local characters = {}
+		
+		if text == nil or text == "" then
+			return characters
+		end
+		
+		for _, code in utf8.codes(text) do
+			table.insert(characters, utf8.char(code))
+		end
+		
+		return characters
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetMessageText(string message)
+		-- 네이티브 챗벌룬 메시지를 갱신합니다.
+		if self.chatBalloon == nil then
+			return
+		end
+		
+		self.chatBalloon.Message = message
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayHideTimer()
+		-- 대사 유지 시간이 지나면 챗벌룬 메시지를 비우도록 예약합니다.
+		if self.defaultDuration <= 0 then
+			return
+		end
+		
+		self:ClearHideTimer()
+		self.hideTimerId = _TimerService:SetTimerOnce(function() self:HideSpeech() end, self.defaultDuration)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideSpeech()
+		-- 출력 중인 스피치를 정리하고 챗벌룬 메시지를 비웁니다.
+		self:ClearTypingTimer()
+		self:ClearHideTimer()
+		self.currentCharacters = {}
+		self.currentCharacterIndex = 1
+		self.currentMessage = ""
+		self.currentSpeechType = ""
+		self:SetMessageText("")
+		
+		local interactionTypes = _EActorInteractionType
+		if self.enableIdleSpeech == true and self.currentMovementInteractionType == interactionTypes:GetIdleInteger() then
+			self:StartIdleSpeechTimer()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearHideTimer()
+		-- 챗벌룬 숨김 타이머를 해제합니다.
+		if self.hideTimerId > 0 then
+			_TimerService:ClearTimer(self.hideTimerId)
+			self.hideTimerId = 0
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearTypingTimer()
+		-- 텍스트 시간차 출력 타이머를 해제합니다.
+		if self.typingTimerId > 0 then
+			_TimerService:ClearTimer(self.typingTimerId)
+			self.typingTimerId = 0
+		end
+	end
+
+end

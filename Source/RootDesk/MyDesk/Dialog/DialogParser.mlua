@@ -1,0 +1,160 @@
+@Logic
+script DialogParser extends Logic
+
+	method any Parse(string message)
+		local tokens = {}
+
+		if message == nil or message == "" then
+			return tokens
+		end
+
+		local index = 1
+		local length = string.len(message)
+
+		while index <= length do
+			local openIdx, _ = string.find(message, "<", index, true)
+
+			if openIdx == nil then
+				self:AddTextToken(tokens, string.sub(message, index))
+				break
+			end
+
+			if openIdx > index then
+				self:AddTextToken(tokens, string.sub(message, index, openIdx - 1))
+			end
+
+			local closeIdx, _ = string.find(message, ">", openIdx + 1, true)
+
+			if closeIdx == nil then
+				log_warning("[DialogParser] Unclosed angle tag: " .. string.sub(message, openIdx))
+				self:AddTextToken(tokens, string.sub(message, openIdx))
+				break
+			end
+
+			local rawTag = string.sub(message, openIdx + 1, closeIdx - 1)
+			local isCustomTag = self:ParseCustomTag(tokens, rawTag)
+
+			if isCustomTag == false then
+				self:AddTextToken(tokens, "<" .. rawTag .. ">")
+			end
+
+			index = closeIdx + 1
+		end
+
+		return tokens
+	end
+
+	method void AddTextToken(any tokens, string text)
+		if text == nil or text == "" then
+			return
+		end
+
+		table.insert(tokens, {
+			kind = "text",
+			text = text
+		})
+	end
+
+	method boolean ParseCustomTag(any tokens, string rawTag)
+		-- 다이얼로그 제어 태그만 토큰으로 변환하고, MSW 리치 텍스트 태그는 원문 그대로 보존합니다.
+		if rawTag == nil or rawTag == "" then
+			return false
+		end
+
+		if string.sub(rawTag, 1, 1) == "/" then
+			return self:ParseCustomEndTag(tokens, string.sub(rawTag, 2))
+		end
+
+		local lowerName = string.lower(self:GetTagName(rawTag))
+		local value = self:GetTagValue(rawTag)
+
+		if lowerName == "wait" then
+			table.insert(tokens, {
+				kind = "wait",
+				value = tonumber(value) or 0
+			})
+			return true
+		end
+
+		if lowerName == "delay" then
+			table.insert(tokens, {
+				kind = "delay",
+				value = tonumber(value) or 0
+			})
+			return true
+		end
+
+		return false
+	end
+
+	method boolean ParseCustomEndTag(any tokens, string rawTag)
+		local lowerName = string.lower(self:GetTagName(rawTag or ""))
+
+		if lowerName == "delay" then
+			table.insert(tokens, {
+				kind = "resetDelay"
+			})
+			return true
+		end
+
+		return false
+	end
+
+	method string GetTagName(string rawTag)
+		if rawTag == nil then
+			return ""
+		end
+
+		local body = self:Trim(rawTag)
+
+		if string.sub(body, 1, 1) == "/" then
+			body = string.sub(body, 2)
+			body = self:Trim(body)
+		end
+
+		local nameEnd = string.len(body)
+
+		for index = 1, string.len(body) do
+			local ch = string.sub(body, index, index)
+
+			if ch == " " or ch == "\t" or ch == "=" or ch == "/" then
+				nameEnd = index - 1
+				break
+			end
+		end
+
+		if nameEnd <= 0 then
+			return ""
+		end
+
+		return string.sub(body, 1, nameEnd)
+	end
+
+	method string GetTagValue(string rawTag)
+		if rawTag == nil then
+			return ""
+		end
+
+		local equalIdx, equalEnd = string.find(rawTag, "=", 1, true)
+
+		if equalIdx == nil then
+			return ""
+		end
+
+		local value = string.sub(rawTag, equalEnd + 1)
+
+		if string.sub(value, string.len(value), string.len(value)) == "/" then
+			value = string.sub(value, 1, string.len(value) - 1)
+		end
+
+		return self:Trim(value)
+	end
+
+	method string Trim(string text)
+		if text == nil then
+			return ""
+		end
+
+		return string.match(text, "^%s*(.-)%s*$") or ""
+	end
+end

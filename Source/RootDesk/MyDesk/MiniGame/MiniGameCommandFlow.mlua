@@ -1,0 +1,188 @@
+---@description "미니게임의 커맨드 입력 흐름을 관리하는 로직"
+@Logic
+@ExecSpace("ClientOnly")
+script MiniGameCommandFlow extends Logic
+
+	property string COMMAND_KEY_UP = "Up"
+	property string COMMAND_KEY_DOWN = "Down"
+	property string COMMAND_KEY_LEFT = "Left"
+	property string COMMAND_KEY_RIGHT = "Right"
+	property string COMMAND_FIELD_SEPARATOR = ","
+	property string COMMAND_FEEDBACK_MISS = "miss"
+	property string COMMAND_FEEDBACK_COMPLETE = "complete"
+	property string COMMAND_FEEDBACK_TIMEOUT = "timeout"
+	property string RESULT_REASON_OBJECTIVE = "objective"
+	property string RESULT_REASON_TIMEOUT = "timeout"
+	property integer COMMAND_SEQUENCE_MIN = 5
+	property integer COMMAND_SEQUENCE_MAX = 8
+
+	@ExecSpace("ClientOnly")
+	method any ParseLaunchPayload(string sequenceText, number duration)
+		-- 서버 실행 문자열의 커맨드 전용 필드 해석
+		return {
+			sequence = self:SplitSequence(sequenceText),
+			duration = duration or 0
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method any CreateState(integer inputType, integer contextType, any launchPayload, any sourceObjectives)
+		-- 커맨드 세션의 서버 동기화 상태 생성
+		local isCommand = inputType == _EMiniGameInputType.Command
+		local sequence = {}
+		local duration = 0
+		if launchPayload ~= nil then
+			sequence = launchPayload.sequence or {}
+			duration = launchPayload.duration or 0
+		end
+
+		if isCommand == true and #sequence == 0 and contextType ~= _EMiniGameContextType.Performance then
+			sequence = self:GenerateSequence()
+		end
+
+		local objectives = sourceObjectives or {}
+		if isCommand == true and #sequence > 0 then
+			objectives = self:BuildObjectives(sourceObjectives, #sequence)
+		end
+
+		local state = {
+			isCommand = isCommand,
+			sequence = sequence,
+			duration = duration,
+			objectives = objectives,
+			serverActivated = isCommand == false,
+			inputReadyRequestSent = false,
+			lastServerInputSequence = 0,
+			confirmedCommandIndex = 0
+		}
+		log("[MiniGameCommandFlow] state command=" .. tostring(isCommand) .. " sequence=" .. tostring(#sequence) .. " duration=" .. tostring(duration))
+		return state
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsAwaitingActivation(any state)
+		-- 서버 활성화 대기 여부 반환
+		return state ~= nil and state.isCommand == true and state.serverActivated == false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean TryMarkInputReadyRequested(any state)
+		-- 입력 준비 요청의 최초 1회 전송 보장
+		if state == nil or state.inputReadyRequestSent == true then
+			return false
+		end
+		state.inputReadyRequestSent = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Activate(any state)
+		-- 서버가 승인한 커맨드 세션 활성화
+		if state ~= nil then
+			state.serverActivated = true
+			log("[MiniGameCommandFlow] activated sequence=" .. tostring(#state.sequence))
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ApplyFeedback(any state, any tFeedback)
+		-- 순차 서버 응답을 현재 커맨드 상태에 반영
+		if state == nil or state.isCommand == false or tFeedback == nil then
+			return { accepted = false }
+		end
+		if tFeedback.inputSequence < state.lastServerInputSequence then
+			return { accepted = false }
+		end
+
+		state.lastServerInputSequence = tFeedback.inputSequence
+		state.confirmedCommandIndex = tFeedback.commandIndex
+		log("[MiniGameCommandFlow] feedback action=" .. tostring(tFeedback.action)
+			.. " input=" .. tostring(tFeedback.inputSequence)
+			.. " index=" .. tostring(tFeedback.commandIndex))
+		if tFeedback.action == self.COMMAND_FEEDBACK_COMPLETE then
+			return {
+				accepted = true,
+				terminal = true,
+				success = true,
+				reason = self.RESULT_REASON_OBJECTIVE,
+				commandIndex = tFeedback.commandIndex,
+				progress = tFeedback.progress
+			}
+		end
+		if tFeedback.action == self.COMMAND_FEEDBACK_TIMEOUT then
+			return {
+				accepted = true,
+				terminal = true,
+				success = false,
+				reason = self.RESULT_REASON_TIMEOUT,
+				commandIndex = tFeedback.commandIndex,
+				progress = tFeedback.progress
+			}
+		end
+		if tFeedback.inputSequence < tFeedback.localInputSequence then
+			return { accepted = false }
+		end
+
+		return {
+			accepted = true,
+			terminal = false,
+			showError = tFeedback.action == self.COMMAND_FEEDBACK_MISS,
+			commandIndex = tFeedback.commandIndex,
+			progress = tFeedback.progress
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method any SplitSequence(string text)
+		-- 쉼표 구분 서버 커맨드 문자열을 배열로 변환
+		local sequence = {}
+		if text == nil or text == "" then
+			return sequence
+		end
+
+		local separator = self.COMMAND_FIELD_SEPARATOR
+		local pattern = "([^" .. separator .. "]*)" .. separator
+		for commandName in string.gmatch(text .. separator, pattern) do
+			sequence[#sequence + 1] = commandName
+		end
+		return sequence
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GenerateSequence()
+		-- 호환 세션용 방향 커맨드 무작위 생성
+		local directions = {
+			self.COMMAND_KEY_UP,
+			self.COMMAND_KEY_DOWN,
+			self.COMMAND_KEY_LEFT,
+			self.COMMAND_KEY_RIGHT
+		}
+		local length = _UtilLogic:RandomIntegerRange(self.COMMAND_SEQUENCE_MIN, self.COMMAND_SEQUENCE_MAX)
+		local result = {}
+		for i = 1, length do
+			result[i] = directions[_UtilLogic:RandomIntegerRange(1, 4)]
+		end
+		return result
+	end
+
+	@ExecSpace("ClientOnly")
+	method any BuildObjectives(any sourceObjectives, integer length)
+		-- 커맨드 시퀀스 길이를 반영한 목표 배열 생성
+		local result = {}
+		if sourceObjectives == nil then
+			result[1] = { type = _EMiniGameObjectiveType.Sequence, target = length, required = true }
+			return result
+		end
+
+		for i = 1, #sourceObjectives do
+			local objective = sourceObjectives[i]
+			if objective.type == _EMiniGameObjectiveType.Sequence then
+				result[i] = { type = objective.type, target = length, required = objective.required }
+			else
+				result[i] = objective
+			end
+		end
+		return result
+	end
+
+end

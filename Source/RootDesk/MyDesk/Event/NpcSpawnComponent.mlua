@@ -1,0 +1,313 @@
+@Component
+@ExecSpace("ClientOnly")
+script NpcSpawnComponent extends Component
+
+	property number defaultSpawnX = 0
+
+	property number defaultSpawnY = 13
+
+	property number spawnSpacingX = 1.5
+
+	@HideFromInspector
+	property integer maxTriggerCount = 1
+
+	property integer maxNpcSpawnCount = 4
+
+	-- npcContext 요청이 한 번이라도 완료되었는지 여부. 맵 재진입 시 false로 초기화되어 재요청 가능
+	@HideFromInspector
+	property boolean hasEvaluatedEntry = false
+
+	@HideFromInspector
+	property any tSpawnedNpcById = {}
+
+	@HideFromInspector
+	property string pendingContextRequestId = ""
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 최초 맵 진입 이벤트에서 한 번만 요청하도록 로컬 상태 초기화
+		self.hasEvaluatedEntry = false
+		self.pendingContextRequestId = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 맵 진입 시 로컬 플레이어 준비가 늦은 경우 현재 맵 확인 후 컨텍스트 요청 재시도
+		if self.hasEvaluatedEntry == true
+			or _UserService == nil
+			or _UserService.LocalPlayer == nil
+			or _UserService.LocalPlayer.CurrentMap ~= self.Entity then
+			return
+		end
+
+		self:TrySpawnEntryNpcs("currentMapReady")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnMapEnter(Entity enteredEntity)
+		if _UserService == nil then
+			return
+		end
+
+		if _UserService.LocalPlayer == nil then
+			return
+		end
+
+		if enteredEntity == nil then
+			return
+		end
+
+		if enteredEntity ~= _UserService.LocalPlayer then
+			return
+		end
+
+		self:ResetEntryEvaluation()
+		self:TrySpawnEntryNpcs("mapEnter")
+	end
+
+	method void OnEndPlay()
+		-- 맵 컴포넌트가 소유한 로컬 NPC와 요청 상태 정리
+		self:ResetEntryEvaluation()
+		self.tSpawnedNpcById = {}
+		self.hasEvaluatedEntry = false
+		self.pendingContextRequestId = ""
+	end
+
+	method void ResetEntryEvaluation()
+		-- 맵 재진입 시 NPC 목록을 재구성할 수 있도록 1회 요청 게이트 초기화
+		for _, spawned in pairs(self.tSpawnedNpcById) do
+			if spawned ~= nil and isvalid(spawned) == true then
+				self:DestroySpawnedNpc(spawned)
+			end
+		end
+
+		self.tSpawnedNpcById = {}
+		self.hasEvaluatedEntry = false
+	end
+
+	method void RefreshEntrySpawn()
+		-- 현재 외출 맵의 서버 권위 NPC 컨텍스트 재요청
+		self:ResetEntryEvaluation()
+		self:TrySpawnEntryNpcs("contextRefresh")
+	end
+
+	method void TrySpawnEntryNpcs(string reason)
+		-- 클라이언트 직접 판정 없이 서버에 현재 맵 NPC 컨텍스트 요청
+		if self.hasEvaluatedEntry == true then
+			return
+		end
+
+		if _NpcEventManager == nil then
+			return
+		end
+
+		self.hasEvaluatedEntry = true
+		self.pendingContextRequestId = _NpcEventManager:CreateClientRequestId(
+			"npc-context:" .. tostring(self.Entity.Name))
+		log("[NpcSpawn] request context requestId=" .. tostring(self.pendingContextRequestId)
+			.. " mapName=" .. tostring(self.Entity.Name)
+			.. " reason=" .. tostring(reason))
+		_NpcEventManager:RequestNpcContext(self.pendingContextRequestId, self.Entity.Name)
+	end
+
+	method void ApplyNpcContext(string requestId, any npcContexts)
+		-- 최신 서버 응답의 NPC 표시 컨텍스트로 로컬 NPC 재구성
+		if requestId == nil or requestId == "" or requestId ~= self.pendingContextRequestId then
+			return
+		end
+
+		self.pendingContextRequestId = ""
+		self:ResetSpawnedNpcsOnly()
+		if npcContexts == nil or type(npcContexts) ~= "table" then
+			return
+		end
+
+		local spawnCount = 0
+		for _, context in ipairs(npcContexts) do
+			if self.maxNpcSpawnCount > 0 and spawnCount >= self.maxNpcSpawnCount then
+				break
+			end
+
+			if context ~= nil and self:SpawnNpc(
+				context.npcId or "",
+				context.characterId or "",
+				context.eventAvailable == true,
+				spawnCount + 1,
+				context) == true then
+				spawnCount = spawnCount + 1
+			end
+		end
+
+		log("[NpcSpawn] context applied requestId=" .. tostring(requestId)
+			.. " mapName=" .. tostring(self.Entity.Name)
+			.. " npcCount=" .. tostring(spawnCount))
+	end
+
+	method void OnNpcContextRejected(string requestId, string reason)
+		-- 최신 서버 컨텍스트 요청 거절 시 대기 상태와 로컬 NPC 정리
+		if requestId ~= self.pendingContextRequestId then
+			return
+		end
+
+		self.pendingContextRequestId = ""
+		self:ResetSpawnedNpcsOnly()
+		log_warning("[NpcSpawn] context rejected requestId=" .. tostring(requestId)
+			.. " mapName=" .. tostring(self.Entity.Name)
+			.. " reason=" .. tostring(reason))
+	end
+
+	method void ResetSpawnedNpcsOnly()
+		-- 현재 로컬 스폰 NPC만 제거하고 컨텍스트 요청 게이트 유지
+		for _, spawned in pairs(self.tSpawnedNpcById) do
+			if spawned ~= nil and isvalid(spawned) == true then
+				self:DestroySpawnedNpc(spawned)
+			end
+		end
+
+		self.tSpawnedNpcById = {}
+	end
+
+	method boolean SpawnNpc(string npcId, string characterId, boolean eventAvailable, integer spawnIndex, any npcContext)
+		-- 실제로 스폰에 성공하면 true, 스킵/실패하면 false를 반환한다(호출부가 성공한 스폰만 카운트하도록)
+		local map = self.Entity.CurrentMap
+		if map == nil then
+			map = self.Entity
+		end
+
+		if map == nil then
+			return false
+		end
+
+		local modelId = self:ResolveNpcModelId(npcId)
+		if modelId == "" then
+			-- 맵에 배치된 고정 NPC는 별도 로컬 스폰 생략
+			return false
+		end
+
+		local entityName = "NPC_Event_" .. tostring(npcId)
+		local existing = map:GetChildByName(entityName, true)
+		if existing ~= nil and isvalid(existing) then
+			self:DestroySpawnedNpc(existing)
+		end
+
+		local spawnPosition = self:ResolveSpawnPosition(spawnIndex, npcContext)
+
+		local spawned = _SpawnService:SpawnByModelId(modelId, entityName, spawnPosition, map)
+		if spawned == nil then
+			return false
+		end
+
+		self.tSpawnedNpcById[npcId] = spawned
+		self:ConfigureSpawnedNpc(spawned, npcId, characterId, eventAvailable)
+		return true
+	end
+
+	method Vector3 ResolveSpawnPosition(integer spawnIndex, any npcContext)
+		-- 트리거(EventTriggerTable)에 명시된 spawnX/spawnY 우선, 없으면 순번 기반 기본 배치로 폴백
+		if npcContext ~= nil then
+			local triggerX = npcContext.spawnX or 0
+			local triggerY = npcContext.spawnY or 0
+			if triggerX ~= 0 or triggerY ~= 0 then
+				return Vector3(triggerX, triggerY, 0)
+			end
+		end
+
+		local spawnX = self.defaultSpawnX + ((spawnIndex - 1) * self.spawnSpacingX)
+		return Vector3(spawnX, self.defaultSpawnY, 0)
+	end
+
+	method string ResolveNpcModelId(string npcId)
+		-- ActorTable의 avatar 컬럼 값을 모델 id로 해석한다. avatar가 없으면 "" 반환(기본 모델 폴백 없음 → 해당 NPC 스폰 생략)
+		if _ActorMaster == nil then
+			return ""
+		end
+
+		return self:ResolveKnownModelId(_ActorMaster:GetActorAvatar(npcId))
+	end
+
+	method string ResolveKnownModelId(string modelId)
+		-- avatar 값을 모델 id로 해석한다. model:// 직접지정 > ResourceTable(resourceId→ruid) > 원본 그대로.
+		if modelId == nil then
+			return ""
+		end
+
+		if string.sub(modelId, 1, 8) == "model://" then
+			return string.sub(modelId, 9)
+		end
+
+		if _ResourceMaster ~= nil then
+			return _ResourceMaster:ResolveResourceId(modelId)
+		end
+
+		return modelId
+	end
+
+	method string NormalizeKey(string value)
+		-- 테이블 비교용 nil 안전 소문자 키 반환
+		if value == nil then
+			return ""
+		end
+
+		return string.lower(value)
+	end
+
+	method void ConfigureSpawnedNpc(Entity spawned, string npcId, string characterId, boolean eventAvailable)
+		-- 모델 스폰 후 액터 표시·대사·이벤트 컨텍스트 적용
+		if spawned == nil or isvalid(spawned) == false then
+			return
+		end
+
+		local localizedNameTag = spawned:GetComponent("script.LocalizedNameTagComponent")
+		if localizedNameTag == nil then
+			localizedNameTag = spawned:AddComponent("script.LocalizedNameTagComponent")
+		end
+		if localizedNameTag ~= nil then
+			localizedNameTag.actorId = npcId
+			localizedNameTag:Refresh()
+		elseif spawned.NameTagComponent ~= nil and _RuntimeActorManager ~= nil then
+			spawned.NameTagComponent.Name = _RuntimeActorManager:ClientGetLocalizedActorName(npcId)
+		end
+
+		---@type StaticActorSpeechComponent
+		local speechComponent = spawned:GetComponent("script.StaticActorSpeechComponent")
+		if speechComponent ~= nil then
+			speechComponent.actorId = npcId
+		end
+
+		---@type any
+		local triggerComponent = spawned:GetComponent("script.NpcEventTriggerComponent")
+		if triggerComponent == nil then
+			triggerComponent = spawned:AddComponent("script.NpcEventTriggerComponent")
+		end
+
+		if triggerComponent ~= nil then
+			triggerComponent:ConfigureNpcContext(npcId, characterId, eventAvailable)
+		end
+
+		-- 동적 NPC 발밑에 2x3 충돌 타일 스탬프 (클라 로컬 스폰과 같은 클라에서 스탬프 → 서버 동기화 불필요)
+		---@type any
+		local tileBlocker = spawned:GetComponent("script.NpcTileBlockerComponent")
+		if tileBlocker == nil then
+			tileBlocker = spawned:AddComponent("script.NpcTileBlockerComponent")
+		end
+		if tileBlocker ~= nil then
+			tileBlocker:Stamp()
+		end
+	end
+
+	method void DestroySpawnedNpc(Entity spawned)
+		-- 스폰된 NPC를 제거하기 전에 충돌 스탬프를 먼저 원복한다. (원복 없이 지우면 타일이 남아 유령 충돌)
+		if spawned == nil or isvalid(spawned) == false then
+			return
+		end
+
+		---@type any
+		local tileBlocker = spawned:GetComponent("script.NpcTileBlockerComponent")
+		if tileBlocker ~= nil then
+			tileBlocker:ClearBlock()
+		end
+
+		spawned:Destroy()
+	end
+
+end

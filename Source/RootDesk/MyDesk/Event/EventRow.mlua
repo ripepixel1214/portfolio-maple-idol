@@ -1,0 +1,46 @@
+@Struct
+script EventRow
+
+	property string id = ""
+
+	property string name = ""
+
+	property string description = ""
+
+	property integer eventType = 0
+
+	-- Dialog 타입 이벤트가 열 DialogTable 대화 id (대화 주도 이벤트의 본문)
+	property string dialogId = ""
+
+	property string miniGameId = ""
+
+	property string successResultId = ""
+
+	property string successValue1 = ""
+
+	property string successValue2 = ""
+
+	property string successValue3 = ""
+
+	property string failResultId = ""
+
+	property string failValue1 = ""
+
+	property string failValue2 = ""
+
+	property string failValue3 = ""
+
+	property string choiceEventId1 = ""
+
+	property string choiceEventId2 = ""
+
+	property string choiceEventId3 = ""
+
+	property string choiceEventId4 = ""
+
+	property string choiceEventId5 = ""
+
+	-- 이 이벤트의 결과(특히 캐릭터 스탯/친밀도)를 적용할 대상 캐릭터 id. 비어 있으면 실행 시 넘어온 인자를 사용.
+	property string characterId = ""
+
+end

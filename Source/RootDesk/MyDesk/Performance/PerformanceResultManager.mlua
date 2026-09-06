@@ -1,0 +1,206 @@
+---@description "공연 결과 매니저. 공연 종료 시 서버 권위로 6개 점수(보컬/댄스/비주얼/팬덤투표/현장반응/총점)를 산출하고 클리어를 판정해 요청한 클라이언트로 동기화한다."
+@Logic
+script PerformanceResultManager extends Logic
+
+	-- 팬덤 투표 점수 가중치 (팬덤 투표 = 현재 팬덤 수 × weight)
+	property number fandomVoteWeight = 1.5
+
+	-- 현장 반응 점수: 공연 중 미니게임 성공 1회당 점수
+	property number liveReactionPerSuccess = 1000
+
+	-- 팀 스탯 가중치: 센터 캐릭터 스탯에 곱하는 배율 (서브는 1)
+	property number centerStatWeight = 1.4
+
+	-- 주요 스탯(50%) 배율/최대 반영 점수
+	property number mainStatMultiplier = 10
+	property number mainStatMax = 15000
+
+	-- 부스탯(각 25%) 배율/최대 반영 점수
+	property number subStatMultiplier = 8
+	property number subStatMax = 7500
+
+	-- 스탯 총점(주스탯+부스탯1+부스탯2) 최대 (팬덤/현장반응 제외)
+	property number statTotalMax = 30000
+
+	@ExecSpace("Server")
+	method void RequestFinishPerformance(string performanceId, table tRoleAssignmentPlain)
+		-- 클라이언트가 공연 정상 종료 시 결과 산출을 서버에 요청 (서버 권위)
+		if performanceId == nil or performanceId == "" then
+			log_warning("[PerformanceResult] performanceId가 비어 있음")
+			return
+		end
+
+		local tScore = self:ComputeScore(performanceId, tRoleAssignmentPlain)
+		-- 요청한 클라이언트에게만 결과를 동기화 (마지막 인자 = 대상 userId)
+		self:SyncPerformanceResult(performanceId, tScore, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ComputeScore(string performanceId, table tRoleAssignmentPlain)
+		-- 6개 점수를 산출해 plain table로 반환
+		-- return: { vocal, dance, visual, fandomVote, liveReaction, total, clearScore, isClear }
+		local assignment = PerformanceRoleAssignment():FromPlainTable(tRoleAssignmentPlain)
+
+		-- 공연 헤더에서 스탯 가중치와 클리어 기준을 가져옴 (공연마다 보컬/댄스/비주얼 중요도가 다름)
+		-- tHeader: PerformanceRow
+		local tHeader = nil
+		if _PerformanceMaster ~= nil then
+			tHeader = _PerformanceMaster:GetPerformance(performanceId)
+		end
+		local vocalWeight = 1
+		local danceWeight = 1
+		local visualWeight = 1
+		local clearScore = 0
+		if tHeader ~= nil then
+			vocalWeight = tHeader.vocalWeight
+			danceWeight = tHeader.danceWeight
+			visualWeight = tHeader.visualWeight
+			clearScore = tHeader.clearScore
+		end
+
+		-- 포지션별 캐릭터 데이터 조회 (센터/서브L/서브R)
+		-- centerChar/subLChar/subRChar: CharacterData 또는 nil
+		local centerChar = self:GetCharacter(assignment.center)
+		local subLChar = self:GetCharacter(assignment.subL)
+		local subRChar = self:GetCharacter(assignment.subR)
+
+		-- 주요 스탯 결정: 가중치가 가장 높은 스탯. 동점이면 보컬>댄스>비주얼 우선
+		local mainStatKey = self:ResolveMainStatKey(vocalWeight, danceWeight, visualWeight)
+
+		-- 스탯별 점수: 주스탯은 ×mainStatMultiplier(최대 mainStatMax), 부스탯은 ×subStatMultiplier(최대 subStatMax)
+		-- 팀 스탯 = (센터×centerStatWeight + 서브L + 서브R) / (centerStatWeight + 2)
+		local vocal = self:ComputeStatScore(centerChar, subLChar, subRChar, "vocal", mainStatKey)
+		local dance = self:ComputeStatScore(centerChar, subLChar, subRChar, "dance", mainStatKey)
+		local visual = self:ComputeStatScore(centerChar, subLChar, subRChar, "visual", mainStatKey)
+
+		-- 팬덤 투표 = 현재 팬덤 수 × 가중치
+		local fandom = 0
+		if _ProgressManager ~= nil then
+			-- tProgress: ProgressData
+			local tProgress = _ProgressManager:ServerGetProgress()
+			if tProgress ~= nil then
+				fandom = tProgress.fandom
+			end
+		end
+		local fandomVote = math.floor(fandom * self.fandomVoteWeight)
+
+		-- 현장 반응 = 공연 중 미니게임 성공 수 × 성공당 점수
+		local successCount = 0
+		if _MiniGameManager ~= nil then
+			successCount = _MiniGameManager:CountPerformanceSuccess(performanceId)
+		end
+		local liveReaction = math.floor(successCount * self.liveReactionPerSuccess)
+
+		-- 스탯 총점(주스탯+부스탯1+부스탯2)은 statTotalMax(기본 30000)로 제한
+		local statTotal = vocal + dance + visual
+		if statTotal > self.statTotalMax then
+			statTotal = self.statTotalMax
+		end
+
+		-- 총점 & 클리어 판정: 팬덤투표·현장반응(QTE)은 statTotalMax와 무관하게 기존처럼 별도 합산
+		local total = statTotal + fandomVote + liveReaction
+		local isClear = total >= clearScore
+
+		local tScore = {}
+		tScore.vocal = vocal
+		tScore.dance = dance
+		tScore.visual = visual
+		tScore.mainStat = mainStatKey
+		tScore.statTotal = statTotal
+		tScore.fandomVote = fandomVote
+		tScore.liveReaction = liveReaction
+		tScore.total = total
+		tScore.clearScore = clearScore
+		tScore.isClear = isClear
+
+		log("[PerformanceResult] 산출 vocal=" .. tostring(tScore.vocal) ..
+			" dance=" .. tostring(tScore.dance) ..
+			" visual=" .. tostring(tScore.visual) ..
+			" mainStat=" .. tostring(mainStatKey) ..
+			" statTotal=" .. tostring(statTotal) ..
+			" weights(v/d/vi)=" .. tostring(vocalWeight) .. "/" .. tostring(danceWeight) .. "/" .. tostring(visualWeight) ..
+			" fandomVote=" .. tostring(fandomVote) ..
+			" liveReaction=" .. tostring(liveReaction) ..
+			" total=" .. tostring(total) ..
+			" clearScore=" .. tostring(clearScore) ..
+			" isClear=" .. tostring(isClear))
+		return tScore
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetCharacter(string characterId)
+		-- characterId로 서버 권위 캐릭터 데이터를 반환 (없거나 비어있으면 nil)
+		if characterId == nil or characterId == "" or _CharacterManager == nil then
+			return nil
+		end
+		return _CharacterManager:ServerGetCharacterById(characterId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string ResolveMainStatKey(number vocalWeight, number danceWeight, number visualWeight)
+		-- 가중치가 가장 높은 스탯을 주요 스탯으로 결정. 동점이면 보컬>댄스>비주얼 순으로 우선(strict 비교)
+		local mainKey = "vocal"
+		local mainWeight = vocalWeight
+		if danceWeight > mainWeight then
+			mainKey = "dance"
+			mainWeight = danceWeight
+		end
+		if visualWeight > mainWeight then
+			mainKey = "visual"
+			mainWeight = visualWeight
+		end
+		return mainKey
+	end
+
+	@ExecSpace("ServerOnly")
+	method number ComputeStatScore(any centerChar, any subLChar, any subRChar, string statKey, string mainStatKey)
+		-- 팀 가중 스탯을 산출한 뒤 주스탯/부스탯 배율·상한을 적용한 점수(정수)를 반환
+		-- 팀 스탯 = (센터×centerStatWeight + 서브L + 서브R) / (centerStatWeight + 2)
+		local divisor = self.centerStatWeight + 2
+		if divisor <= 0 then
+			divisor = 1
+		end
+		local teamStat = (self:StatOf(centerChar, statKey) * self.centerStatWeight
+			+ self:StatOf(subLChar, statKey)
+			+ self:StatOf(subRChar, statKey)) / divisor
+
+		local score = 0
+		local cap = 0
+		if statKey == mainStatKey then
+			score = teamStat * self.mainStatMultiplier
+			cap = self.mainStatMax
+		else
+			score = teamStat * self.subStatMultiplier
+			cap = self.subStatMax
+		end
+
+		score = math.floor(score)
+		if score > cap then
+			score = cap
+		end
+		if score < 0 then
+			score = 0
+		end
+		return score
+	end
+
+	method number StatOf(any tCharacter, string statKey)
+		-- 캐릭터의 스탯 값(vocal/dance/visual)을 반환, 캐릭터가 없으면 0
+		if tCharacter == nil then
+			return 0
+		end
+		if statKey == "vocal" then return tCharacter.vocal end
+		if statKey == "dance" then return tCharacter.dance end
+		if statKey == "visual" then return tCharacter.visual end
+		return 0
+	end
+
+	@ExecSpace("Client")
+	method void SyncPerformanceResult(string performanceId, table tScore)
+		-- 서버가 산출한 결과를 받아 점수 UI를 표시 (Step 3b에서 PerformanceScoreUILogic 연결)
+		if _PerformanceScoreUILogic ~= nil then
+			_PerformanceScoreUILogic:Show(performanceId, tScore)
+		end
+	end
+
+end

@@ -1,0 +1,33 @@
+@Struct
+script MiniGameCommandFeedbackData
+
+	property integer inputSequence = 0
+	property string action = ""
+	property integer commandIndex = 0
+	property number progress = 0
+	property integer localInputSequence = 0
+
+	method any ToPlainTable()
+		-- RPC 전달용 서버 커맨드 피드백 plain table 생성
+		return {
+			inputSequence = self.inputSequence,
+			action = self.action,
+			commandIndex = self.commandIndex,
+			progress = self.progress
+		}
+	end
+
+	method any FromPlainTable(any tPlainFeedback)
+		-- RPC plain table 값을 피드백 구조체에 복원
+		if tPlainFeedback == nil or type(tPlainFeedback) ~= "table" then
+			return self
+		end
+
+		self.inputSequence = math.floor(tonumber(tPlainFeedback.inputSequence) or 0)
+		self.action = type(tPlainFeedback.action) == "string" and tPlainFeedback.action or ""
+		self.commandIndex = math.floor(tonumber(tPlainFeedback.commandIndex) or 0)
+		self.progress = tonumber(tPlainFeedback.progress) or 0
+		return self
+	end
+
+end

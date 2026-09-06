@@ -1,0 +1,203 @@
+---@description "피로도(fatigue) 값을 컨디션 등급으로 변환하고, 등급별 훈련 실패 확률을 제공하는 마스터 로직."
+@Logic
+script ConditionMaster extends Logic
+
+	-- 컨디션 등급 테이블 로드 완료 여부
+	property boolean IsLoaded = false
+
+	-- fatigueMin 오름차순으로 정렬된 등급 구간 목록 [{conditionKey, condition, fatigueMin, fatigueMax, failureChance}]
+	property any tGrades = {}
+
+	method void OnBeginPlay()
+		-- 로직 시작 시 컨디션 등급 테이블을 로드
+		self:LoadGrades()
+	end
+
+	method void LoadGrades()
+		-- ConditionGradeTable을 읽어 fatigue 구간별 등급/실패확률을 캐싱
+		self.tGrades = {}
+		self.IsLoaded = false
+
+		local dataSet = _DataService:GetTable("ConditionGradeTable")
+		if dataSet == nil then
+			log_warning("[ConditionMaster] ConditionGradeTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local gradeKey = string.lower(_DataTableUtil:SafeGetString(dataSet, rowIndex, "grade", ""))
+			if gradeKey ~= "" then
+				local displayNameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "displayNameKey", "")
+				local localizedDisplayName = ""
+				if _LocalizationLogic ~= nil then
+					localizedDisplayName = _LocalizationLogic:GetText(displayNameKey, "")
+				end
+				local iconResourceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "icon", "")
+				if iconResourceId == "" then
+					iconResourceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "iconResourceId", "")
+				end
+
+				local tGrade = {
+					conditionKey = gradeKey,
+					condition = _ECondition:FromKey(gradeKey),
+					displayName = localizedDisplayName,
+					displayNameKey = displayNameKey,
+					iconResourceId = iconResourceId,
+					fatigueMin = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "fatigueMin", 0),
+					fatigueMax = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "fatigueMax", 0),
+					failureChance = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "failureChancePercent", 0)
+				}
+				table.insert(self.tGrades, tGrade)
+			end
+		end
+
+		table.sort(self.tGrades, function(left, right)
+			return left.fatigueMin < right.fatigueMin
+		end)
+
+		self.IsLoaded = true
+	end
+
+	method any GetGradeByFatigue(number fatigue)
+		-- fatigue 값이 속한 등급 구간 row를 반환, 범위를 벗어나면 최저/최고 구간으로 클램프
+		if self.IsLoaded == false then
+			self:LoadGrades()
+		end
+
+		if #self.tGrades <= 0 then
+			return nil
+		end
+
+		for _, tGrade in ipairs(self.tGrades) do
+			if fatigue >= tGrade.fatigueMin and fatigue <= tGrade.fatigueMax then
+				return tGrade
+			end
+		end
+
+		local tFirstGrade = self.tGrades[1]
+		if fatigue < tFirstGrade.fatigueMin then
+			return tFirstGrade
+		end
+
+		return self.tGrades[#self.tGrades]
+	end
+
+	method any GetGradeByKey(string conditionKey)
+		-- conditionKey에 해당하는 컨디션 등급 row를 반환합니다.
+		if self.IsLoaded == false then
+			self:LoadGrades()
+		end
+
+		if conditionKey == nil or conditionKey == "" then
+			return nil
+		end
+
+		local normalizedKey = string.lower(conditionKey)
+		for _, tGrade in ipairs(self.tGrades) do
+			if tGrade.conditionKey == normalizedKey then
+				return tGrade
+			end
+		end
+
+		return nil
+	end
+
+	method integer GetConditionByFatigue(number fatigue)
+		-- fatigue 값에 해당하는 컨디션 등급(enum)을 반환
+		local tGrade = self:GetGradeByFatigue(fatigue)
+		if tGrade == nil then
+			return _ECondition.None
+		end
+
+		return tGrade.condition
+	end
+
+	method number GetFailureChanceByFatigue(number fatigue)
+		-- fatigue 값에 해당하는 훈련 실패 확률(0~100)을 반환
+		local tGrade = self:GetGradeByFatigue(fatigue)
+		if tGrade == nil then
+			return 0
+		end
+
+		return tGrade.failureChance
+	end
+
+	method string GetConditionKeyByFatigue(number fatigue)
+		-- fatigue 값에 해당하는 컨디션 grade 키를 반환합니다.
+		local tGrade = self:GetGradeByFatigue(fatigue)
+		if tGrade == nil then
+			return ""
+		end
+
+		return tGrade.conditionKey or ""
+	end
+
+	method string GetConditionNameByFatigue(number fatigue)
+		-- fatigue 값에 해당하는 컨디션 표시 이름을 반환합니다.
+		return self:GetConditionNameByKey(self:GetConditionKeyByFatigue(fatigue))
+	end
+
+	method string GetConditionNameByKey(string conditionKey)
+		-- 컨디션 grade 키를 화면 표시 이름으로 변환합니다.
+		local tGrade = self:GetGradeByKey(conditionKey)
+		if tGrade == nil then
+			return ""
+		end
+
+		if tGrade.displayName ~= nil and tGrade.displayName ~= "" then
+			return tGrade.displayName
+		end
+
+		if tGrade.conditionKey == "good" then
+			return "좋음"
+		elseif tGrade.conditionKey == "normal" then
+			return "보통"
+		elseif tGrade.conditionKey == "bad" then
+			return "나쁨"
+		end
+
+		return ""
+	end
+
+	method string GetConditionIconResourceIdByFatigue(number fatigue)
+		-- fatigue 값에 해당하는 컨디션 아이콘 리소스 ID를 반환합니다.
+		return self:GetConditionIconResourceIdByKey(self:GetConditionKeyByFatigue(fatigue))
+	end
+
+	method string GetConditionIconRuidByFatigue(number fatigue)
+		-- 피로도에 해당하는 컨디션 아이콘의 최종 ImageRUID를 반환합니다.
+		return self:GetConditionIconRuidByKey(self:GetConditionKeyByFatigue(fatigue))
+	end
+
+	method string GetConditionIconResourceIdByKey(string conditionKey)
+		-- 컨디션 grade 키를 ResourceTable의 아이콘 리소스 ID로 변환합니다.
+		local tGrade = self:GetGradeByKey(conditionKey)
+		if tGrade == nil then
+			return ""
+		end
+
+		if tGrade.iconResourceId ~= nil and tGrade.iconResourceId ~= "" then
+			return tGrade.iconResourceId
+		end
+
+		return "condition_" .. tGrade.conditionKey .. "_icon"
+	end
+
+	method string GetConditionIconRuidByKey(string conditionKey)
+		-- 컨디션 grade 키에 해당하는 아이콘 resourceId를 ResourceTable 기준 ImageRUID로 변환합니다.
+		local resourceId = self:GetConditionIconResourceIdByKey(conditionKey)
+		if resourceId == nil or resourceId == "" then
+			return ""
+		end
+
+		if _ResourceMaster ~= nil then
+			local ruid = _ResourceMaster:ResolveResourceId(resourceId)
+			if ruid ~= nil and ruid ~= "" then
+				return ruid
+			end
+		end
+
+		return resourceId
+	end
+
+end

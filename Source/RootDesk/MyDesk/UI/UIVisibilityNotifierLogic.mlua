@@ -1,0 +1,23 @@
+@Logic
+@ExecSpace("ClientOnly")
+script UIVisibilityNotifierLogic extends Logic
+
+	@ExecSpace("ClientOnly")
+	method void SendFrom(any sender, string uiId, boolean isOpen)
+		-- 지정한 UI Logic을 발신자로 사용해 UI 표시 상태 이벤트를 발행합니다.
+		if sender == nil or uiId == nil or uiId == "" then
+			return
+		end
+
+		local uiVisibilityChangedEvent = UIVisibilityChangedEvent()
+		uiVisibilityChangedEvent.uiId = uiId
+		uiVisibilityChangedEvent.isOpen = isOpen
+		sender:SendEvent(uiVisibilityChangedEvent)
+
+		local broadcastEvent = UIVisibilityChangedEvent()
+		broadcastEvent.uiId = uiId
+		broadcastEvent.isOpen = isOpen
+		self:SendEvent(broadcastEvent)
+	end
+
+end

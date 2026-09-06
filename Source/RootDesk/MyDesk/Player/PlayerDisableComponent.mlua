@@ -1,0 +1,95 @@
+---@description "이 컴포넌트가 붙은 맵에 들어온 기본 플레이어의 조작/외형을 끄는 컴포넌트. 기본 캐릭터를 비활성화할 맵의 맵 엔티티(.map 루트)에 부착한다."
+@Component
+script PlayerDisableComponent extends Component
+    -- OnMapEnter는 플레이어가 처음 스폰되는 맵에서는 발생하지 않고, 다른 맵에서 이 맵으로 전환해 들어올 때만 발생하므로, 두 경우에 모두 대응하기 위해 OnBeginPlay와 OnMapEnter에서 각각 처리
+    -- OnMapEnter/OnMapLeave는 @Logic에서는 호출되지 않으므로, 맵 단위 엔티티에만 부착 필수
+
+    -- 조작 차단 여부
+    @DisplayName("조작 차단")
+    property boolean BlockControl = true
+
+    -- 캐릭터 외형 숨김 여부
+    @DisplayName("캐릭터 숨김")
+    property boolean HideAvatar = true
+
+    method void OnBeginPlay()
+        -- 플레이 시작 시점에 맵에 있는 플레이어를 모두 비활성화
+        local mapComponent = self.Entity.MapComponent
+        if mapComponent == nil then return end
+        local users = _UserService:GetUsersByMapComponent(mapComponent)
+        if users == nil then return end
+        for _, user in ipairs(users) do
+            self:ApplyPlayerState(user, false)
+        end
+    end
+
+    method void OnMapEnter(Entity enterEntity)
+        -- 이 맵에 들어온 플레이어(서버 + 각 클라이언트) 비활성화
+        self:ApplyPlayerState(enterEntity, false)
+    end
+
+    method void OnMapLeave(Entity leaveEntity)
+        -- 이 맵을 떠난 플레이어의 조작/외형을 복구한다.
+        local player = leaveEntity
+        -- 클라이언트에서 로컬 플레이어가 스스로 맵을 떠날 때, 이전 맵 컨텍스트의 leaveEntity 참조가 이미 무효화되어 전달되는 경우가 있으므로, 로컬 플레이어가 이 맵을 벗어난 상태라면 그 플레이어를 복구 대상으로 삼는다.
+        if not isvalid(player) then
+            local localPlayer = _UserService.LocalPlayer
+            if isvalid(localPlayer) and localPlayer.CurrentMap ~= self.Entity then
+                player = localPlayer
+            end
+        end
+        -- 이동해 들어간 목적지 맵도 PlayerDisableComponent를 가지면 복구하지 않는다.
+        -- (목적지의 비활성화(OnBeginPlay)와 출발지의 복구(OnMapLeave) 실행 순서 경쟁으로,
+        --  복구가 나중에 실행되면 방금 비활성화한 플레이어가 다시 활성화되는 문제를 방지)
+        if isvalid(player) and isvalid(player.CurrentMap) and player.CurrentMap ~= self.Entity then
+            local destDisable = player.CurrentMap:GetComponent("script.PlayerDisableComponent")
+            if isvalid(destDisable) then
+                return
+            end
+        end
+        self:ApplyPlayerState(player, true)
+    end
+
+    method void ApplyPlayerState(Entity player, boolean activate)
+        -- 기본 플레이어의 조작/외형 컴포넌트를 켜고 끈다. 플레이어가 아니면 아무것도 하지 않는다.
+        if not isvalid(player) then return end
+        if player.PlayerComponent == nil then return end
+
+        log("[MapPlayerDisable] " .. player.Name .. " activate=" .. tostring(activate) .. " server=" .. tostring(self:IsServer()))
+
+        if self.BlockControl then
+            self:SetEnable(player, "PlayerControllerComponent", activate)
+            -- 비활성화할 때는 잔여 이동 입력으로 미끄러지지 않도록 즉시 정지
+            if not activate then
+                local move = player.MovementComponent
+                if isvalid(move) then move:Stop() end
+            end
+        end
+
+        if self.HideAvatar then
+            self:SetEnable(player, "AvatarRendererComponent", activate)
+            self:SetEnable(player, "AvatarStateAnimationComponent", activate)
+            self:SetEnable(player, "NameTagComponent", activate)
+            self:SetEnable(player, "ChatBalloonComponent", activate)
+            -- 발밑 그림자는 플레이어 하위의 'Shadow' 자식 엔티티가 그리며, 위 렌더러 Enable로는 꺼지지 않음.
+            -- 플레이어 루트의 Visible은 스폰 마무리 단계에서 다시 true로 덮어써져 효과가 없으므로, Shadow 자식의 Visible을 직접 제어
+            self:SetChildVisible(player, "Shadow", activate)
+        end
+    end
+
+    method void SetChildVisible(Entity player, string childName, boolean visible)
+        -- 이름으로 자식 엔티티를 찾아 Visible을 안전하게 변경. 아직 생성 전이면 아무것도 하지 않음
+        local child = player:GetChildByName(childName)
+        if isvalid(child) then
+            child.Visible = visible
+        end
+    end
+
+    method void SetEnable(Entity entity, string componentName, boolean enable)
+        -- 엔티티가 해당 네이티브 컴포넌트를 가지고 있을 때만 안전하게 Enable을 변경
+        local comp = entity:GetComponent(componentName)
+        if isvalid(comp) then
+            comp.Enable = enable
+        end
+    end
+end
