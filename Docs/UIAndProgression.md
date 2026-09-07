@@ -8,7 +8,7 @@
 
 대화 종료와 시나리오 완료를 진행에 연결하고, [TutorialUILogic](../Source/RootDesk/MyDesk/Tutorial/TutorialUILogic.mlua)에서 안내를 표시합니다. 이벤트 구독과 해제는 시작, 종료 수명주기에 맞춰 처리했습니다.
 
-`TutorialManager.BuildRegistry`에서 정의를 준비하고 `EvaluateTriggers`, `MeetsCondition`에서 현재 진행과 맵 조건을 확인합니다. `StartTrigger`에서 시작한 대화의 종료는 `OnDialogClosed`, 시나리오 종료는 `OnScenarioFinished`에서 받아 완료 처리로 연결합니다. `OnEndPlay`와 `DisconnectDialogClosed`에서 구독을 해제합니다. [ProgressChangedEvent](../Source/RootDesk/MyDesk/Progress/ProgressChangedEvent.mlua), [DialogClosedEvent](../Source/RootDesk/MyDesk/Dialog/DialogClosedEvent.mlua), [UIVisibilityChangedEvent](../Source/RootDesk/MyDesk/UI/UIVisibilityChangedEvent.mlua)를 함께 수록해 콜백의 전달 데이터를 확인할 수 있게 했습니다.
+`TutorialManager.BuildRegistry`에서 정의를 준비하고 `EvaluateTriggers`, `MeetsCondition`에서 현재 진행과 맵 조건을 확인합니다. `StartTrigger`에서 시작한 대화의 종료는 `OnDialogClosed`, 시나리오 종료는 `OnScenarioFinished`에서 받아 완료 처리로 연결합니다. `OnEndPlay`와 `DisconnectDialogClosed`에서 구독을 해제합니다. [ProgressChangedEvent](../Source/RootDesk/MyDesk/Progress/ProgressChangedEvent.mlua), [DialogClosedEvent](../Source/RootDesk/MyDesk/Dialog/DialogClosedEvent.mlua), [UIVisibilityChangedEvent](../Source/RootDesk/MyDesk/UI/UIVisibilityChangedEvent.mlua)는 콜백으로 전달하는 이벤트 데이터입니다.
 
 ## 스케줄과 정산 화면
 
@@ -25,4 +25,4 @@
 | 전환과 안내 화면 | [LoadingUILogic](../Source/RootDesk/MyDesk/UI/LoadingUILogic.mlua), [ScreenEffectUILogic](../Source/RootDesk/MyDesk/UI/ScreenEffectUILogic.mlua), [UIToast](../Source/RootDesk/MyDesk/UI/UIToast.mlua) |
 | 소리와 표현 보조 | [SoundManager](../Source/RootDesk/MyDesk/Sound/SoundManager.mlua), [EntityFadeComponent](../Source/RootDesk/MyDesk/Utils/EntityFadeComponent.mlua) |
 
-Actor, Item, Shop, Progress 등 공동 모듈도 수정과 연결에 사용한 파일을 수록했습니다. 이 파일들의 존재를 캐릭터, 아이템 또는 상점 시스템 전체의 단독 개발로 설명하지 않습니다. 구체적인 파일별 작성 이력은 [소스 출처](SourceMap.md)에서 확인할 수 있습니다.
+Actor, Item, Shop, Progress는 공동 모듈이며 수정과 연동을 담당했습니다. [파일별 작성 이력](SourceMap.md)

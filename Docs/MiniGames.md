@@ -20,8 +20,6 @@
 
 [MiniGameManager](../Source/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua)에서 사용자별 세션과 준비 타임아웃, 종료를 관리하고, [MiniGamePlayLogic](../Source/RootDesk/MyDesk/MiniGame/MiniGamePlayLogic.mlua)이 규칙 실행을 연결합니다. 일반 이벤트와 공연 중 실행은 [MiniGameUIRouter](../Source/RootDesk/MyDesk/MiniGame/MiniGameUIRouter.mlua)를 통해 각각의 화면으로 연결했습니다.
 
-화면 피드백도 함께 수록했습니다.
-
 - [MiniGameUILogic](../Source/RootDesk/MyDesk/MiniGame/MiniGameUILogic.mlua), [MiniGamePerformanceUILogic](../Source/RootDesk/MyDesk/MiniGame/MiniGamePerformanceUILogic.mlua): 일반 화면과 공연 화면
 - [MiniGameCommandFlow](../Source/RootDesk/MyDesk/MiniGame/MiniGameCommandFlow.mlua), [MiniGameCommandBox](../Source/RootDesk/MyDesk/MiniGame/MiniGameCommandBox.mlua): 방향 입력 순서와 피드백
 - [DragIndicator](../Source/RootDesk/MyDesk/MiniGame/DragIndicator.mlua): 드래그 표시

@@ -2,15 +2,15 @@
 
 [프로젝트](../README.md) / [전체 코드](CodeIndex.md)
 
-원본 `D:/SecondBigbang`의 커밋 `83faf19ae75873e211ba1a81aa217e00e8e4321f`에서 발췌했습니다. 공개 파일의 `Source/` 뒤 경로가 원본 저장소의 상대 경로입니다. 각 파일의 LF 정규화 SHA-256과 기준 커밋은 [파일별 출처 목록](SourceManifest.json)에 기록했습니다.
+원본 `D:/SecondBigbang`의 커밋 `83faf19ae75873e211ba1a81aa217e00e8e4321f`에서 발췌했습니다. 파일의 `Source/` 뒤 경로가 원본 저장소의 상대 경로입니다. 각 파일의 LF 정규화 SHA-256과 기준 커밋은 [파일별 출처 목록](SourceManifest.json)에 기록했습니다.
 
-NPC, 미니게임, 공연과 UI의 담당 구현에 공동 모듈의 수정 및 연동 코드, 읽기에 필요한 보조 타입을 함께 수록했습니다. Git 작성자 목록은 수정 이력이며 설계 기여나 단독 저작권의 판정이 아닙니다. 도구의 웹 UI 작성에는 AI 보조를 사용했고 연동 규칙 설계, 검토와 게임 통합을 담당했습니다.
+NPC, 미니게임, 공연과 UI 구현, 공동 모듈의 수정 및 연동을 담당했습니다. 도구의 웹 UI 작성에는 AI 보조를 사용했고 연동 규칙 설계, 검토와 게임 통합을 담당했습니다.
 
-게임 에셋, 플랫폼 SDK, DataSet 원본 CSV와 에디터 엔티티 설정은 포함하지 않았습니다. 발췌본만으로 게임을 실행할 수 없으며, 공동 시스템의 저장소와 캐릭터 동작 등은 전체 실행 의존성을 재현하기 위한 범위가 아닙니다. 진행 상태와 이벤트 타입, 공통 데이터 조회, CSV 저장 서버는 코드 흐름 확인에 필요한 의존 코드로 포함했습니다.
+게임 에셋, 플랫폼 SDK, DataSet 원본 CSV와 에디터 엔티티 설정이 없는 소스 발췌본으로, 단독 실행은 지원하지 않습니다.
 
-기준 커밋에는 서비스 미배포 변경이 포함됩니다. 원본 개발 이력과 이 저장소의 포트폴리오 정리 커밋을 구분합니다.
+기준 커밋에는 서비스 미배포 변경이 포함됩니다.
 
-| 공개 파일 | Git 작성자 | 수록 범위 |
+| 파일 | Git 작성자 | 기여 구분 |
 | --- | --- | --- |
 | [RootDesk/MyDesk/Activity/ActivityHandler.mlua](../Source/RootDesk/MyDesk/Activity/ActivityHandler.mlua) | HGM2695, Jinwon | 담당 구현 또는 공동 수정과 연동 |
 | [RootDesk/MyDesk/Activity/ActivityManager.mlua](../Source/RootDesk/MyDesk/Activity/ActivityManager.mlua) | HGM2695, Jinwon | 담당 구현 또는 공동 수정과 연동 |
