@@ -3,7 +3,7 @@
 활동과 미니게임으로 캐릭터를 육성하고 최종 공연 목표에 도전하는 아이돌 육성 시뮬레이션입니다. PC와 모바일로 출시한 뒤 사용자 피드백과 실제 플레이에서 확인한 문제를 업데이트에 반영했습니다.
 
 | 구분 | 내용 |
-| --- | --- |
+| :---: | :---: |
 | 개발 | 2026.06~출시 후 개선 중 |
 | 팀 | 5명 |
 | 환경 | MapleStory Worlds, mLua |
@@ -22,7 +22,7 @@
 ## 구현 상세와 코드
 
 | 기능 | 설명 |
-| --- | --- |
+| :---: | :---: |
 | [NPC와 이벤트 진행](Docs/Events.md) | 요청 검증, 세션, 실행과 완료 기록, 맵 이동 |
 | [미니게임](Docs/MiniGames.md) | 입력과 규칙, 세션 수명, PC와 모바일 UI, 최신 추가 기능 |
 | [연출 제작과 다국어](Docs/ToolsAndLocalization.md) | 타임라인 도구, 연출 실행과 결과, 언어 전환 |
@@ -34,7 +34,7 @@
 
 ## 게임 소개 영상
 
-<table width="100%"><tr><td width="15%"></td><td width="70%" align="center">
+<table align="center" width="100%"><tr><td width="15%"></td><td width="70%" align="center">
   <a href="https://www.youtube.com/watch?v=ICh-ejmLbco">
     <img src="https://img.youtube.com/vi/ICh-ejmLbco/hqdefault.jpg" alt="메이플 아이돌 키우기 소개 영상" width="100%">
   </a>
