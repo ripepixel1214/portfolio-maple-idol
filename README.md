@@ -2,10 +2,10 @@
 
 활동과 미니게임으로 캐릭터를 육성하고 최종 공연 목표에 도전하는 아이돌 육성 시뮬레이션입니다. PC와 모바일로 출시한 뒤 사용자 피드백과 실제 플레이에서 확인한 문제를 업데이트에 반영했습니다.
 
-<table align="center">
+<table align="center" width="100%">
   <tr>
     <th>구분</th>
-    <th>내용</th>
+    <th width="100%">내용</th>
   </tr>
   <tr>
     <td>개발</td>
@@ -46,10 +46,10 @@
 
 ## 구현 상세와 코드
 
-<table align="center">
+<table align="center" width="100%">
   <tr>
     <th>기능</th>
-    <th>설명</th>
+    <th width="100%">설명</th>
   </tr>
   <tr>
     <td><a href="Docs/Events.md">NPC와 이벤트 진행</a></td>
@@ -81,10 +81,10 @@
 
 ## 게임 소개 영상
 
-<table align="center" width="100%"><tr><td width="15%"></td><td width="70%" align="center">
+<table align="center" width="100%"><tr><td width="1200" align="center">
   <a href="https://www.youtube.com/watch?v=ICh-ejmLbco">
     <img src="https://img.youtube.com/vi/ICh-ejmLbco/hqdefault.jpg" alt="메이플 아이돌 키우기 소개 영상" width="100%">
   </a>
   <br>
   <sub>메이플 아이돌 키우기 PV</sub>
-</td><td width="15%"></td></tr></table>
+</td></tr></table>

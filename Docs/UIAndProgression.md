@@ -14,7 +14,7 @@
 
 [ScheduleUILogic](../Source/RootDesk/MyDesk/Progress/Schedule/ScheduleUILogic.mlua)의 주간 선택 화면, [ScheduleProgressUILogic](../Source/RootDesk/MyDesk/Progress/Schedule/ScheduleProgressUILogic.mlua)의 진행 표시, [SettlementCardUILogic](../Source/RootDesk/MyDesk/Progress/Schedule/SettlementCardUILogic.mlua)의 정산 표현을 연결했습니다.
 
-[WeeklyPlanData](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklyPlanData.mlua)와 [WeeklySequenceScheduler](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklySequenceScheduler.mlua)는 이 화면 흐름을 따라가기 위한 데이터와 실행 코드입니다. Progress와 Activity에는 팀 공동 구현이 포함되며 초기 UI 작업과 후속 연동 기여를 구분합니다.
+[WeeklyPlanData](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklyPlanData.mlua)와 [WeeklySequenceScheduler](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklySequenceScheduler.mlua)는 주간 계획 데이터와 실행 순서를 관리합니다. Progress와 Activity는 팀 공동 구현이며, 초기 UI 작업과 이후 화면 연동을 담당했습니다.
 
 ## 입력, 대화와 화면 효과
 
