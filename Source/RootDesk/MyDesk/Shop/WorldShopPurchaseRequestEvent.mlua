@@ -1,0 +1,7 @@
+@Event
+script WorldShopPurchaseRequestEvent extends EventType
+
+	property string productId = ""
+	property string status = ""
+
+end

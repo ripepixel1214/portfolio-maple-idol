@@ -9,6 +9,8 @@ script EventExecutor extends Logic
 
 	property any miniGameResultEventHandler = nil
 
+	-- Public API
+
 	@ExecSpace("ServerOnly")
 	method void OnBeginPlay()
 		-- 미니게임 결과 이벤트를 구독해 이벤트 결과 적용 흐름으로 연결합니다.
@@ -159,10 +161,14 @@ script EventExecutor extends Logic
 
 	@ExecSpace("ServerOnly")
 	method boolean StartMiniGameEvent(any tEvent, string characterId, string requesterUserId)
-		-- 이벤트에 연결된 미니게임을 이벤트 컨텍스트로 시작하고 결과 대기 상태를 기록합니다.
+		-- 야시장 로비 승인 또는 일반 이벤트 미니게임의 결과 대기 등록
 		if tEvent.miniGameId == nil or tEvent.miniGameId == "" then
 			log_warning("[EventExecutor] miniGameId is empty eventId=" .. tostring(tEvent.id))
 			return false
+		end
+
+		if _MiniGameManager:IsNightMarketMiniGame(tEvent.miniGameId) then
+			return _MiniGameManager:OpenEventNightMarketLobby(tEvent, requesterUserId)
 		end
 
 		local tStartOptions = MiniGameStartOptions()
@@ -171,7 +177,7 @@ script EventExecutor extends Logic
 		tStartOptions.contextType = _EMiniGameContextType.Event
 		tStartOptions.contextId = tEvent.id
 		tStartOptions.presentationActorId = characterId or ""
-		local startedSessionId = _MiniGameManager:CreateMiniGameSession(tStartOptions)
+		local startedSessionId = _MiniGameContentService:Start(tStartOptions, nil)
 		if startedSessionId == nil or startedSessionId == "" then
 			return false
 		end
@@ -312,6 +318,8 @@ script EventExecutor extends Logic
 		self:SendEvent(eventExecutionFailedEvent)
 	end
 
+	-- Private Methods
+
 	@ExecSpace("Client")
 	method void OpenEventResultPopup(string eventId, string eventResultId)
 		-- 이벤트 결과 설명이 있으면 범용 결과 팝업으로 표시합니다.
@@ -340,8 +348,8 @@ script EventExecutor extends Logic
 		end
 
 		local title = "이벤트 결과"
-		if _LocalizationLogic ~= nil then
-			title = _LocalizationLogic:GetText(self.UI_EVENT_RESULT_TITLE_KEY, title)
+		if _LocaleTextUtil ~= nil then
+			title = _LocaleTextUtil:GetText(self.UI_EVENT_RESULT_TITLE_KEY)
 		end
 		_ResultPopupUILogic:OpenWithTitle(title, message, nil)
 	end

@@ -1,0 +1,92 @@
+---@description "럭키 큐브 클라이언트 입력 상태 관리"
+@Struct
+script MiniGameLuckyCubeModel
+	property string TEXT_UI_LUCKY_CUBE_DEBIT_FAILED = "ui.lucky_cube.debit_failed"
+	property string sessionId = ""
+	property any tState = nil
+	property boolean requestPending = false
+	property string message = ""
+	property any settlementRule = nil
+
+	method void OpenLobby(integer coinBalance, boolean debugMode, integer mesoBalance)
+		-- 초기 두 재화 잔액으로 로비 표시 상태 구성
+		local preset = _MiniGameTable:FindMiniGame(_MiniGameLuckyCubeRule.MINI_GAME_ID)
+		self.settlementRule = preset.settlementRule
+		self.tState = MiniGameLuckyCubeState()
+		self.tState.stage = _MiniGameLuckyCubeRule.STAGE_LOBBY
+		self.tState.isDebug = debugMode
+		self.requestPending = false
+		self:UpdateLobbyBalances(mesoBalance, coinBalance)
+	end
+
+	method void UpdateLobbyBalances(integer mesoBalance, integer coinBalance)
+		-- 잔액 동기화 시 입장 재화와 선택 가능한 판돈을 함께 갱신
+		if self.tState.stage ~= _MiniGameLuckyCubeRule.STAGE_LOBBY or self.requestPending then return end
+		local entry = self.settlementRule
+		self.tState.mesoBalance = math.max(0, mesoBalance)
+		self.tState.coinBalance = math.max(0, coinBalance)
+		self.tState.coinChange = 0
+		self.tState.entryCurrency = self.tState.mesoBalance >= entry.entryMeso
+			and _MiniGameSettlementRule.CURRENCY_MESO or _MiniGameSettlementRule.CURRENCY_NIGHT_MARKET_COIN
+		local maxUnits = _MiniGameSettlementRule:GetBetUnitCount(entry, self:GetAffordableBet())
+		local units = _MiniGameSettlementRule:GetBetUnitsFromAmount(entry, self.tState.bet)
+		self.tState.bet = _MiniGameSettlementRule:GetBetAmountFromUnits(entry,
+			math.min(maxUnits, math.max(1, units)))
+		self:UpdateEntryAmount()
+	end
+
+	method integer GetAffordableBet()
+		-- 입장 재화 잔액을 실제 코인 판돈 한도로 변환
+		local entry = self.settlementRule
+		if self.tState.entryCurrency == _MiniGameSettlementRule.CURRENCY_MESO then
+			return math.floor(self.tState.mesoBalance * entry.entryCoin / entry.entryMeso)
+		end
+		return self.tState.coinBalance
+	end
+
+	method void UpdateEntryAmount()
+		-- 코인 판돈에 대응하는 입장 비용 표시
+		local entry = self.settlementRule
+		self.tState.entryAmount = self.tState.entryCurrency == _MiniGameSettlementRule.CURRENCY_MESO
+			and self.tState.bet * entry.entryMeso / entry.entryCoin or self.tState.bet
+	end
+
+	method void SetBet(integer units)
+		-- 공통 정산 규칙으로 슬라이더 단위를 판돈으로 변환하고 잔액과 상한 적용
+		if self.tState.stage ~= _MiniGameLuckyCubeRule.STAGE_LOBBY or self.requestPending then return end
+		local maxUnits = _MiniGameSettlementRule:GetBetUnitCount(self.settlementRule, self:GetAffordableBet())
+		local selectedUnits = math.max(0, math.min(maxUnits, math.max(1, units)))
+		self.tState.bet = _MiniGameSettlementRule:GetBetAmountFromUnits(self.settlementRule, selectedUnits)
+		self:UpdateEntryAmount()
+	end
+
+	method boolean TryChoose(string choice)
+		-- 연타와 서버 응답 대기 중 입력 차단
+		local rule = _MiniGameLuckyCubeRule
+		if self.requestPending or rule:FindChoice(choice) == nil then return false end
+		if self.tState.stage ~= rule.STAGE_LOBBY and self.tState.stage ~= rule.STAGE_READY
+			and self.tState.stage ~= rule.STAGE_DECISION then return false end
+		if not _MiniGameSettlementRule:IsValidAmount(self.settlementRule, self.tState.bet) then return false end
+		if self.tState.stage ~= rule.STAGE_DECISION and self.tState.bet > self:GetAffordableBet() then return false end
+		self.requestPending = true
+		self.message = ""
+		return true
+	end
+
+	method boolean ApplyState(string sessionId, any tState)
+		-- 이전 세션 또는 역순 응답 폐기
+		if self.sessionId ~= sessionId or tState.revision <= self.tState.revision then return false end
+		self.tState = tState
+		self.requestPending = false
+		if tState.stage == _MiniGameLuckyCubeRule.STAGE_READY then
+			self.message = self.TEXT_UI_LUCKY_CUBE_DEBIT_FAILED
+		end
+		return true
+	end
+
+	method boolean CanClose()
+		local stage = self.tState.stage
+		local rule = _MiniGameLuckyCubeRule
+		return not self.requestPending and (stage == rule.STAGE_LOBBY or stage == rule.STAGE_RESULT or stage == rule.STAGE_READY)
+	end
+end

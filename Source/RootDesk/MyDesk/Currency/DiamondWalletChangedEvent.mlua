@@ -1,0 +1,8 @@
+@Event
+script DiamondWalletChangedEvent extends EventType
+
+	property boolean isLoaded = false
+	property number balance = 0
+	property number revision = 0
+
+end

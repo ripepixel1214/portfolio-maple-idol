@@ -1,0 +1,72 @@
+---@description "미니게임 입력 시각과 판정 좌표의 RPC 기록"
+@Struct
+script MiniGameInputProof
+
+	property integer VERSION = 1
+	property integer MAX_SAMPLES = 2048
+	property number MAX_SECONDS = 300
+	property number elapsed = 0
+	property table samples = {}
+	property boolean overflow = false
+
+	method boolean SupportsGameKind(string gameKind)
+		-- 입력 기록을 재검산하는 게임 유형 확인
+		return gameKind == _EMiniGameKind.RAPID_PRESS_COUNT
+			or gameKind == _EMiniGameKind.TIMING_ACCURACY
+			or gameKind == _EMiniGameKind.GAUGE_MAINTENANCE
+			or gameKind == _EMiniGameKind.SHAPE_TRACE
+	end
+
+	method void AddSample(number sampleTime, number x, number y)
+		-- 입력 원본을 제한된 크기로 보관
+		if #self.samples >= self.MAX_SAMPLES then
+			self.overflow = true
+			return
+		end
+		table.insert(self.samples, {time = sampleTime, x = x, y = y})
+	end
+
+	method any ToPlainTable()
+		-- 런타임 참조 없이 입력 기록 복사
+		local copied = {}
+		for i, sample in ipairs(self.samples) do
+			copied[i] = {time = sample.time, x = sample.x, y = sample.y}
+		end
+		return {version = self.VERSION, elapsed = self.elapsed, samples = copied, overflow = self.overflow}
+	end
+
+	method boolean IsFiniteNumber(any value)
+		-- 문자열 변환 없이 유한한 숫자 여부 확인
+		return type(value) == "number" and value == value and value > -math.huge and value < math.huge
+	end
+
+	method any FromPlainTable(any tPlainProof)
+		-- 잘못된 필드와 희소 배열을 거절한 뒤 새 기록으로 복원
+		if type(tPlainProof) ~= "table" or tPlainProof.version ~= self.VERSION
+			or tPlainProof.overflow ~= false or type(tPlainProof.samples) ~= "table"
+			or not self:IsFiniteNumber(tPlainProof.elapsed)
+			or tPlainProof.elapsed < 0 or tPlainProof.elapsed > self.MAX_SECONDS then return nil end
+		local count = 0
+		for key, sample in pairs(tPlainProof.samples) do
+			count += 1
+			if count > self.MAX_SAMPLES or not self:IsFiniteNumber(key)
+				or key < 1 or key > self.MAX_SAMPLES or key ~= math.floor(key)
+				or type(sample) ~= "table" then return nil end
+		end
+		local copied = {}
+		local lastTime = 0
+		for i = 1, count do
+			local sample = tPlainProof.samples[i]
+			if type(sample) ~= "table" or not self:IsFiniteNumber(sample.time)
+				or not self:IsFiniteNumber(sample.x) or not self:IsFiniteNumber(sample.y)
+				or sample.time < lastTime or sample.time > tPlainProof.elapsed then return nil end
+			copied[i] = {time = sample.time, x = sample.x, y = sample.y}
+			lastTime = sample.time
+		end
+		self.elapsed = tPlainProof.elapsed
+		self.samples = copied
+		self.overflow = false
+		return self
+	end
+
+end

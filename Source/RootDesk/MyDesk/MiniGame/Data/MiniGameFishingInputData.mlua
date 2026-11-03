@@ -1,0 +1,21 @@
+---@description "낚시 입력 의도와 RPC 전달 데이터"
+@Struct
+script MiniGameFishingInputData
+	property string action = ""
+	property number x = 550
+	property integer sequence = 0
+
+	method any ToPlainTable()
+		-- RPC 경계에 원시 타입 입력만 전달
+		return {action = self.action, x = self.x, sequence = self.sequence}
+	end
+
+	method any FromPlainTable(any tPlainInput)
+		-- 수신 입력 복원, 서버의 원본 타입 및 범위 검증과 별개
+		if type(tPlainInput) ~= "table" then return self end
+		self.action = type(tPlainInput.action) == "string" and tPlainInput.action or ""
+		self.x = type(tPlainInput.x) == "number" and tPlainInput.x or 550
+		self.sequence = math.floor(tonumber(tPlainInput.sequence) or 0)
+		return self
+	end
+end

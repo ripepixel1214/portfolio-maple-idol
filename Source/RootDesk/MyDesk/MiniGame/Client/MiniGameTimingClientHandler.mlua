@@ -1,0 +1,45 @@
+---@description "클라이언트 측 타이밍 미니게임 처리 로직"
+@Logic
+script MiniGameTimingClientHandler extends Logic
+	property string TEXT_UI_MINIGAME_TIMING_GOAL = "ui.minigame.timing_goal"
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method any CreateBehavior()
+		-- 게임별 클라이언트 처리와 필수 View 기능 구성
+		local tBehavior = MiniGameClientBehavior()
+		local caps = _MiniGameViewRegistry
+		tBehavior.requiredCapabilities = {caps.CAP_STAGE, caps.CAP_HUD, caps.CAP_RESULT, caps.CAP_TIMING}
+		tBehavior.configureInput = function(presenter, config)
+			local goal = presenter.tModel:GetGoalCount()
+			if goal > 0 then config.maxAttempts = goal * 2 end
+		end
+		tBehavior.buildInstruction = function(presenter, instruction)
+			local goal = presenter.tModel:GetGoalCount()
+			if goal > 0 then return _LocaleTextUtil:Format(self.TEXT_UI_MINIGAME_TIMING_GOAL, instruction, goal, nil, "") end
+			return instruction
+		end
+		tBehavior.prepareView = function(presenter, tContext)
+			local view = presenter:GetViewCapability(caps.CAP_TIMING)
+			local tModel = presenter.tModel
+			view:SetupTiming((tModel.preset.inputConfig or {}).timings, tModel.timeDuration)
+			local maxAttempts = tModel:GetGoalCount() * 2
+			if maxAttempts > 0 then view:UpdateTimingAttempts(maxAttempts, maxAttempts) end
+		end
+		tBehavior.afterInput = function(presenter, event)
+			local view = presenter:GetViewCapability(caps.CAP_TIMING)
+			if event.action == _EMiniGameInputAction.Hit then
+				view:PlayTimingHit()
+			elseif event.action == _EMiniGameInputAction.Miss then
+				view:PlayTimingMiss()
+			end
+			if event.maxAttempts > 0 then view:UpdateTimingAttempts(event.attemptsRemaining, event.maxAttempts) end
+		end
+		tBehavior.updateView = function(presenter)
+			presenter:GetViewCapability(caps.CAP_TIMING):UpdateTimingCursor(presenter.tModel.elapsed, presenter.tModel.timeDuration)
+		end
+		return tBehavior
+	end
+
+end

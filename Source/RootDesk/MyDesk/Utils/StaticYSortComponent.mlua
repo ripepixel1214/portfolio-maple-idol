@@ -16,12 +16,17 @@ script StaticYSortComponent extends Component
 	method void OnBeginPlay()
 		-- 정적 오브젝트이므로 시작 시 1회만 OrderInLayer를 계산·적용한다. (@Sync로 전 클라 전파)
 		local order = self:ComputeOrder(self:GetSortY())
+		local sortingLayer = _YSortLayerLogic:ResolveSortingLayer(self.Entity.CurrentMap)
 
 		if self.IsCompositeEntity then
 			-- 복합: 그룹을 하나의 발밑선으로 취급, 자식 전체에 같은 order를 적용한다.
 			for _, child in ipairs(self.Entity.Children:ToTable()) do
 				local r = child.SpriteRendererComponent
 				if isvalid(r) then
+					if sortingLayer ~= "" then
+						r.IgnoreMapLayerCheck = true
+						r.SortingLayer = sortingLayer
+					end
 					r.OrderInLayer = order
 				end
 			end
@@ -34,12 +39,16 @@ script StaticYSortComponent extends Component
 			log_warning("[StaticYSort] SpriteRendererComponent 없음: " .. self.Entity.Name)
 			return
 		end
+		if sortingLayer ~= "" then
+			renderer.IgnoreMapLayerCheck = true
+			renderer.SortingLayer = sortingLayer
+		end
 		renderer.OrderInLayer = order
 	end
 
 	method number GetSortY()
 		-- 정렬 기준 Y를 반환한다. SortPoint가 유효하면 그 월드 Y를, 아니면 자기 월드 Y를 사용한다.
-		if isvalid(self.SortPoint) then
+		if isvalid(self.SortPoint) and self.SortPoint.CurrentMap == self.Entity.CurrentMap then
 			return self.SortPoint.TransformComponent.WorldPosition.y
 		end
 		return self.Entity.TransformComponent.WorldPosition.y

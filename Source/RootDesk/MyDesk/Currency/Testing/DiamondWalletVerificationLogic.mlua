@@ -1,0 +1,227 @@
+@Logic
+script DiamondWalletVerificationLogic extends Logic
+
+	property string FIXTURE_NAME = "fixture"
+	property string FIXTURE_PRODUCT_ID = "fixture_product"
+	property string MODE_REJECT_WRITE = "reject_write"
+	property string MODE_TIMEOUT_BEFORE = "timeout_before"
+	property string MODE_TIMEOUT_AFTER = "timeout_after"
+	property string MODE_CONCURRENT_PURCHASE = "concurrent_purchase"
+	property string FIRST_PURCHASE_ID = "purchase_1"
+	property string SPEND_OPERATION_ID = "spend"
+	property string PENDING_PURCHASE_ID = "journal_failure"
+	property string CORRUPT_VALUE = "corrupt"
+
+	@ExecSpace("ServerOnly")
+	method boolean RunStorageScenarios()
+		-- 메이커에서만 가짜 저장소로 장애·중복·경합 시나리오 실행
+		if Environment:IsMakerPlay() == false then return false end
+		local storageLogic = _DiamondWalletStorage
+		local passed = 0
+		local check = function(condition, label)
+			if condition == false then error("[CurrencyVerify] FAIL " .. label) end
+			passed = passed + 1
+			log("[CurrencyVerify] PASS " .. label)
+		end
+		local makeStorage = function(balance)
+			local tWallet = DiamondWalletData()
+			tWallet.balance = balance
+			tWallet.migratedLegacyBalance = balance
+			tWallet.migrationCompleted = true
+			tWallet.initializationId = self.FIXTURE_NAME
+			local fake = { UserId = self.FIXTURE_NAME, values = {}, mode = "", rejectJournal = false, peakWalletBytes = 0 }
+			fake.values[storageLogic.WALLET_KEY] = _HttpService:JSONEncode(tWallet:ToPlainTable())
+			fake.GetAndWait = function(db, key) return 0, db.values[key] end
+			fake.SetAndWait = function(db, key, value)
+				if key == storageLogic.WALLET_KEY and db.mode == self.MODE_TIMEOUT_BEFORE then
+					db.mode = ""; return _DataStorageErrorUtil.TimedOut
+				end
+				if db.rejectJournal and key ~= storageLogic.WALLET_KEY and key ~= _ProgressStorage.ProgressStorageKey then
+					return _DataStorageErrorUtil.ResourceExhausted
+				end
+				db.values[key] = value
+				if key == storageLogic.WALLET_KEY and db.mode == self.MODE_TIMEOUT_AFTER then
+					db.mode = ""; return _DataStorageErrorUtil.TimedOut
+				end
+				return 0
+			end
+			fake.UpdateAndWait = function(db, key, expected, value)
+				if db.mode == self.MODE_REJECT_WRITE then db.mode = ""; return _DataStorageErrorUtil.ResourceExhausted, db.values[key] end
+				if db.mode == self.MODE_TIMEOUT_BEFORE then db.mode = ""; return _DataStorageErrorUtil.TimedOut, nil end
+				if db.values[key] ~= expected then return storageLogic.UPDATE_CONFLICT_CODE, db.values[key] end
+				if db.mode == self.MODE_CONCURRENT_PURCHASE then
+					db.mode = ""
+					local tOther = DiamondWalletOperationData()
+					tOther.operationId = "other_instance"
+					tOther.kind = storageLogic.KIND_GAME
+					tOther.reason = self.FIXTURE_NAME
+					tOther.credit = 25
+					storageLogic:ApplyOperation(db, tOther)
+					return storageLogic.UPDATE_CONFLICT_CODE, db.values[key]
+				end
+				db.values[key] = value
+				if key == storageLogic.WALLET_KEY then db.peakWalletBytes = math.max(db.peakWalletBytes, string.len(value)) end
+				if db.mode == self.MODE_TIMEOUT_AFTER then db.mode = ""; return _DataStorageErrorUtil.TimedOut, nil end
+				return 0, value
+			end
+			fake.SetByInfoAndWait = function(db, keyInfo, value) return db:SetAndWait(keyInfo.Key, value) end
+			return fake
+		end
+		local operation = function(id, debit, credit, purchase)
+			local tOperation = DiamondWalletOperationData()
+			tOperation.operationId = id
+			tOperation.kind = purchase and storageLogic.KIND_PURCHASE or storageLogic.KIND_GAME
+			tOperation.reason = self.FIXTURE_NAME
+			tOperation.debit = debit
+			tOperation.credit = credit
+			if purchase then tOperation.productId = self.FIXTURE_PRODUCT_ID; tOperation.orderNumber = 12 end
+			return tOperation
+		end
+		local balance = function(db) return storageLogic:ReadWallet(db).tWallet.balance end
+		local db = makeStorage(0)
+		local tFirst = storageLogic:ApplyOperation(db, operation(self.FIRST_PURCHASE_ID, 0, 100, true))
+		check(tFirst.success and balance(db) == 100, "purchase grant durable")
+		local tDuplicate = storageLogic:ApplyOperation(db, operation(self.FIRST_PURCHASE_ID, 0, 100, true))
+		check(tDuplicate.success and tDuplicate.alreadyApplied and balance(db) == 100, "duplicate purchase no extra grant")
+		check(storageLogic:ApplyOperation(db, operation("purchase_2", 0, 50, true)).success and balance(db) == 150, "repeat product unique purchase")
+		check(storageLogic:ApplyOperation(db, operation("overspend", 151, 0, false)).success == false and balance(db) == 150, "insufficient balance")
+		check(storageLogic:ApplyOperation(db, operation("negative", -1, 10, false)).success == false, "negative debit rejected")
+		check(storageLogic:ApplyOperation(db, operation("fraction", 0, 1.5, false)).success == false, "fraction credit rejected")
+		check(storageLogic:ApplyOperation(db, operation(self.SPEND_OPERATION_ID, 40, 0, false)).success and balance(db) == 110, "game spend durable")
+		check(storageLogic:ApplyOperation(db, operation(self.SPEND_OPERATION_ID, 40, 0, false)).alreadyApplied and balance(db) == 110, "game spend retry idempotent")
+		check(storageLogic:ApplyOperation(db, operation(self.SPEND_OPERATION_ID, 41, 0, false)).success == false and balance(db) == 110, "same id different payload rejected")
+		db.mode = self.MODE_REJECT_WRITE
+		check(storageLogic:ApplyOperation(db, operation("write_failure", 0, 20, true)).success == false and balance(db) == 110, "uncommitted write not acknowledged")
+		db.mode = self.MODE_TIMEOUT_BEFORE
+		check(storageLogic:ApplyOperation(db, operation("timeout_before", 0, 20, true)).success and balance(db) == 130, "timeout before commit retry")
+		db.mode = self.MODE_TIMEOUT_AFTER
+		check(storageLogic:ApplyOperation(db, operation("timeout_after", 0, 20, true)).success and balance(db) == 150, "timeout after commit no duplicate")
+		db.mode = self.MODE_CONCURRENT_PURCHASE
+		check(storageLogic:ApplyOperation(db, operation("racing_purchase", 0, 20, true)).success and balance(db) == 195, "other instance CAS conflict preserves both grants")
+		db.rejectJournal = true
+		check(storageLogic:ApplyOperation(db, operation(self.PENDING_PURCHASE_ID, 0, 20, true)).success
+			and balance(db) == 215 and storageLogic:ReadWallet(db).tWallet.tPendingOperation ~= nil, "journal failure retains atomic receipt")
+		check(storageLogic:ApplyOperation(db, operation(self.PENDING_PURCHASE_ID, 0, 20, true)).success and balance(db) == 215, "pending receipt duplicate acknowledged")
+		check(storageLogic:ApplyOperation(db, operation("blocked_by_journal", 0, 20, true)).success == false
+			and balance(db) == 215, "next transaction waits for journal")
+		db.rejectJournal = false
+		check(storageLogic:ApplyOperation(db, operation("after_journal_recovery", 0, 20, true)).success
+			and balance(db) == 235, "pending journal recovery")
+		check(storageLogic:ApplyOperation(db, operation(self.FIRST_PURCHASE_ID, 0, 0, true)).success and balance(db) == 235,
+			"previous receipt acknowledged without catalog")
+		local tMismatched = operation(self.FIRST_PURCHASE_ID, 0, 100, true)
+		tMismatched.productId = "other_product"
+		check(storageLogic:ApplyOperation(db, tMismatched).success == false and balance(db) == 235, "purchase identity mismatch")
+		local corrupt = makeStorage(0)
+		corrupt.values[storageLogic.WALLET_KEY] = self.CORRUPT_VALUE
+		check(storageLogic:ApplyOperation(corrupt, operation(self.CORRUPT_VALUE, 0, 20, true)).success == false
+			and corrupt.values[storageLogic.WALLET_KEY] == self.CORRUPT_VALUE, "corrupt wallet preserved")
+		local legacy = makeStorage(0)
+		legacy.values[storageLogic.WALLET_KEY] = nil
+		local tLegacyData = _ProgressStorage:CreateDefaultProgress():ToPlainTable()
+		tLegacyData.saveVersion = 7
+		tLegacyData.diamond = 75
+		legacy.values[_ProgressStorage.ProgressStorageKey] = _UtilLogic:TableToString(tLegacyData)
+		check(storageLogic:CreateWalletUnderInitializationLock(legacy).success and balance(legacy) == 75, "legacy diamond migrated once")
+		check(storageLogic:CreateWalletUnderInitializationLock(legacy).success and balance(legacy) == 75, "migration retry no extra credit")
+		legacy.values[storageLogic.WALLET_KEY] = nil
+		check(storageLogic:CreateWalletUnderInitializationLock(legacy).success == false
+			and legacy.values[storageLogic.WALLET_KEY] == nil, "missing wallet after marker not recreated")
+		local fresh = makeStorage(0)
+		fresh.values[storageLogic.WALLET_KEY] = nil
+		check(storageLogic:CreateWalletUnderInitializationLock(fresh).success and balance(fresh) == 0, "new user zero wallet")
+		local interrupted = makeStorage(0)
+		interrupted.values[storageLogic.WALLET_KEY] = nil
+		interrupted.mode = self.MODE_TIMEOUT_BEFORE
+		check(storageLogic:CreateWalletUnderInitializationLock(interrupted).success == false,
+			"initialization timeout before write not assumed successful")
+		check(storageLogic:CreateWalletUnderInitializationLock(interrupted).success == false
+			and interrupted.values[storageLogic.WALLET_KEY] == nil, "uncertain initialization Set never replayed")
+		local completed = makeStorage(0)
+		completed.values[storageLogic.WALLET_KEY] = nil
+		completed.mode = self.MODE_TIMEOUT_AFTER
+		check(storageLogic:CreateWalletUnderInitializationLock(completed).success and balance(completed) == 0,
+			"initialization timeout after write recovered by read")
+		local large = makeStorage(storageLogic.MAX_SAFE_AMOUNT - 1)
+		check(storageLogic:ApplyOperation(large, operation("overflow", 1, 3, false)).success == false, "balance overflow rejected")
+		local history = makeStorage(0)
+		for i = 1, 80 do
+			local tResult = storageLogic:ApplyOperation(history, operation("history_" .. tostring(i), 0, 1, true))
+			if tResult.success == false then error("history transaction failed") end
+		end
+		check(balance(history) == 80 and history.peakWalletBytes < 4000, "purchase history does not grow wallet record")
+		local resetKeys = _UserDataManager:GetResetStorageKeys()
+		local protectsWallet = true
+		for _, key in ipairs(resetKeys) do
+			if key == storageLogic.WALLET_KEY or string.sub(key, 1, string.len(storageLogic.PURCHASE_RECORD_PREFIX))
+				== storageLogic.PURCHASE_RECORD_PREFIX then protectsWallet = false end
+		end
+		check(protectsWallet, "game reset excludes paid wallet and receipts")
+		check(_ProgressStorage:CreateProgressString(_ProgressStorage:CreateDefaultProgress()):find("diamond") == nil,
+			"progress serialization excludes diamond")
+		log("[CurrencyVerify] storage scenarios passed=" .. tostring(passed))
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RunNativeStorageScenario()
+		-- 실제 메이커 저장소의 새 테스트 키만 사용하고 해당 키만 배치 삭제
+		if Environment:IsMakerPlay() == false then return false end
+		local userId = _ProgressManager.currentUserId
+		if userId == nil or userId == "" then return false end
+		local native = _DataStorageService:GetUserDataStorage(userId)
+		local prefix = "DWVerify_" .. string.sub(_UtilLogic:NewGuid(), 1, 12) .. "_"
+		local createdKeys = {}
+		local adapter = { UserId = userId }
+		adapter.GetAndWait = function(db, key) return native:GetAndWait(prefix .. key) end
+		adapter.SetAndWait = function(db, key, value)
+			createdKeys[prefix .. key] = true
+			return native:SetAndWait(prefix .. key, value)
+		end
+		adapter.UpdateAndWait = function(db, key, expected, value)
+			return native:UpdateAndWait(prefix .. key, expected, value)
+		end
+		local ok, result = pcall(function()
+			adapter.SetByInfoAndWait = function(db, keyInfo, value)
+				createdKeys[prefix .. keyInfo.Key] = true
+				local nativeInfo = DataStorageKeyInfo()
+				nativeInfo.Key = prefix .. keyInfo.Key
+				nativeInfo.Tag = keyInfo.Tag
+				return native:SetByInfoAndWait(nativeInfo, value)
+			end
+			local tLoaded = _DiamondWalletStorage:LoadOrCreateWallet(adapter)
+			if tLoaded.success == false then error("native initialization: " .. tLoaded.reason) end
+			local tPurchase = DiamondWalletOperationData()
+			tPurchase.operationId = "native_receipt"
+			tPurchase.kind = _DiamondWalletStorage.KIND_PURCHASE
+			tPurchase.reason = self.FIXTURE_NAME
+			tPurchase.productId = self.FIXTURE_PRODUCT_ID
+			tPurchase.credit = 100
+			local tFirst = _DiamondWalletStorage:ApplyOperation(adapter, tPurchase)
+			local tDuplicate = _DiamondWalletStorage:ApplyOperation(adapter, tPurchase)
+			if tFirst.success == false or tDuplicate.success == false or tDuplicate.alreadyApplied == false
+				or _DiamondWalletStorage:ReadWallet(adapter).tWallet.balance ~= 100 then error("native purchase duplicate") end
+			local tSpend = DiamondWalletOperationData()
+			tSpend.operationId = "native_spend"
+			tSpend.kind = _DiamondWalletStorage.KIND_GAME
+			tSpend.reason = self.FIXTURE_NAME
+			tSpend.debit = 40
+			local tSpent = _DiamondWalletStorage:ApplyOperation(adapter, tSpend)
+			if tSpent.success == false or _DiamondWalletStorage:ReadWallet(adapter).tWallet.balance ~= 60 then
+				error("native spend")
+			end
+			local raw = _DiamondWalletStorage:ReadWallet(adapter).rawData
+			local staleCode = adapter:UpdateAndWait(_DiamondWalletStorage.WALLET_KEY, "stale", raw)
+			if staleCode ~= _DiamondWalletStorage.UPDATE_CONFLICT_CODE then error("unexpected CAS conflict code=" .. tostring(staleCode)) end
+			log("[CurrencyVerify] native initialization grant duplicate spend CAS conflict PASS balance=60")
+			return true
+		end)
+		local keys = {}
+		for key, _ in pairs(createdKeys) do table.insert(keys, key) end
+		local cleanupCode, deletedKeys = native:BatchDeleteAndWait(keys)
+		log("[CurrencyVerify] native fixture cleanup code=" .. tostring(cleanupCode) .. " keys=" .. tostring(#keys))
+		if ok == false then log_error("[CurrencyVerify] native fixture failed " .. tostring(result)) end
+		return ok and result == true and cleanupCode == 0
+	end
+
+end

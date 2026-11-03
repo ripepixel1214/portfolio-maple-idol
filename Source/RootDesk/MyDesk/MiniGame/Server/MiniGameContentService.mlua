@@ -1,0 +1,54 @@
+---@description "콘텐츠별 미니게임 실행 및 결과 전달 로직"
+@Logic
+script MiniGameContentService extends Logic
+
+	property any callbacksBySession = {}
+	property any resultEventHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 서버 확정 결과만 구독
+		self.callbacksBySession = {}
+		self.resultEventHandler = _MiniGameManager:ConnectEvent(MiniGameResultEvent, self.OnResult)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 콘텐츠 콜백과 결과 구독 해제
+		if self.resultEventHandler ~= nil then
+			_MiniGameManager:DisconnectEvent(MiniGameResultEvent, self.resultEventHandler)
+			self.resultEventHandler = nil
+		end
+		self.callbacksBySession = {}
+	end
+
+	@ExecSpace("ServerOnly")
+	method string Start(any tStartOptions, any onCompleted)
+		-- 서버 호출 옵션으로 시작, 콜백은 서버 메모리에만 보관
+		if tStartOptions == nil then return "" end
+		if onCompleted ~= nil and type(onCompleted) ~= "function" then return "" end
+		local sessionId = _MiniGameSessionService:CreateMiniGameSession(tStartOptions)
+		if sessionId ~= "" and onCompleted ~= nil then
+			self.callbacksBySession[sessionId] = onCompleted
+		end
+		return sessionId
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Cancel(string sessionId, string ownerUserId)
+		-- 호출 콘텐츠가 소유한 세션만 취소
+		_MiniGameSessionService:HandleCancel(sessionId, ownerUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnResult(MiniGameResultEvent event)
+		-- 콜백을 먼저 제거하여 중복 결과와 재진입 차단
+		if event == nil then return end
+		local onCompleted = self.callbacksBySession[event.sessionId]
+		if onCompleted == nil then return end
+		self.callbacksBySession[event.sessionId] = nil
+		local success, errorMessage = pcall(onCompleted, event)
+		if not success then log_error("[MiniGameContentService] 결과 콜백 실패 session=" .. event.sessionId .. " error=" .. tostring(errorMessage)) end
+	end
+
+end

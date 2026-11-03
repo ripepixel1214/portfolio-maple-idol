@@ -4,7 +4,7 @@ script CharacterStorage extends Logic
 
 	property string charactersStorageKey = "characterData"
 
-	property integer currentSaveVersion = 1
+	property integer currentSaveVersion = 3
 
 	property string loadedCharactersString = ""
 
@@ -12,12 +12,18 @@ script CharacterStorage extends Logic
 
 	property boolean isNeedDefaultLoad = false
 
+	property boolean isShopSaveDeferred = false
+
 	-- 비동기 저장 중 들어온 최신 저장 요청을 보관합니다.
 	property boolean isCharactersSaveInProgress = false
 
 	property string pendingCharactersUserId = ""
 
 	property string pendingCharactersString = ""
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ServerOnly")
 	method any LoadCharacters(string userId)
@@ -31,6 +37,10 @@ script CharacterStorage extends Logic
 			return nil
 		end
 
+		if not _DiamondWalletLogic:WaitForShopRecovery(userId) then
+			self.canSaveCharacters = false
+			return nil
+		end
 		local userStorage = _DataStorageService:GetUserDataStorage(userId)
 		local errorCode, storedCharactersString = userStorage:GetAndWait(self.charactersStorageKey)
 		if _DataStorageErrorUtil:IsNotFound(errorCode) then
@@ -69,8 +79,8 @@ script CharacterStorage extends Logic
 	end
 
 	@ExecSpace("ServerOnly")
-	method void SaveCharacterArchiveAsync(string userId, any tCharacters, any activeCharacterIds, string selectedCharacterId)
-		-- 전체 캐릭터 아카이브와 현재 편성 id 목록을 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+	method void SaveCharacterArchiveAsync(string userId, any tCharacters, any activeCharacterIds, string selectedCharacterId, string trainingState)
+		-- 전체 캐릭터 아카이브·현재 편성·태그 육성 상태를 저장 문자열로 바꿔 비동기 저장을 요청합니다.
 		-- tCharacters: { CharacterData, CharacterData, ... }
 		-- activeCharacterIds: { characterId:string, characterId:string, characterId:string }
 		-- 유저 캐릭터 목록을 저장 문자열로 바꿔 비동기 저장을 요청합니다.
@@ -84,35 +94,92 @@ script CharacterStorage extends Logic
 			return
 		end
 
+		if (_ShopItemManager ~= nil and _ShopItemManager.isPurchaseInProgress)
+			or (_DiamondWalletLogic.busyByUserId ~= nil and _DiamondWalletLogic.busyByUserId[userId] == true) then
+			self.isShopSaveDeferred = true
+			return
+		end
+
 		local tCharactersPlainTable = self:CreateCharactersPlainTable(tCharacters, activeCharacterIds, selectedCharacterId)
 		if tCharactersPlainTable == nil then
 			log_warning("[CharacterStorage] charactersPlainTable is invalid")
 			return
 		end
 
+		tCharactersPlainTable.trainingState = trainingState
 		local charactersString = self:CreateCharactersStringFromPlainTable(tCharactersPlainTable)
-		if charactersString == self.loadedCharactersString then
-			return
-		end
-
-		if self.isCharactersSaveInProgress then
-			self.pendingCharactersUserId = userId
-			self.pendingCharactersString = charactersString
-			return
-		end
-
-		self:SaveCharactersStringAsync(userId, charactersString)
+		-- 저장 중 원래 값으로 되돌린 요청도 최신 스냅샷으로 보존
+		self.pendingCharactersUserId = userId
+		self.pendingCharactersString = charactersString
+		if self.isCharactersSaveInProgress then return end
+		self:CheckPendingCharactersSave()
 	end
+
+	@ExecSpace("ServerOnly")
+	method boolean WaitForPendingCharactersSave()
+		-- 구매 전 기존 아카이브 저장 완료 확인
+		if self.canSaveCharacters == false then return false end
+		if self.isCharactersSaveInProgress == false then self:CheckPendingCharactersSave() end
+		local deadline = _UtilLogic.ServerElapsedSeconds + _ProgressStorage.CONFIRMED_SAVE_WAIT_SECONDS
+		while self.isCharactersSaveInProgress do
+			if _UtilLogic.ServerElapsedSeconds >= deadline then return false end
+			wait(0.1)
+		end
+		return self.canSaveCharacters and self.pendingCharactersString == ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateShopCharacterSnapshot(table characterIds)
+		-- 기존 육성 값과 편성을 유지하고 구매 대상의 보유 여부만 변경
+		local tPlain = self:CreateCharactersPlainTable(_CharacterManager.tCharacters,
+			_CharacterManager.activeCharacterIds, _CharacterManager.selectedCharacterId)
+		if tPlain == nil then return "" end
+		tPlain.trainingState = _TagTrainingManager:CreateSaveString()
+		local raw = self:CreateCharactersStringFromPlainTable(tPlain)
+		return self:UnlockShopCharactersInString(raw, characterIds)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string UnlockShopCharactersInString(string raw, table characterIds)
+		-- 저장 스키마의 다른 필드를 재생성하지 않고 보유 표식만 갱신
+		local ok, tFlat = pcall(function() return _UtilLogic:StringToTable(raw) end)
+		if ok == false or type(tFlat) ~= "table" or (tFlat.saveVersion ~= 1 and tFlat.saveVersion ~= 2 and tFlat.saveVersion ~= 3)
+			or type(tFlat.characterCount) ~= "number" or tFlat.characterCount < 1
+			or tFlat.characterCount > 1000 or tFlat.characterCount ~= math.floor(tFlat.characterCount) then return "" end
+		for _, characterId in ipairs(characterIds) do
+			local found = false
+			for index = 1, tFlat.characterCount do
+				local suffix = tostring(index)
+				if tFlat["characterId" .. suffix] == characterId then
+					tFlat["isDiscovered" .. suffix] = true
+					found = true
+					break
+				end
+			end
+			if found == false then return "" end
+		end
+		return _UtilLogic:TableToString(tFlat)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ServerOnly")
 	method void SaveCharactersStringAsync(string userId, string charactersString)
 		-- 직렬화된 캐릭터 저장 문자열을 UserDataStorage에 비동기로 저장합니다.
 		self.isCharactersSaveInProgress = true
 
-		local userStorage = _DataStorageService:GetUserDataStorage(userId)
-		userStorage:SetAsync(self.charactersStorageKey, charactersString, function(errorCode, key)
-			self:OnCharactersSaveCompleted(userId, charactersString, errorCode)
+		local ok, errorMessage = pcall(function()
+			local userStorage = _DataStorageService:GetUserDataStorage(userId)
+			userStorage:SetAsync(self.charactersStorageKey, charactersString, function(errorCode, key)
+				self:OnCharactersSaveCompleted(userId, charactersString, errorCode)
+			end)
 		end)
+		if not ok then
+			log_error("[CharacterStorage] save exception userId=" .. tostring(userId) .. " error=" .. tostring(errorMessage))
+			self:OnCharactersSaveCompleted(userId, charactersString, -1)
+		end
 	end
 
 	@ExecSpace("ServerOnly")
@@ -121,6 +188,13 @@ script CharacterStorage extends Logic
 		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
 		if isSaved == false then
 			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.isCharactersSaveInProgress = false
+			-- 자동 반복 재시도 없이 최신 실패 데이터를 다음 저장 요청까지 유지
+			if self.pendingCharactersString == "" then
+				self.pendingCharactersUserId = userId
+				self.pendingCharactersString = charactersString
+			end
+			return
 		else
 			self.loadedCharactersString = charactersString
 		end
@@ -139,10 +213,12 @@ script CharacterStorage extends Logic
 	@ExecSpace("ServerOnly")
 	method void CheckPendingCharactersSave()
 		-- 대기 중인 최신 캐릭터 저장 요청이 있으면 이어서 비동기 저장합니다.
-		if self.pendingCharactersString == "" then
+		if not self.canSaveCharacters or self.isCharactersSaveInProgress or self.pendingCharactersString == "" then
 			return
 		end
 
+		if _DiamondWalletLogic.shopRecoveryBlockedByUserId ~= nil
+			and _DiamondWalletLogic.shopRecoveryBlockedByUserId[self.pendingCharactersUserId] then return end
 		local pendingUserId = self.pendingCharactersUserId
 		local pendingCharactersString = self.pendingCharactersString
 		self.pendingCharactersUserId = ""
@@ -178,6 +254,7 @@ script CharacterStorage extends Logic
 		tFlatPlainTable.selectedCharacterId = tCharactersPlainTable.selectedCharacterId
 		tFlatPlainTable.activeCharacterCount = #tCharactersPlainTable.activeCharacterIds
 		tFlatPlainTable.characterCount = #tCharactersPlainTable.characters
+		tFlatPlainTable.trainingState = tCharactersPlainTable.trainingState or ""
 
 		for index, characterId in ipairs(tCharactersPlainTable.activeCharacterIds) do
 			local suffix = tostring(index)
@@ -196,6 +273,8 @@ script CharacterStorage extends Logic
 			tFlatPlainTable["maxIntimacyReached" .. suffix] = tCharacterSaveRow.maxIntimacyReached
 			tFlatPlainTable["isDiscovered" .. suffix] = tCharacterSaveRow.isDiscovered
 			tFlatPlainTable["hasPlayed" .. suffix] = tCharacterSaveRow.hasPlayed
+			tFlatPlainTable["tags" .. suffix] = tCharacterSaveRow.tags
+			tFlatPlainTable["tagCapacity" .. suffix] = tCharacterSaveRow.tagCapacity
 		end
 
 		return _UtilLogic:TableToString(tFlatPlainTable)
@@ -209,7 +288,11 @@ script CharacterStorage extends Logic
 		end
 
 		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
-		if saveVersion == 1 then
+		if saveVersion == 1 or saveVersion == 2 then
+			tFlatPlainTable.trainingState = tFlatPlainTable.trainingSession
+			return self:CreateCharactersPlainTableFromFlatPlainTableV1(tFlatPlainTable)
+		end
+		if saveVersion == 3 then
 			return self:CreateCharactersPlainTableFromFlatPlainTableV1(tFlatPlainTable)
 		end
 
@@ -229,6 +312,7 @@ script CharacterStorage extends Logic
 		tCharactersPlainTable.selectedCharacterId = self:NormalizeString(tFlatPlainTable.selectedCharacterId, "")
 		tCharactersPlainTable.activeCharacterIds = {}
 		tCharactersPlainTable.characters = {}
+		tCharactersPlainTable.trainingState = self:NormalizeString(tFlatPlainTable.trainingState, "")
 
 		for index = 1, characterCount do
 			local suffix = tostring(index)
@@ -243,6 +327,8 @@ script CharacterStorage extends Logic
 			tSaveRow.maxIntimacyReached = tFlatPlainTable["maxIntimacyReached" .. suffix]
 			tSaveRow.isDiscovered = tFlatPlainTable["isDiscovered" .. suffix]
 			tSaveRow.hasPlayed = tFlatPlainTable["hasPlayed" .. suffix]
+			tSaveRow.tags = tFlatPlainTable["tags" .. suffix]
+			tSaveRow.tagCapacity = tFlatPlainTable["tagCapacity" .. suffix]
 			if tSaveRow.isDiscovered == nil then
 				tSaveRow.isDiscovered = true
 			end
@@ -349,6 +435,8 @@ script CharacterStorage extends Logic
 		tSaveRow.maxIntimacyReached = tCharacter.maxIntimacyReached
 		tSaveRow.isDiscovered = tCharacter.isDiscovered
 		tSaveRow.hasPlayed = tCharacter.hasPlayed
+		tSaveRow.tags = tCharacter.tags
+		tSaveRow.tagCapacity = tCharacter.tagCapacity
 
 		return self:CreateCharacterSaveRowFromPlainTable(tSaveRow)
 	end
@@ -403,6 +491,8 @@ script CharacterStorage extends Logic
 		tSaveRow.maxIntimacyReached = math.max(maxIntimacyReached, intimacy)
 		tSaveRow.isDiscovered = self:NormalizeBoolean(tPlainTableData.isDiscovered, false)
 		tSaveRow.hasPlayed = self:NormalizeBoolean(tPlainTableData.hasPlayed, false)
+		tSaveRow.tags = self:NormalizeString(tPlainTableData.tags, "")
+		tSaveRow.tagCapacity = math.max(5, math.min(8, self:NormalizeInteger(tPlainTableData.tagCapacity, 5, 5)))
 
 		return tSaveRow
 	end

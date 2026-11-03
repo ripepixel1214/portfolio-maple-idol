@@ -1,7 +1,7 @@
 @Struct
 script ProgressData
 
-	property string gameGoalId = "perf_01"
+	property string eCurrentStage = ""
 
 	property integer eCurrentStep = 1
 
@@ -11,12 +11,16 @@ script ProgressData
 
 	property integer actionPoint = 0
 
-	property integer groupMeso = 500
+	property integer meso = 500
+
+	property integer nightMarketCoin = 0
 
 	-- 베타 기간 임시 월드 코인(실결제 월드코인 대체). 저장/로드 대상 포함.
 	property integer tempWorldCoin = 1000
 
 	property integer fandom = 0
+
+	property string currentMapId = ""
 
 	property number positionX = 0
 
@@ -28,19 +32,85 @@ script ProgressData
 	method any ToPlainTable()
 		-- RPC 전달과 클라이언트 캐시 저장에 사용할 plain table 복사본을 반환합니다.
 		local tData = {}
-		tData.gameGoalId = self.gameGoalId
+		tData.eCurrentStage = self.eCurrentStage
 		tData.eCurrentStep = self.eCurrentStep
 		tData.currentMonth = self.currentMonth
 		tData.currentWeek = self.currentWeek
 		tData.actionPoint = self.actionPoint
-		tData.groupMeso = self.groupMeso
+		tData.meso = self.meso
+		tData.nightMarketCoin = self.nightMarketCoin
 		tData.tempWorldCoin = self.tempWorldCoin
 		tData.fandom = self.fandom
+		tData.currentMapId = self.currentMapId
 		tData.positionX = self.positionX
 		tData.positionY = self.positionY
 		tData.completedTutorials = self:CompletedToCsv()
 
 		return tData
+	end
+
+	method any CreatePlainTableCopy(any tProgressData)
+		-- ProgressData 구조체나 plain table을 외부에서 안전하게 사용할 plain table 복사본으로 만듭니다.
+		if tProgressData == nil then
+			return self:CreateEmptyPlainTable()
+		end
+
+		if tProgressData.ToPlainTable ~= nil then
+			return tProgressData:ToPlainTable()
+		end
+
+		if type(tProgressData) ~= "table" then
+			return self:CreateEmptyPlainTable()
+		end
+
+		local tCopiedData = self:CreateEmptyPlainTable()
+		if tProgressData.eCurrentStage ~= nil then
+			tCopiedData.eCurrentStage = tProgressData.eCurrentStage
+		end
+		if tProgressData.eCurrentStep ~= nil then
+			tCopiedData.eCurrentStep = tProgressData.eCurrentStep
+		end
+		if tProgressData.currentMonth ~= nil then
+			tCopiedData.currentMonth = tProgressData.currentMonth
+		end
+		if tProgressData.currentWeek ~= nil then
+			tCopiedData.currentWeek = tProgressData.currentWeek
+		end
+		if tProgressData.actionPoint ~= nil then
+			tCopiedData.actionPoint = tProgressData.actionPoint
+		end
+		if tProgressData.meso ~= nil then
+			tCopiedData.meso = tProgressData.meso
+		end
+		if tProgressData.nightMarketCoin ~= nil then
+			tCopiedData.nightMarketCoin = tProgressData.nightMarketCoin
+		end
+		if tProgressData.tempWorldCoin ~= nil then
+			tCopiedData.tempWorldCoin = tProgressData.tempWorldCoin
+		end
+		if tProgressData.fandom ~= nil then
+			tCopiedData.fandom = tProgressData.fandom
+		end
+		if tProgressData.currentMapId ~= nil then
+			tCopiedData.currentMapId = tProgressData.currentMapId
+		end
+		if tProgressData.positionX ~= nil then
+			tCopiedData.positionX = tProgressData.positionX
+		end
+		if tProgressData.positionY ~= nil then
+			tCopiedData.positionY = tProgressData.positionY
+		end
+		if type(tProgressData.completedTutorials) == "table" then
+			local copiedTutorials = {}
+			for tutorialId, isCompleted in pairs(tProgressData.completedTutorials) do
+				copiedTutorials[tutorialId] = isCompleted
+			end
+			tCopiedData.completedTutorials = copiedTutorials
+		elseif tProgressData.completedTutorials ~= nil then
+			tCopiedData.completedTutorials = tProgressData.completedTutorials
+		end
+
+		return tCopiedData
 	end
 
 	method any CreateEmptyPlainTable()
@@ -57,9 +127,12 @@ script ProgressData
 			.. " week=" .. tostring(self.currentWeek)
 			.. " actionPoint=" .. tostring(self.actionPoint)
 			.. " fandom=" .. tostring(self.fandom)
-			.. " groupMeso=" .. tostring(self.groupMeso)
+			.. " meso=" .. tostring(self.meso)
+			.. " nightMarketCoin=" .. tostring(self.nightMarketCoin)
 			.. " tempWorldCoin=" .. tostring(self.tempWorldCoin)
+			.. " stage=" .. tostring(self.eCurrentStage)
 			.. " step=" .. stepName
+			.. " map=" .. tostring(self.currentMapId)
 			.. " position=(" .. tostring(self.positionX) .. "," .. tostring(self.positionY) .. ")"
 			.. " tutorials=[" .. self:CompletedToCsv() .. "]"
 	end

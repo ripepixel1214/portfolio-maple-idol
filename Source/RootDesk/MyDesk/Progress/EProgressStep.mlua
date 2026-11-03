@@ -1,58 +1,49 @@
 @Logic
 script EProgressStep extends Logic
 
-	property integer Step_Weekly = 1
+	property integer StageSelect = 1
 
-	property integer Step_TrainingCompleted = 2
+	property integer BeforeTraining = 2
 
-	property integer Step_Weekend = 3
+	property integer AfterTraining = 3
 
-	property integer Step_Performance = 4
+	property integer Outdoor = 4
 
-	property integer Step_DemoEnd = 5
+	property integer Performance = 5
 
 	method boolean IsValidStep(integer step)
-		-- 사용할 수 있는 진행 단계인지 확인합니다.
-		return step == self.Step_Weekly
-			or step == self.Step_TrainingCompleted
-			or step == self.Step_Weekend
-			or step == self.Step_Performance
-			or step == self.Step_DemoEnd
+		-- 사용할 수 있는 진행 스텝인지 확인합니다.
+		return step == self.StageSelect or step == self.BeforeTraining or step == self.AfterTraining or step == self.Outdoor or step == self.Performance
 	end
 
 	method string GetName(integer step)
-		-- 진행 단계 값을 화면 표시와 로그 출력용 이름으로 변환합니다.
-		if step == self.Step_Weekly then
-			return "주간"
+		-- 스텝 값을 화면 표시와 로그 출력용 이름으로 변환합니다.
+		if step == self.StageSelect then
+			return "스테이지 선택"
 		end
 
-		if step == self.Step_TrainingCompleted then
-			return "훈련 완료"
+		if step == self.BeforeTraining then
+			return "훈련 전"
 		end
 
-		if step == self.Step_Weekend then
-			return "주말"
+		if step == self.AfterTraining then
+			return "훈련 후"
 		end
 
-		if step == self.Step_Performance then
+		if step == self.Outdoor then
+			return "외출"
+		end
+
+		if step == self.Performance then
 			return "공연"
-		end
-
-		if step == self.Step_DemoEnd then
-			return "데모 종료"
 		end
 
 		return tostring(step)
 	end
 
 	method boolean IsPerformanceStep(integer step)
-		-- 공연 단계인지 확인합니다.
-		return step == self.Step_Performance
-	end
-
-	method boolean IsDemoEndStep(integer step)
-		-- 데모가 종료되어 더 이상 진행하지 않는 종단 단계인지 확인합니다.
-		return step == self.Step_DemoEnd
+		-- 공연 스텝인지 확인합니다.
+		return step == self.Performance
 	end
 
 end

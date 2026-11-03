@@ -11,7 +11,7 @@ script MiniGameInputHubLogic extends Logic
 
 	property string activeSessionId = ""
 
-	-- 채널 ID별 어댑터·모듈·활성 상태
+	-- 채널 ID별 어댑터, 모듈, 활성 상태
 	property any activeChannels = {}
 	property any activeChannelOrder = {}
 	
@@ -95,7 +95,7 @@ script MiniGameInputHubLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method boolean IsChannelEnabled(string channelId)
-		-- 지정 채널의 실행·입력 허용 상태 확인
+		-- 지정 채널의 실행, 입력 허용 상태 확인
 		local entry = self.activeChannels[channelId]
 		return self.isRunning == true
 			and self.inputEnabled == true

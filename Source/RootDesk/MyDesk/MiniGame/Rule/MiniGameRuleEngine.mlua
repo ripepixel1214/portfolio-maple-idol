@@ -1,10 +1,6 @@
----@description "미니게임 프리셋의 Phase·시간·Objective·결과 처리를 통합 실행"
+---@description "미니게임 프리셋의 Phase, 시간, Objective, 결과 처리를 통합 실행"
 @Logic
 script MiniGameRuleEngine extends Logic
-
-	property string TIME_RULE_COUNTDOWN = "Countdown"
-
-	property string TIME_RULE_GAUGE_DRAIN = "GaugeDrain"
 
 	method any CreateState(any preset)
 		-- 프리셋 첫 Phase를 기준으로 독립 규칙 상태 생성

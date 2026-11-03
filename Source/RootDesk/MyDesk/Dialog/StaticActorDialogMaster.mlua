@@ -4,6 +4,9 @@ script StaticActorDialogMaster extends Logic
 
 	-- Dictionary<string, string> (actorId -> dialogId)
 	property any tDialogIdByActorId = {}
+	property any tMiniGameEventIdByActorId = {}
+	property any tInsufficientDialogIdByActorId = {}
+	property any tMiniGameDialogIdByActorId = {}
 
 	property boolean isCached = false
 
@@ -20,6 +23,9 @@ script StaticActorDialogMaster extends Logic
 		end
 
 		self.tDialogIdByActorId = {}
+		self.tMiniGameEventIdByActorId = {}
+		self.tInsufficientDialogIdByActorId = {}
+		self.tMiniGameDialogIdByActorId = {}
 
 		local dataSet = _DataService:GetTable("StaticActorDialogTable")
 		if dataSet == nil then
@@ -32,6 +38,9 @@ script StaticActorDialogMaster extends Logic
 			local dialogId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogId", "")
 			if actorId ~= "" and dialogId ~= "" then
 				self.tDialogIdByActorId[actorId] = dialogId
+				self.tMiniGameEventIdByActorId[actorId] = _DataTableUtil:SafeGetString(dataSet, rowIndex, "miniGameEventId", "")
+				self.tInsufficientDialogIdByActorId[actorId] = _DataTableUtil:SafeGetString(dataSet, rowIndex, "insufficientDialogId", "")
+				self.tMiniGameDialogIdByActorId[actorId] = _DataTableUtil:SafeGetString(dataSet, rowIndex, "miniGameDialogId", "")
 			end
 		end
 
@@ -57,6 +66,24 @@ script StaticActorDialogMaster extends Logic
 	method boolean HasDialog(string actorId)
 		-- actorId에 평상시 대화가 매핑되어 있는지 반환합니다.
 		return self:GetDialogId(actorId) ~= ""
+	end
+
+	method string GetMiniGameEventId(string actorId)
+		-- 고정 NPC의 평상시 대화에 연결된 미니게임 이벤트 반환
+		self:CacheAll()
+		return self.tMiniGameEventIdByActorId[actorId] or ""
+	end
+
+	method string GetInsufficientDialogId(string actorId)
+		-- 입장 재화가 부족할 때 출력할 NPC별 대화 반환
+		self:CacheAll()
+		return self.tInsufficientDialogIdByActorId[actorId] or ""
+	end
+
+	method string GetMiniGameDialogId(string actorId)
+		-- 기본 대화 후 이어질 미니게임 안내 대화 반환
+		self:CacheAll()
+		return self.tMiniGameDialogIdByActorId[actorId] or ""
 	end
 
 	method integer GetCount()

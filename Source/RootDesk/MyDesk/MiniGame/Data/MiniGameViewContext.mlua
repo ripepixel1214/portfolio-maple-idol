@@ -1,0 +1,19 @@
+@Struct
+script MiniGameViewContext
+
+	-- View 초기화 전용 데이터, Model, Presenter 참조 미포함
+	property string sessionId = ""
+	property string gameKind = ""
+	property integer inputType = -1
+	property string title = ""
+	property string instruction = ""
+	property string presentationActorId = ""
+	property integer betAmount = 0
+	property integer balance = 0
+	property integer mesoBalance = 0
+	property integer coinBalance = 0
+	property boolean isDebug = false
+	property string entryCurrency = ""
+	property integer entryAmount = 0
+
+end

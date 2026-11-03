@@ -12,6 +12,8 @@ script RuntimeActorManager extends Logic
 
 	property any userEnterHandler = nil
 
+	-- Public API
+
 	@ExecSpace("ServerOnly")
 	method void OnBeginPlay()
 		-- 유저 입장 시점에 서버 권위 액터 런타임 데이터를 준비해 전송하도록 이벤트만 연결합니다.
@@ -59,12 +61,7 @@ script RuntimeActorManager extends Logic
 			return actorId or ""
 		end
 
-		local fallbackName = actorId or ""
-		if _LocalizationLogic ~= nil and tActor.nameKey ~= nil and tActor.nameKey ~= "" then
-			return _LocalizationLogic:GetText(tActor.nameKey, "")
-		end
-
-		return tActor.name or fallbackName
+		return _LocalizationService:GetText(tActor.nameKey)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -555,6 +552,8 @@ script RuntimeActorManager extends Logic
 
 		self:SendActorChangedEvent(actorId)
 	end
+
+	-- Private Methods
 
 	method any CopyRuntimeActorData(any tRuntimeActor)
 		-- 액터 런타임 표시 데이터 한 건을 RuntimeActorData로 복사합니다.

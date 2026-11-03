@@ -140,11 +140,10 @@ script PerformancePhotocardUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnConfirmClicked()
-		-- 확인: 포토카드를 닫고 후속 흐름(스튜디오 이동→대화→데모 종료)으로
+		-- 확인: 포토카드를 닫고 후속 흐름(스튜디오 이동→공연 후 대화)으로
 		self:Hide()
 		if _PerformancePostFlowLogic ~= nil then
 			_PerformancePostFlowLogic:OnPhotocardConfirmed()
-			_ItemManager:RequestUnlockItem("photoCard_lucid_firstPerformance")
 		end
 	end
 

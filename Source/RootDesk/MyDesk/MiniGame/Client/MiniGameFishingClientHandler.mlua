@@ -1,0 +1,24 @@
+---@description "잡아라! 날치왕 공통 미니게임 클라이언트 계약 연결"
+@Logic
+script MiniGameFishingClientHandler extends Logic
+	@ExecSpace("ClientOnly")
+	method any CreateBehavior()
+		local tBehavior = MiniGameClientBehavior()
+		tBehavior.requiredCapabilities = {_MiniGameViewRegistry.CAP_STAGE, _MiniGameViewRegistry.CAP_FISHING}
+		tBehavior.usesInputHub = false
+		tBehavior.acceptsSelection = true
+		tBehavior.openLobby = function() _MiniGameFishingPresenter:OpenLobby() end
+		tBehavior.openDebugLobby = function(testMesoBalance)
+			_MiniGameFishingPresenter:OpenDebugLobby()
+		end
+		-- 공통 클라이언트 타이머를 활성화하지 않고 서버 종료만 수신
+		tBehavior.startPresentation = function(presenter, sessionId, config) return true end
+		tBehavior.prepareView = function(presenter, tContext) _MiniGameFishingPresenter:BeginSession(tContext) end
+		tBehavior.reset = function() _MiniGameFishingPresenter:ClearState() end
+		tBehavior.endSession = function(presenter) _MiniGameFishingPresenter:EndSession() end
+		tBehavior.requestRejected = function(miniGameId, reason)
+			_MiniGameFishingPresenter:HandleRejected(miniGameId)
+		end
+		return tBehavior
+	end
+end

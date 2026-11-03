@@ -1,0 +1,398 @@
+---@description "클라이언트 측 미니게임 진행 데이터"
+@Struct
+script MiniGameClientModel
+	property string TEXT_UI_MINIGAME_MATCH = "ui.minigame.match"
+
+	-- 클라이언트 세션별 규칙 상태, View와 RPC 참조 제외
+	property string gameKind = ""
+	property string EVALUATOR_SEQUENCE = "Sequence"
+	property string TIME_GAUGE_DRAIN = "GaugeDrain"
+	property string REASON_COMPLETE = "complete"
+	property string REASON_TIMEOUT = "timeout"
+	property string REASON_DRAIN = "drain"
+	property string REASON_OBJECTIVE = "objective"
+	property any preset = nil
+	property any ruleState = nil
+	property any objectives = {}
+	property integer inputType = -1
+	property integer timeMode = -1
+	property number timeRemaining = 0
+	property number elapsed = 0
+	property boolean useGauge = false
+	property number gauge = 0
+	property number gaugePerInput = 0
+	property number gaugeFailAt = 0
+	property number gaugeTarget = 100
+	property number timeDuration = 0
+	property number dotAreaScale = 120
+	property number dragTolerance = 18
+	property any checkpoints = {}
+	property any checkpointHit = {}
+	property integer coveredSectorCount = 0
+	property integer successCount = 0
+	property integer hitCount = 0
+	property integer missCount = 0
+	property integer commandIndex = 0
+	property any commandSequence = {}
+	property number shapeRatio = 0
+	property number lastProgress = 0
+	property string lastAccuracy = ""
+	property any commandFlowState = nil
+	property any tInputProof = nil
+
+	-- Public API
+
+	method void ResetTrackers()
+		-- 진행 추적값과 입력 기록 초기화
+		self.successCount = 0
+		self.hitCount = 0
+		self.missCount = 0
+		self.commandIndex = 0
+		self.shapeRatio = 0
+		self.lastProgress = 0
+		self.lastAccuracy = ""
+		self.elapsed = 0
+		self.tInputProof = MiniGameInputProof()
+	end
+
+	method void SetupTimeAndGauge(any presetData)
+		-- RuleEngine 시간 상태를 기존 HUD, 입력 호환 프로퍼티에 반영
+		self.timeMode = presetData.timeMode or _EMiniGameTimeMode.None
+		self.timeRemaining = 0
+		self.timeDuration = 0
+		self.useGauge = false
+		self.gauge = 0
+		self.gaugePerInput = 0
+		self.gaugeFailAt = 0
+
+		local inputConfig = presetData.inputConfig or {}
+		local timeState = self.ruleState ~= nil and self.ruleState.timeState or nil
+		if timeState ~= nil then
+			self.timeRemaining = timeState.timeRemaining or 0
+			self.timeDuration = timeState.duration or 0
+			self.gauge = timeState.gauge or 0
+			self.gaugeFailAt = timeState.failAt or 0
+			self.useGauge = timeState.mode == self.TIME_GAUGE_DRAIN
+		end
+
+		-- GaugeFill 목표가 있으면 입력으로 게이지를 채운다.
+		self.gaugeTarget = 100
+		if self:HasObjective(_EMiniGameObjectiveType.GaugeFill) == true then
+			self.useGauge = true
+			self.gaugePerInput = inputConfig.gaugePerInput or 0
+			self.gaugeTarget = self:GetObjectiveTarget(_EMiniGameObjectiveType.GaugeFill)
+		end
+	end
+
+	method number GetObjectiveTarget(integer objectiveType)
+		-- 특정 목표 타입의 target 값을 반환한다. (없으면 0)
+		for _, objective in ipairs(self.objectives) do
+			if objective.type == objectiveType then
+				return objective.target or 0
+			end
+		end
+
+		return 0
+	end
+
+	method boolean HasObjective(integer objectiveType)
+		-- 특정 목표 타입이 포함되어 있는지 반환한다.
+		for _, objective in ipairs(self.objectives) do
+			if objective.type == objectiveType then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	method number GetGaugeRatio()
+		-- 게이지 표시 비율(0~1)을 반환한다.
+		if self.gaugeTarget <= 0 then
+			return 0
+		end
+
+		return self.gauge / self.gaugeTarget
+	end
+
+	method boolean CheckObjectives()
+		-- 통합 RuleEngine을 통한 필수 Objective와 평균 진행률 계산
+		self:SyncRuleStateFromRuntime()
+		local summary = _MiniGameRuleEngine:EvaluateObjectives(self.preset, self.ruleState)
+		self.lastProgress = summary ~= nil and summary.progress or 0
+		return summary ~= nil and summary.allRequiredMet == true
+	end
+
+	method void SyncRuleStateFromRuntime()
+		-- 기존 입력, 화면 호환 프로퍼티를 통합 규칙 상태에 동기화
+		if self.ruleState == nil then
+			return
+		end
+
+		_MiniGameRuleEngine:SyncRuntimeState(self.ruleState, {
+			successCount = self.successCount,
+			hitCount = self.hitCount,
+			missCount = self.missCount,
+			gauge = self.gauge,
+			shapeRatio = self.shapeRatio,
+			accuracyScore = self.shapeRatio,
+			lastAccuracy = self.lastAccuracy
+		})
+	end
+
+	method void ApplyRuleStateToRuntime()
+		-- 통합 규칙 상태를 기존 HUD, 입력 호환 프로퍼티에 동기화
+		if self.ruleState == nil or self.ruleState.timeState == nil then
+			return
+		end
+
+		local timeState = self.ruleState.timeState
+		self.elapsed = timeState.elapsed or 0
+		self.timeRemaining = timeState.timeRemaining or 0
+		self.gauge = timeState.gauge or self.gauge
+	end
+
+	method number GetObjectiveCurrent(integer objectiveType)
+		-- 목표 타입별 현재 수치를 반환한다.
+		if objectiveType == _EMiniGameObjectiveType.Count then
+			return self.successCount
+		elseif objectiveType == _EMiniGameObjectiveType.TimingHit then
+			return self.hitCount
+		elseif objectiveType == _EMiniGameObjectiveType.Sequence then
+			return self.successCount
+		elseif objectiveType == _EMiniGameObjectiveType.GaugeFill then
+			return self.gauge
+		elseif objectiveType == _EMiniGameObjectiveType.ShapeMatch then
+			return self.shapeRatio
+		end
+
+		return 0
+	end
+
+	method void SetupDragShape()
+		-- 정규화 도형을 판정 좌표로 변환, View도 같은 좌표계로 가이드와 입력 변환
+		self.dragTolerance = 18
+		local shapePoints = nil
+		for _, objective in ipairs(self.objectives) do
+			if objective.type == _EMiniGameObjectiveType.ShapeMatch then
+				self.dragTolerance = objective.tolerance or 18
+				shapePoints = objective.shapePoints
+			end
+		end
+
+		self.checkpoints = {}
+		self.checkpointHit = {}
+		if shapePoints ~= nil then
+			for i = 1, #shapePoints do
+				local p = shapePoints[i]
+				-- 정규화(0~1, 중심 0.5) [->] DragArea 로컬 좌표 (DragArea 중심이 원점)
+				self.checkpoints[i] = { x = (p.x - 0.5) * self.dotAreaScale, y = (p.y - 0.5) * self.dotAreaScale }
+				self.checkpointHit[i] = false
+			end
+		end
+
+		self.coveredSectorCount = 0
+		self.shapeRatio = 0
+
+	end
+
+	method void RegisterDragPoint(number x, number y)
+		-- 허용 거리 안의 가장 가까운 체크포인트 하나만 충족 처리
+		if self.checkpoints == nil then
+			return
+		end
+
+		local bestIdx = 0
+		local bestSq = 0
+		for i = 1, #self.checkpoints do
+			local cp = self.checkpoints[i]
+			local dx = x - cp.x
+			local dy = y - cp.y
+			local sq = dx * dx + dy * dy
+			if bestIdx == 0 or sq < bestSq then
+				bestIdx = i
+				bestSq = sq
+			end
+		end
+
+		-- 가장 가까운 체크포인트도 허용 거리 밖이면 선 위가 아니므로 무시
+		if bestIdx > 0 and bestSq > (self.dragTolerance * self.dragTolerance) then
+			return
+		end
+
+		if bestIdx > 0 and self.checkpointHit[bestIdx] == false then
+			self.tInputProof:AddSample(self.elapsed, x, y)
+			self.checkpointHit[bestIdx] = true
+			self.coveredSectorCount = self.coveredSectorCount + 1
+		end
+
+		if #self.checkpoints > 0 then
+			self.shapeRatio = self.coveredSectorCount / #self.checkpoints
+		end
+	end
+
+	method integer GetMatchPercent()
+		-- 결과/HUD에 표시할 핵심 달성률(%)을 반환한다.
+		if self.gameKind == _EMiniGameKind.SHAPE_TRACE then
+			return math.floor(self.shapeRatio * 100)
+		end
+
+		return math.floor(self.lastProgress * 100)
+	end
+
+	method integer GetGoalCount()
+		-- 카운트형 목표(횟수)면 목표 횟수를, 아니면 0을 반환한다.
+		for _, objective in ipairs(self.objectives) do
+			if objective.type == _EMiniGameObjectiveType.Count
+				or objective.type == _EMiniGameObjectiveType.TimingHit
+				or objective.type == _EMiniGameObjectiveType.Sequence then
+				return objective.target or 0
+			end
+		end
+
+		return 0
+	end
+
+	method integer GetCurrentCount()
+		-- 카운트형 목표의 현재 달성 횟수를 반환한다.
+		for _, objective in ipairs(self.objectives) do
+			if objective.type == _EMiniGameObjectiveType.Count
+				or objective.type == _EMiniGameObjectiveType.TimingHit
+				or objective.type == _EMiniGameObjectiveType.Sequence then
+				return math.floor(self:GetObjectiveCurrent(objective.type))
+			end
+		end
+
+		return 0
+	end
+
+	method string GetHeadlineText()
+		-- HUD 진행 표시 문자열. 카운트형은 "현재 / 목표", 그 외는 "%".
+		if self.gameKind == _EMiniGameKind.SHAPE_TRACE then
+			return tostring(self:GetMatchPercent()) .. "%"
+		end
+
+		local goal = self:GetGoalCount()
+		if goal > 0 then
+			local current = self:GetCurrentCount()
+			if current > goal then
+				current = goal
+			end
+			return tostring(current) .. " / " .. tostring(goal)
+		end
+
+		return tostring(self:GetMatchPercent()) .. "%"
+	end
+
+	method string GetResultDetail()
+		-- 결과 표시 상세. 드래그는 일치율%, 카운트형은 "현재 / 목표".
+		if self.gameKind == _EMiniGameKind.SHAPE_TRACE then
+			return _LocaleTextUtil:Format(self.TEXT_UI_MINIGAME_MATCH, self:GetMatchPercent(), nil, nil, "")
+		end
+
+		return self:GetHeadlineText()
+	end
+
+	method void Initialize(any presetData, any tLaunchContext)
+		-- View, RPC 참조 없이 프리셋과 서버 시작 정보로 상태 구성
+		self.preset = presetData
+		self.gameKind = presetData.gameKind
+		self.inputType = presetData.inputType
+		local launch = _MiniGameCommandFlow:ParseLaunchPayload(tLaunchContext.commandPayload, tLaunchContext.duration)
+		self.commandFlowState = _MiniGameCommandFlow:CreateState(self.inputType, launch, presetData.objectives)
+		self.commandSequence = self.commandFlowState.sequence
+		self.objectives = self.commandFlowState.objectives
+		self:ResetTrackers()
+		self.ruleState = _MiniGameRuleEngine:CreateState(presetData)
+		if self.gameKind == _EMiniGameKind.COMMAND_SEQUENCE and #self.commandSequence > 0 then
+			_MiniGameRuleEngine:SetObjectiveTargetOverride(self.ruleState, self.EVALUATOR_SEQUENCE, #self.commandSequence)
+		end
+		self:SetupTimeAndGauge(presetData)
+		if self.commandFlowState.duration > 0 then
+			_MiniGameRuleEngine:SetCountdownDuration(self.ruleState, self.commandFlowState.duration)
+			self.timeDuration = self.commandFlowState.duration
+			self.timeRemaining = self.commandFlowState.duration
+		end
+		if self.gameKind == _EMiniGameKind.SHAPE_TRACE then
+			self:SetupDragShape()
+		end
+	end
+
+	method void ApplyInput(any event)
+		-- 입력 수치와 규칙 상태만 갱신, 화면 효과는 Presenter에서 처리
+		self.successCount = math.max(self.successCount, event.successCount)
+		self.missCount = math.max(self.missCount, event.missCount)
+		if event.action == _EMiniGameInputAction.Hit then
+			self.hitCount = self.hitCount + 1
+		end
+		if self.gameKind == _EMiniGameKind.COMMAND_SEQUENCE then
+			if event.action == _EMiniGameInputAction.Hit or event.action == _EMiniGameInputAction.Progress then
+				self.commandIndex = event.successCount
+				self.lastProgress = event.progress
+			elseif event.action == _EMiniGameInputAction.Miss then
+				self.commandIndex = 0
+				self.lastProgress = event.progress
+			end
+		end
+		if event.accuracy ~= nil and event.accuracy ~= "" then
+			self.lastAccuracy = event.accuracy
+		end
+		if self.useGauge and self.gaugePerInput > 0 and event.action == _EMiniGameInputAction.Input then
+			self.gauge = self.gauge + self.gaugePerInput
+		end
+	end
+
+	method boolean CanFinishOnObjectives()
+		-- 서버 판정 게임의 빈 목표를 로컬 완료로 처리하지 않도록 차단
+		if self.preset ~= nil and self.preset.authority == _MiniGameTable.AUTHORITY_SERVER then return false end
+		return self.gameKind ~= _EMiniGameKind.SHAPE_TRACE
+			and self.gameKind ~= _EMiniGameKind.COMMAND_SEQUENCE
+			and self.gameKind ~= _EMiniGameKind.DALGONA_DRAW
+			and self.gameKind ~= _EMiniGameKind.LUCKY_CUBE
+	end
+
+	method any Update(number delta)
+		-- 시간, 목표 판정 결과만 반환, 입력과 화면 수명은 Presenter에서 처리
+		self:SyncRuleStateFromRuntime()
+		_MiniGameRuleEngine:Update(self.preset, self.ruleState, delta)
+		self:ApplyRuleStateToRuntime()
+		if _MiniGameRuleEngine:IsTimeExpired(self.ruleState) then
+			if self.timeMode == _EMiniGameTimeMode.Countdown then
+				if self.gameKind == _EMiniGameKind.COMMAND_SEQUENCE then
+					self.timeRemaining = 0
+					return nil
+				end
+				local met = self:CheckObjectives()
+				return self:BuildResult(met, met and self.REASON_COMPLETE or self.REASON_TIMEOUT)
+			elseif self.timeMode == _EMiniGameTimeMode.GaugeDrain then
+				self.gauge = self.gaugeFailAt
+				return self:BuildResult(false, self.REASON_DRAIN)
+			end
+		end
+		if self:CheckObjectives() and self:CanFinishOnObjectives() then
+			return self:BuildResult(true, self.REASON_OBJECTIVE)
+		end
+		return nil
+	end
+
+	method any BuildResult(boolean success, string reason)
+		-- 공통 결과 Struct로 로컬 판정 결과 반환
+		self:SyncRuleStateFromRuntime()
+		if self.ruleState ~= nil then self.ruleState.requestedSuccess = success end
+		local resolved = _MiniGameRuleEngine:BuildResult(self.preset, self.ruleState, reason)
+		local tResult = MiniGameResultData()
+		tResult.success = success
+		tResult.score = self:GetMatchPercent()
+		tResult.reason = reason
+		if resolved ~= nil then
+			tResult.success = resolved.isSuccess
+			tResult.score = resolved.score
+			self.lastProgress = resolved.progress
+			self.lastAccuracy = resolved.accuracy
+		end
+		tResult.progress = self.lastProgress
+		tResult.accuracy = self.lastAccuracy
+		return tResult
+	end
+
+end

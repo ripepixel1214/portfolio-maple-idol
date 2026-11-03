@@ -11,7 +11,6 @@ script MiniGameInputRule extends Logic
 	property string REASON_INVALID_CONFIG = "invalidConfig"
 	property string REASON_UNKNOWN_BLOCK = "unknownBlock"
 	property string REASON_DUPLICATE_BLOCK = "duplicateBlock"
-	property string REASON_MISSING_BLOCK = "missingBlock"
 	property string REASON_INVALID_ROTATION = "invalidRotation"
 	property string REASON_OUT_OF_BOARD = "outOfBoard"
 	property string REASON_OVERLAP = "overlap"
@@ -35,12 +34,18 @@ script MiniGameInputRule extends Logic
 		local blockCatalog = preset ~= nil and preset.blockCatalog or nil
 		local boardRows = inputConfig ~= nil and inputConfig.boardRows or 0
 		local boardColumns = inputConfig ~= nil and inputConfig.boardColumns or 0
-		if boardRows <= 0 or boardColumns <= 0 or blockCatalog == nil or #blockCatalog == 0 then
+		local requiredPlacementCount = 0
+		if inputConfig ~= nil and blockCatalog ~= nil then
+			requiredPlacementCount = math.floor(
+				tonumber(inputConfig.requiredPlacementCount) or #blockCatalog)
+		end
+		if boardRows <= 0 or boardColumns <= 0 or blockCatalog == nil or #blockCatalog == 0
+			or requiredPlacementCount <= 0 or requiredPlacementCount > #blockCatalog then
 			return self:BuildFailure(self.REASON_INVALID_CONFIG)
 		end
 
 		local sourcePlacements = self:ParsePlacements(payload)
-		if sourcePlacements == nil or #sourcePlacements ~= #blockCatalog then
+		if sourcePlacements == nil or #sourcePlacements ~= requiredPlacementCount then
 			return self:BuildFailure(self.REASON_INVALID_FORMAT)
 		end
 
@@ -91,12 +96,6 @@ script MiniGameInputRule extends Logic
 				rotation = source.rotation,
 				cells = absoluteCells
 			}
-		end
-
-		for _, block in ipairs(blockCatalog) do
-			if usedBlockIds[block.id] ~= true then
-				return self:BuildFailure(self.REASON_MISSING_BLOCK)
-			end
 		end
 
 		return {

@@ -1,0 +1,31 @@
+---@description "미니게임별 클라이언트 처리기 관리 로직"
+@Logic
+script MiniGameClientHandlerRegistry extends Logic
+
+	@ExecSpace("ClientOnly")
+	method any Resolve(string gameKind)
+		-- 종류에 대응하는 처리기에서 세션별 클라이언트 계약 생성
+		local kinds = _EMiniGameKind
+		if gameKind == kinds.RAPID_PRESS_COUNT then
+			return _MiniGameCountClientHandler:CreateBehavior()
+		elseif gameKind == kinds.TIMING_ACCURACY then
+			return _MiniGameTimingClientHandler:CreateBehavior()
+		elseif gameKind == kinds.COMMAND_SEQUENCE then
+			return _MiniGameCommandClientHandler:CreateBehavior()
+		elseif gameKind == kinds.GAUGE_MAINTENANCE then
+			return _MiniGameGaugeClientHandler:CreateBehavior()
+		elseif gameKind == kinds.SHAPE_TRACE then
+			return _MiniGameShapeClientHandler:CreateBehavior()
+		elseif gameKind == kinds.DALGONA_DRAW then
+			return _MiniGameDalgonaClientHandler:CreateBehavior()
+		elseif gameKind == kinds.LUCKY_CUBE then
+			return _MiniGameLuckyCubeClientHandler:CreateBehavior()
+		elseif gameKind == kinds.FISHING then
+			return _MiniGameFishingClientHandler:CreateBehavior()
+		elseif gameKind == kinds.SNAIL_LADDER then
+			return _MiniGameSnailLadderClientHandler:CreateBehavior()
+		end
+		return nil
+	end
+
+end

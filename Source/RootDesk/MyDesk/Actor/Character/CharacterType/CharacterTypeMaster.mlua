@@ -7,6 +7,8 @@ script CharacterTypeMaster extends Logic
 	-- CharacterTypeRow
 	property any tCharacterTypeById = {}
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 로직 시작 때 캐릭터 타입 마스터 데이터를 로드합니다.
 		self:LoadCharacterType()
@@ -33,8 +35,8 @@ script CharacterTypeMaster extends Logic
 				tCharacterType.id = id
 				local nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
 				tCharacterType.name = ""
-				if _LocalizationLogic ~= nil then
-					tCharacterType.name = _LocalizationLogic:GetText(nameKey, "")
+				if _LocaleTextUtil ~= nil then
+					tCharacterType.name = _LocaleTextUtil:GetText(nameKey)
 				end
 		
 				self.tCharacterTypeById[id] = tCharacterType

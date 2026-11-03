@@ -1,0 +1,61 @@
+---@description "달팽이 사다리 서버 상태와 RPC 전송 데이터"
+@Struct
+script MiniGameSnailLadderState
+	property string stage = "lobby"
+	property integer selectedLane = 0
+	property any route = {}
+	property integer bet = 0
+	property integer balance = 0
+	property integer payout = 0
+	property integer multiplier = 0
+	property integer revision = 0
+	property boolean isWin = false
+	property boolean entryRejected = false
+	property boolean isDebug = false
+	property number elapsed = 0
+
+	method table ToPlainTable()
+		-- RPC 경계에서 사다리 경로를 단순 배열로 복사
+		local route = {}
+		for i = 1, 4 do
+			route[i] = math.max(0, math.min(3, math.floor(tonumber(self.route[i]) or 0)))
+		end
+		return {
+			stage = self.stage,
+			selectedLane = self.selectedLane,
+			route = route,
+			bet = self.bet,
+			balance = self.balance,
+			payout = self.payout,
+			multiplier = self.multiplier,
+			revision = self.revision,
+			isWin = self.isWin,
+			entryRejected = self.entryRejected,
+			isDebug = self.isDebug,
+			elapsed = self.elapsed
+		}
+	end
+
+	method any FromPlainTable(any data)
+		-- RPC 상태의 타입과 범위를 정규화
+		if type(data) ~= "table" then return self end
+		self.stage = type(data.stage) == "string" and data.stage or _MiniGameSnailLadderRule.STAGE_LOBBY
+		self.selectedLane = math.max(0, math.min(3, math.floor(tonumber(data.selectedLane) or 0)))
+		self.route = {}
+		if type(data.route) == "table" then
+			for i = 1, 4 do
+				self.route[i] = math.max(0, math.min(3, math.floor(tonumber(data.route[i]) or 0)))
+			end
+		end
+		self.bet = math.max(0, math.floor(tonumber(data.bet) or 0))
+		self.balance = math.max(0, math.floor(tonumber(data.balance) or 0))
+		self.payout = math.max(0, math.floor(tonumber(data.payout) or 0))
+		self.multiplier = math.max(0, math.min(2, math.floor(tonumber(data.multiplier) or 0)))
+		self.revision = math.max(0, math.floor(tonumber(data.revision) or 0))
+		self.isWin = data.isWin == true
+		self.entryRejected = data.entryRejected == true
+		self.isDebug = data.isDebug == true
+		self.elapsed = math.max(0, tonumber(data.elapsed) or 0)
+		return self
+	end
+end

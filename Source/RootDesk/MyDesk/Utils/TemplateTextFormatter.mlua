@@ -1,6 +1,8 @@
 @Logic
 script TemplateTextFormatter extends Logic
 
+	-- Public API
+
 	method string FormatText(string text, string token, any value)
 		-- 템플릿 문자열 안의 단일 토큰을 지정한 값으로 치환합니다.
 		if text == nil then
@@ -10,33 +12,7 @@ script TemplateTextFormatter extends Logic
 		return self:ReplaceToken(text, token, tostring(value))
 	end
 
-	method string FormatNumberValue(string text, integer valueIndex, number value)
-		-- valueIndex에 해당하는 {valueN} 토큰을 숫자 문자열로 치환합니다.
-		local valueToken = "{value" .. tostring(valueIndex) .. "}"
-		return self:ReplaceToken(text, valueToken, self:ToNumberText(value))
-	end
-
-	method string FormatPercentValue(string text, integer valueIndex, number value)
-		-- valueIndex에 해당하는 {valueNPercent} 토큰을 퍼센트 숫자 문자열로 치환합니다.
-		local percentToken = "{value" .. tostring(valueIndex) .. "Percent}"
-		return self:ReplaceToken(text, percentToken, self:ToPercentText(value))
-	end
-
-	method string ToPercentText(number value)
-		-- 0.3 같은 비율 값을 30 같은 퍼센트 숫자 문자열로 변환합니다.
-		return self:ToNumberText(value * 100)
-	end
-
-	method string ToNumberText(number value)
-		-- 소수점이 필요 없는 숫자를 정수 문자열로 정리합니다.
-		local flooredValue = math.floor(value)
-
-		if value == flooredValue then
-			return tostring(flooredValue)
-		end
-
-		return tostring(value)
-	end
+	-- Private Methods
 
 	method Color TextToColor(string colorKey)
 		-- 테이블에서 사용하는 색상 키를 UI 텍스트 색상으로 변환합니다.

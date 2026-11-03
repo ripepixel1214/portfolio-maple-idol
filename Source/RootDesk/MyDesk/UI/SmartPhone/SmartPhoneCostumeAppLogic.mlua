@@ -1,0 +1,1004 @@
+---@description "스마트폰 치장 앱의 미리보기, 임시 편집과 저장 요청."
+@Logic
+script SmartPhoneCostumeAppLogic extends Logic
+
+	property ButtonComponent MenuButton = "81965a33-69fc-4a6b-93c2-ee6c9fde70fa"
+
+	property Entity MenuNewBadgeEntity = "f6a450a9-86e0-43f8-88b5-d4415815e1ef"
+
+	property CostumeAppViewComponent View = "9d583417-a717-45a7-aaef-815f3e9b1ed9"
+
+	property boolean IsInitialized = false
+
+	property boolean IsOpen = false
+
+	property integer costumeBehaviorIndex = 1
+
+	property string UI_BEHAVIOR_DEFAULT_KEY = "ui.shop.behavior.default"
+
+	property string UI_BEHAVIOR_WALK_KEY = "ui.shop.behavior.walk"
+
+	property string UI_BEHAVIOR_MOTION_KEY = "ui.shop.behavior.motion"
+
+	property any costumeSaveClickHandler = nil
+
+	property string previewCostumeCharacterId = ""
+
+	property any costumeDraftByCharacterId = {}
+
+	property any shopItemChangedHandler = nil
+
+	property any costumeNewItemSnapshotSet = {}
+
+	property string costumeNewSnapshotCategory = ""
+
+	property string currentCostumeCategory = "hair"
+
+	property string UI_BASE_COSTUME_OUTFIT_KEY = "ui.smartphone.base_costume.outfit"
+
+	property string UI_BASE_COSTUME_SHOES_KEY = "ui.smartphone.base_costume.shoes"
+
+	property any costumeSlotClickHandlers = {}
+
+	property any costumeSelectedByCategory = {}
+
+	property string UI_OWNED_KEY = "ui.smartphone.item.equipped"
+
+	-- Public API
+
+	-- SmartPhoneUILogic이 검사하는 앱 계약 메서드입니다.
+
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		-- UI 참조와 초기 표시 상태를 준비합니다. 이벤트는 모든 앱의 초기화 후 연결합니다.
+		if self.IsInitialized then
+			return true
+		end
+		self.View:Initialize()
+		self:ApplyCostumeBehavior()
+		self.IsInitialized = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectEvents()
+		-- 스마트폰 관리자가 모든 앱의 초기화를 마친 뒤 입력과 데이터 이벤트를 연결합니다.
+		self:ConnectCostumeCategoryButtons()
+		self:ConnectCostumeSelectedItemButtons()
+		self:ConnectCostumePortraitFrames()
+		self:ConnectCostumeBehaviorButtons()
+		self:ConnectCostumeSaveButton()
+		self:ConnectShopItemChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		-- 스마트폰 관리자가 초기화를 마친 앱을 열고 현재 데이터로 표시를 갱신합니다.
+		self.IsOpen = true
+		self:RefreshCostumeCharacters()
+		self:ShowCostumeCategory("hair")
+		self:ApplyCostumeBehavior()
+		self:RefreshCostumeSaveButtonState()
+		self.View:SetVisible(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 초기화된 앱의 방문 상태를 정리하고 화면을 닫습니다.
+		self:DiscardCostumeDraftsIfLeavingCostume()
+		self.IsOpen = false
+		self.View:SetVisible(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Refresh()
+		-- 기존 데이터 매니저에서 앱의 최신 표시 데이터를 읽습니다.
+		self:RefreshCostumeCharacters()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshLocalized()
+		-- 언어 변경에 맞춰 앱의 동적 텍스트를 다시 표시합니다.
+		self:RebuildCostumeSlots()
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self.View:SetBehaviorLabel(self:GetCostumeBehaviorLabel(self.costumeBehaviorIndex))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnNewContentChanged()
+		-- 보유 아이템 변경은 OnShopItemChanged에서 처리하고 새 콘텐츠 배지는 RefreshBadges에서 반영합니다.
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean RefreshBadges()
+		-- 저장된 미확인 정보와 현재 방문 상태를 합쳐 앱 내부 배지를 갱신합니다.
+		local categories = {"hair", "clothes", "shoes", "hat", "goods"}
+		local hasAnyNew = _NewContentManager:ClientHasAnyNewContent("costume", "")
+		local hasSnapshot = self:HasCostumeNewItemSnapshot()
+		for _, category in ipairs(categories) do
+			local isNew = _NewContentManager:ClientHasAnyNewContent("costume", category)
+			if hasSnapshot and self.costumeNewSnapshotCategory == category then
+				isNew = true
+			end
+			self.View:SetCategoryBadge(category, isNew)
+		end
+		local hasAppNew = hasAnyNew or hasSnapshot
+		_SmartPhoneUIUtil:SetEntityEnable(self.MenuNewBadgeEntity, hasAppNew)
+		return hasAppNew
+	end
+
+	-- Private Methods
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeCategoryButtons()
+		-- 치장 카테고리 버튼들의 클릭 이벤트를 연결합니다.
+		for category, button in pairs(self.View:GetCategoryButtons()) do
+			self:ConnectCostumeCategoryButton(button, category)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeCategoryButton(ButtonComponent button, string category)
+		-- 카테고리 키를 캡처해 버튼 이벤트를 연결합니다.
+		if button == nil or button.Entity == nil then
+			return
+		end
+
+		local capturedCategory = category
+		button.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:ShowCostumeCategory(capturedCategory)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSelectedItemButtons()
+		-- 선택 중인 치장 항목 버튼들을 연결합니다.
+		for category, button in pairs(self.View:GetSelectedItemButtons()) do
+			self:ConnectCostumeSelectedItemButton(button, category)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSelectedItemButton(ButtonComponent button, string category)
+		-- 선택 항목의 카테고리 복원 동작을 버튼에 연결합니다.
+		if button == nil or button.Entity == nil then
+			return
+		end
+
+		local capturedCategory = category
+		button.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:RestoreCostumeCategorySelection(capturedCategory)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumePortraitFrames()
+		-- 미리보기 캐릭터 전환용 초상화 버튼을 연결합니다.
+		for index, button in ipairs(self.View:GetPortraitButtons()) do
+			self:ConnectCostumePortraitFrame(button, index)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumePortraitFrame(ButtonComponent frameButton, integer index)
+		-- 캐릭터 슬롯 번호를 캡처해 초상화 버튼을 연결합니다.
+		if frameButton == nil or frameButton.Entity == nil then
+			return
+		end
+
+		local capturedIndex = index
+		frameButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:OnCostumePortraitFrameClicked(capturedIndex)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeBehaviorButtons()
+		-- 스마트폰 치장 미리보기의 좌우 동작 버튼을 순환 전환에 연결합니다.
+		for _, entry in ipairs(self.View:GetBehaviorButtons()) do
+			self:ConnectCostumeBehaviorButton(entry.button, entry.delta)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeBehaviorButton(ButtonComponent behaviorButton, integer delta)
+		-- 개별 동작 버튼 클릭 시 현재 동작 인덱스를 지정 방향으로 이동합니다.
+		if behaviorButton == nil or behaviorButton.Entity == nil then
+			return
+		end
+
+		local capturedDelta = delta
+		behaviorButton.Entity:ConnectEvent(ButtonClickEvent, function()
+			self:CycleCostumeBehavior(capturedDelta)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CycleCostumeBehavior(integer delta)
+		-- 스마트폰 치장 미리보기 동작을 기본, 걷기, 모션 순서로 순환합니다.
+		local count = self:GetCostumeBehaviorCount()
+		if count <= 0 then
+			return
+		end
+
+		self.costumeBehaviorIndex = self.costumeBehaviorIndex + delta
+		if self.costumeBehaviorIndex < 1 then
+			self.costumeBehaviorIndex = count
+		elseif self.costumeBehaviorIndex > count then
+			self.costumeBehaviorIndex = 1
+		end
+
+		self:ApplyCostumeBehavior()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumeBehavior()
+		-- 현재 동작의 라벨을 표시하고 스마트폰 치장 미리보기 아바타에 재생합니다.
+		self.View:SetBehaviorLabel(self:GetCostumeBehaviorLabel(self.costumeBehaviorIndex))
+		self:PlayCurrentCostumeBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCurrentCostumeBehaviorAction()
+		-- 현재 동작 인덱스에 해당하는 액션을 스마트폰 치장 미리보기에서 재생합니다.
+		self.View:PlayAvatarAction(self:GetCostumeBehaviorAction(self.costumeBehaviorIndex))
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCostumeBehaviorCount()
+		-- 스마트폰 치장 미리보기에서 지원하는 동작 개수를 반환합니다.
+		return 3
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeBehaviorAction(integer index)
+		-- 동작 인덱스에 대응하는 스프라이트 액션 ID를 반환합니다.
+		if index == 1 then
+			return "stand1"
+		elseif index == 2 then
+			return "walk1"
+		elseif index == 3 then
+			return "swingO2"
+		end
+
+		return "stand1"
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeBehaviorLabel(integer index)
+		-- 동작 인덱스에 대응하는 스마트폰 치장 미리보기 표시 라벨을 반환합니다.
+		if index == 1 then
+			return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_DEFAULT_KEY)
+		elseif index == 2 then
+			return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_WALK_KEY)
+		elseif index == 3 then
+			return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_MOTION_KEY)
+		end
+
+		return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_DEFAULT_KEY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSaveButton()
+		-- 치장 저장 버튼을 캐릭터 코스튬 영구 저장 요청에 연결합니다.
+		if self.costumeSaveClickHandler == nil then
+			self.costumeSaveClickHandler = self.View:GetSaveButton().Entity:ConnectEvent(ButtonClickEvent, self.OnCostumeSaveButtonClicked)
+		end
+
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumeSaveButtonClicked(ButtonClickEvent event)
+		-- 현재 스마트폰 세션에서 편집한 모든 캐릭터의 치장을 한 번에 반영하고 저장하도록 요청합니다.
+		if self.previewCostumeCharacterId == "" then
+			return
+		end
+
+		self:SaveCurrentCostumeDraft()
+		local tCostumePlainByCharacterId = {}
+		local draftCount = 0
+		for characterId, tCostumeDataPlain in pairs(self.costumeDraftByCharacterId) do
+			if characterId ~= nil and characterId ~= "" and tCostumeDataPlain ~= nil then
+				tCostumePlainByCharacterId[characterId] = tCostumeDataPlain
+				draftCount += 1
+			end
+		end
+
+		if draftCount <= 0 then
+			return
+		end
+
+		_CharacterCostumeManager:RequestSetCostumesAndSave(tCostumePlainByCharacterId)
+		self.costumeDraftByCharacterId = {}
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectShopItemChanged()
+		-- 보유 치장 아이템 변경 이벤트를 구독합니다.
+		if self.shopItemChangedHandler == nil then
+			self.shopItemChangedHandler = _ShopItemManager:ConnectEvent(ShopItemChangedEvent, self.OnShopItemChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasCostumeNewItemSnapshot()
+		-- 치장 방문 상태에 NEW 항목이 남아 있는지 확인합니다.
+		for _, isNew in pairs(self.costumeNewItemSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnShopItemChanged(any shopItemChangedEvent)
+		-- 열린 치장 앱에 보유 아이템 변경을 반영합니다.
+		if self.IsOpen then
+			self:RebuildCostumeSlots()
+			self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowCostumeCategory(string category)
+		-- 선택 카테고리의 방문 상태와 목록을 표시합니다.
+		if category == nil or category == "" then
+			return
+		end
+		if self.costumeNewSnapshotCategory == category then
+			return
+		end
+
+		self:BeginCostumeCategoryVisit(category)
+		self.currentCostumeCategory = category
+		self:RefreshCostumeCategoryButtonVisuals()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginCostumeCategoryVisit(string category)
+		-- 치장 카테고리의 새 항목을 보관하고 확인 처리를 요청합니다.
+		self:ClearCostumeNewItemSnapshot()
+		self.costumeNewSnapshotCategory = category or ""
+		if self.costumeNewSnapshotCategory == "" then
+			return
+		end
+
+		local contentIds = _NewContentManager:ClientGetNewContentIds("costume", self.costumeNewSnapshotCategory)
+		for _, contentId in ipairs(contentIds) do
+			if contentId ~= nil and contentId ~= "" then
+				self.costumeNewItemSnapshotSet[contentId] = true
+			end
+		end
+		self:NotifyBadgesChanged()
+
+		if #contentIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("costume", self.costumeNewSnapshotCategory)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCostumeNewItemSnapshot()
+		-- 치장 카테고리 방문 상태를 비웁니다.
+		self.costumeNewSnapshotCategory = ""
+		self.costumeNewItemSnapshotSet = {}
+		self:NotifyBadgesChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCostumeCategoryButtonVisuals()
+		-- 현재 카테고리에는 SelectedColor, 나머지 카테고리에는 NormalColor를 적용합니다.
+		self.View:SetCategoryActive(self.currentCostumeCategory)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RebuildCostumeSlots()
+		-- 현재 카테고리의 치장 슬롯을 다시 생성합니다.
+		self:ClearCostumeRuntimeSlots()
+
+		local items = self:GetDisplayCostumeItemsByCategory(self.currentCostumeCategory)
+		for index = 1, #items do
+			local tShopItem = items[index]
+			local itemView = self.View:CreateItem(self:GetCostumeRuntimeSlotName(index))
+			if itemView ~= nil then
+				self:SetCostumeSlot(itemView, tShopItem)
+				self:ConnectCostumeSlotClick(itemView:GetClickEntity(), tShopItem)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetDisplayCostumeItemsByCategory(string category)
+		-- 기본 치장과 보유 상점 아이템을 표시 목록으로 합칩니다.
+		local items = {}
+		self:AddUnlockedCharacterBaseCostumeItems(items, category)
+		self:AddOwnedShopCostumeItems(items, category)
+		return items
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddUnlockedCharacterBaseCostumeItems(any items, string category)
+		-- 해금된 캐릭터의 기본 치장을 목록에 추가합니다.
+		if items == nil then
+			return
+		end
+
+		local characters = _CharacterManager:ClientGetCharacters()
+		if characters == nil then
+			return
+		end
+
+		if category == "clothes" or category == "shoes" then
+			for _, character in ipairs(characters) do
+				if self:IsUnlockedCostumeCharacter(character) then
+					local characterId = character.id or ""
+					local ruid = self:GetBaseCostumeRuid(characterId, category)
+					if ruid ~= nil and ruid ~= "" then
+						local tBaseItem = {}
+						tBaseItem.shopItemId = "__base_shared_" .. tostring(category or "")
+						tBaseItem.name = self:GetBaseCostumeDisplayName(character, category)
+						tBaseItem.category = category or ""
+						tBaseItem.ruid = ruid
+						tBaseItem.isBaseCostume = true
+						tBaseItem.sourceCharacterId = characterId
+						table.insert(items, tBaseItem)
+						return
+					end
+				end
+			end
+
+			return
+		end
+
+		for _, character in ipairs(characters) do
+			if self:IsUnlockedCostumeCharacter(character) then
+				local characterId = character.id or ""
+				local ruid = self:GetBaseCostumeRuid(characterId, category)
+				if ruid ~= nil and ruid ~= "" then
+					local tBaseItem = {}
+					tBaseItem.shopItemId = self:GetBaseCostumeItemId(characterId, category)
+					tBaseItem.name = self:GetBaseCostumeDisplayName(character, category)
+					tBaseItem.category = category or ""
+					tBaseItem.ruid = ruid
+					tBaseItem.isBaseCostume = true
+					tBaseItem.sourceCharacterId = characterId
+					table.insert(items, tBaseItem)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsUnlockedCostumeCharacter(any character)
+		-- 치장을 표시할 수 있는 해금 캐릭터인지 확인합니다.
+		if character == nil then
+			return false
+		end
+
+		if character.isDiscovered == false then
+			return false
+		end
+
+		local characterId = character.id or ""
+		if characterId == "" then
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AddOwnedShopCostumeItems(any items, string category)
+		-- 현재 카테고리의 보유 상점 아이템을 목록에 추가합니다.
+		if items == nil then
+			return
+		end
+		local ownedIds = _ShopItemManager:ClientGetOwnedShopItemIds()
+		if ownedIds == nil then
+			return
+		end
+
+		for _, shopItemId in ipairs(ownedIds) do
+			local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+			if tShopItem ~= nil and (category == nil or category == "" or (tShopItem.category or "") == category) then
+				table.insert(items, tShopItem)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetOwnedCostumeItemsByCategory(string category)
+		-- 카테고리별 보유 상점 치장 목록을 반환합니다.
+		local items = {}
+		self:AddOwnedShopCostumeItems(items, category)
+		return items
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeRuid(string characterId, string category)
+		-- 캐릭터 기본 치장의 해당 부위 리소스를 반환합니다.
+		local mapleCategory = self:GetMapleAvatarItemCategory(category)
+		if characterId == "" or mapleCategory == nil then
+			return ""
+		end
+
+		return _CharacterBaseCostumeMaster:GetRuid(characterId, mapleCategory)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetMapleAvatarItemCategory(string category)
+		-- 앱의 카테고리 키를 엔진 장착 부위로 변환합니다.
+		if category == "hair" then
+			return MapleAvatarItemCategory.Hair
+		elseif category == "clothes" then
+			return MapleAvatarItemCategory.Longcoat
+		elseif category == "shoes" then
+			return MapleAvatarItemCategory.Shoes
+		elseif category == "hat" then
+			return MapleAvatarItemCategory.Cap
+		elseif category == "goods" then
+			return MapleAvatarItemCategory.OneHandedWeapon
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeItemId(string characterId, string category)
+		-- 기본 치장 슬롯을 식별할 표시용 키를 생성합니다.
+		return "__base_" .. tostring(characterId or "") .. "_" .. tostring(category or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetBaseCostumeDisplayName(any character, string category)
+		-- 기본 치장 항목의 현지화된 이름을 반환합니다.
+		if category == "clothes" then
+			return _LocaleTextUtil:Format(self.UI_BASE_COSTUME_OUTFIT_KEY, self:GetCostumeCategoryDisplayName(category), nil, nil, "")
+		elseif category == "shoes" then
+			return _LocaleTextUtil:Format(self.UI_BASE_COSTUME_SHOES_KEY, self:GetCostumeCategoryDisplayName(category), nil, nil, "")
+		end
+
+		local characterName = ""
+		if character ~= nil then
+			characterName = character.name or ""
+		end
+		if characterName == "" and character ~= nil then
+			characterName = character.id or ""
+		end
+
+		return characterName .. " " .. self:GetCostumeCategoryDisplayName(category)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeCategoryDisplayName(string category)
+		-- 치장 카테고리의 표시 이름을 반환합니다.
+		if category == "hair" then
+		return _LocaleTextUtil:GetText("ui.shop.category.hair")
+		elseif category == "clothes" then
+		return _LocaleTextUtil:GetText("ui.shop.category.clothes")
+		elseif category == "shoes" then
+		return _LocaleTextUtil:GetText("ui.shop.category.shoes")
+		elseif category == "hat" then
+		return _LocaleTextUtil:GetText("ui.shop.category.hat")
+		elseif category == "goods" then
+		return _LocaleTextUtil:GetText("ui.smartphone.category.weapon")
+		end
+
+		return _LocaleTextUtil:GetText("ui.smartphone.category.cosmetic")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCostumeRuntimeSlots()
+		-- 생성한 치장 슬롯의 이벤트를 해제하고 엔티티를 제거합니다.
+		self:DisconnectCostumeSlotClicks()
+		self.View:ClearItems()
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeRuntimeSlotName(integer index)
+		-- 복제할 치장 슬롯의 이름을 생성합니다.
+		if index < 10 then
+			return "RuntimeCostumeItem0" .. tostring(index)
+		end
+
+		return "RuntimeCostumeItem" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCostumeSlot(any itemView, any tShopItem)
+		-- 치장 슬롯의 아이콘과 착용 상태 및 NEW 배지를 채웁니다.
+		itemView:Show(tShopItem.ruid or "", self:GetCostumeSlotStatusText(tShopItem), self:IsCostumeItemNewInSnapshot(tShopItem))
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCostumeItemNewInSnapshot(any tShopItem)
+		-- 치장 항목이 이번 방문의 NEW 목록에 속하는지 확인합니다.
+		if tShopItem == nil or tShopItem.isBaseCostume == true then
+			return false
+		end
+
+		local shopItemId = tShopItem.shopItemId or ""
+		return shopItemId ~= "" and self.costumeNewItemSnapshotSet[shopItemId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectCostumeSlotClick(Entity slot, any tShopItem)
+		-- 아이템 정보를 캡처해 치장 슬롯 클릭을 연결합니다.
+		if slot == nil or tShopItem == nil then
+			return
+		end
+
+		local shopItemId = tShopItem.shopItemId or ""
+		if shopItemId == "" then
+			return
+		end
+
+		local capturedItem = tShopItem
+		local clickHandler = slot:ConnectEvent(ButtonClickEvent, function()
+			self:OnCostumeSlotClicked(capturedItem)
+		end)
+		table.insert(self.costumeSlotClickHandlers, { entity = slot, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectCostumeSlotClicks()
+		-- 생성한 치장 슬롯의 클릭 이벤트를 해제합니다.
+		if self.costumeSlotClickHandlers == nil then
+			self.costumeSlotClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.costumeSlotClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.costumeSlotClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumeSlotClicked(any tCostumeItem)
+		-- 선택한 치장을 미리보기에 적용하고 임시 변경을 기록합니다.
+		if tCostumeItem == nil then
+			return
+		end
+		if tCostumeItem.isBaseCostume ~= true and _ShopItemManager:ClientHasShopItem(tCostumeItem.shopItemId or "") == false then
+			return
+		end
+
+		self:DismissCostumeItemNewBadge(tCostumeItem)
+		local category = tCostumeItem.category or ""
+		if self:IsCostumeItemEquipped(tCostumeItem) then
+			self:RestoreCostumeCategorySelection(category)
+			return
+		end
+
+		self.costumeSelectedByCategory[category] = tCostumeItem.shopItemId or ""
+		self:UpdateCostumeSelectedText(category, tCostumeItem.name or "")
+		self:ApplyCostumeOverrideForCategory(category, tCostumeItem.ruid or "")
+		self:PlayCurrentCostumeBehaviorAction()
+		self:SaveCurrentCostumeDraft()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissCostumeItemNewBadge(any tCostumeItem)
+		-- 확인한 치장 아이템을 현재 방문 NEW 목록에서 제거합니다.
+		if tCostumeItem == nil then
+			return
+		end
+
+		local shopItemId = tCostumeItem.shopItemId or ""
+		if shopItemId ~= "" then
+			self.costumeNewItemSnapshotSet[shopItemId] = nil
+			self:NotifyBadgesChanged()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeSlotStatusText(any tCostumeItem)
+		-- 치장 슬롯의 착용 상태 문구를 반환합니다.
+		if self:IsCostumeItemEquipped(tCostumeItem) then
+			return _LocaleTextUtil:GetText(self.UI_OWNED_KEY)
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCostumeItemEquipped(any tCostumeItem)
+		-- 현재 선택된 캐릭터의 프리뷰 아바타 장착값과 슬롯 아이템을 비교합니다.
+		if tCostumeItem == nil then
+			return false
+		end
+
+		local category = tCostumeItem.category or ""
+		if self.previewCostumeCharacterId == "" or category == "" then
+			return false
+		end
+
+		local currentRuid = self:GetCurrentCostumeRuid(category)
+		return currentRuid ~= "" and currentRuid == (tCostumeItem.ruid or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentCostumeRuid(string category)
+		-- 현재 선택된 캐릭터가 적용된 프리뷰 아바타에서 카테고리별 장착 RUID를 반환합니다.
+		if self.previewCostumeCharacterId == "" then
+			return ""
+		end
+		return self.View:GetCurrentCostumeRuid(category)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateCostumeSelectedText(string category, string name)
+		-- 해당 카테고리의 선택 항목 이름을 갱신합니다.
+		self.View:SetSelectedText(category, name)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCostumeCharacters()
+		-- 활성 캐릭터의 초상화와 미리보기 대상을 갱신합니다.
+		local activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		for index = 1, 3 do
+			local characterId = activeIds[index] or ""
+			self.View:SetPortrait(index, _SmartPhoneUIUtil:GetCharacterPortraitRuid(characterId), characterId ~= "")
+		end
+
+		if self.previewCostumeCharacterId == "" or _SmartPhoneUIUtil:ContainsString(activeIds, self.previewCostumeCharacterId) == false then
+			self:SelectCostumePreviewCharacter(activeIds[1] or "")
+			return
+		end
+
+		self:ApplyCostumePreviewForCharacter(self.previewCostumeCharacterId)
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:PlayCurrentCostumeBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCostumePortraitFrameClicked(integer index)
+		-- 선택한 초상화의 캐릭터를 미리보기 대상으로 전환합니다.
+		local activeIds = _CharacterManager:ClientGetActiveCharacterIds()
+		if activeIds == nil then
+			activeIds = {}
+		end
+
+		self:SelectCostumePreviewCharacter(activeIds[index] or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectCostumePreviewCharacter(string characterId)
+		-- 기존 캐릭터의 임시 변경을 보관한 뒤 미리보기를 전환합니다.
+		self:SaveCurrentCostumeDraft()
+		self.previewCostumeCharacterId = characterId or ""
+		self.costumeSelectedByCategory = {}
+		self:ApplyCostumePreviewForCharacter(self.previewCostumeCharacterId)
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:RebuildCostumeSlots()
+		self:PlayCurrentCostumeBehaviorAction()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SaveCurrentCostumeDraft()
+		-- 캐릭터 전환 전 현재 프리뷰의 17개 슬롯을 캐릭터별 임시 상태로 보관합니다.
+		if self.previewCostumeCharacterId == "" then
+			return
+		end
+
+		local tCostumeDataPlain = self.View:BuildPreviewCostumeData()
+		if tCostumeDataPlain ~= nil then
+			local tSavedCostume = _CharacterCostumeManager:ClientGetCostume(self.previewCostumeCharacterId)
+
+			if self:AreCostumeDataEqual(tCostumeDataPlain, tSavedCostume) then
+				self.costumeDraftByCharacterId[self.previewCostumeCharacterId] = nil
+			else
+				self.costumeDraftByCharacterId[self.previewCostumeCharacterId] = tCostumeDataPlain
+			end
+		end
+
+		self:RefreshCostumeSaveButtonState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean AreCostumeDataEqual(any left, any right)
+		-- 17개 장착 부위가 저장된 치장과 동일한지 비교합니다.
+		if left == nil or right == nil then
+			return false
+		end
+
+		return (left.body or "") == (right.body or "")
+			and (left.hair or "") == (right.hair or "")
+			and (left.face or "") == (right.face or "")
+			and (left.cap or "") == (right.cap or "")
+			and (left.cape or "") == (right.cape or "")
+			and (left.coat or "") == (right.coat or "")
+			and (left.longcoat or "") == (right.longcoat or "")
+			and (left.pants or "") == (right.pants or "")
+			and (left.glove or "") == (right.glove or "")
+			and (left.shoes or "") == (right.shoes or "")
+			and (left.oneHandedWeapon or "") == (right.oneHandedWeapon or "")
+			and (left.twoHandedWeapon or "") == (right.twoHandedWeapon or "")
+			and (left.subWeapon or "") == (right.subWeapon or "")
+			and (left.faceAccessory or "") == (right.faceAccessory or "")
+			and (left.eyeAccessory or "") == (right.eyeAccessory or "")
+			and (left.earAccessory or "") == (right.earAccessory or "")
+			and (left.ear or "") == (right.ear or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasCostumeDraftChanges()
+		-- 저장하지 않은 캐릭터별 치장 변경이 있는지 확인합니다.
+		for _, tCostumeDataPlain in pairs(self.costumeDraftByCharacterId) do
+			if tCostumeDataPlain ~= nil then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCostumeSaveButtonState()
+		-- 미저장 변경 유무에 따라 저장 버튼을 활성화합니다.
+		self.View:SetSaveEnabled(self:HasCostumeDraftChanges())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumePreviewForCharacter(string characterId)
+		-- 저장 코스튬을 먼저 적용하고, 현재 스마트폰 세션의 캐릭터별 임시 치장을 덮어씁니다.
+		self:ApplyBaseCostumeToCostumePreview()
+
+		local tDraft = self.costumeDraftByCharacterId[characterId or ""]
+		if tDraft == nil then
+			return
+		end
+		self.View:ApplyPreviewCostume(tDraft)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DiscardCostumeDraftsIfLeavingCostume()
+		-- 치장 탭을 벗어나거나 스마트폰을 닫을 때만 모든 캐릭터의 미저장 임시 치장을 폐기합니다.
+		if self.IsOpen == false then
+			return
+		end
+
+		self:ClearCostumeNewItemSnapshot()
+		self.costumeDraftByCharacterId = {}
+		self.costumeSelectedByCategory = {}
+		self:RefreshCostumeSaveButtonState()
+		self:ApplyBaseCostumeToCostumePreview()
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyBaseCostumeToCostumePreview()
+		-- 미리보기 컴포넌트에 현재 캐릭터의 저장된 치장을 적용합니다.
+		self.View:SetPreviewCharacter(self.previewCostumeCharacterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedCostumeTextsFromCurrentCostume()
+		-- 미리보기의 장착 상태에 맞춰 선택 항목 문구를 갱신합니다.
+		self:ClearCostumeSelectedTexts()
+		if self.previewCostumeCharacterId == "" then
+			return
+		end
+
+		self:SetSelectedCostumeFromRuid("hair", self:GetCurrentCostumeRuid("hair"))
+		self:SetSelectedCostumeFromRuid("clothes", self:GetCurrentCostumeRuid("clothes"))
+		self:SetSelectedCostumeFromRuid("shoes", self:GetCurrentCostumeRuid("shoes"))
+		self:SetSelectedCostumeFromRuid("hat", self:GetCurrentCostumeRuid("hat"))
+		self:SetSelectedCostumeFromRuid("goods", self:GetCurrentCostumeRuid("goods"))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearCostumeSelectedTexts()
+		-- 치장 카테고리별 선택 항목 문구를 비웁니다.
+		self:UpdateCostumeSelectedText("hair", "")
+		self:UpdateCostumeSelectedText("clothes", "")
+		self:UpdateCostumeSelectedText("shoes", "")
+		self:UpdateCostumeSelectedText("hat", "")
+		self:UpdateCostumeSelectedText("goods", "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSelectedCostumeFromRuid(string category, string ruid)
+		-- 장착 리소스와 대응하는 보유 항목 이름을 표시합니다.
+		local tShopItem = self:FindOwnedCostumeItemByRuid(category, ruid)
+		if tShopItem == nil then
+			return
+		end
+
+		self.costumeSelectedByCategory[category] = tShopItem.shopItemId or ""
+		self:UpdateCostumeSelectedText(category, tShopItem.name or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method any FindOwnedCostumeItemByRuid(string category, string ruid)
+		-- 리소스가 일치하는 기본 또는 보유 치장 항목을 찾습니다.
+		if ruid == nil or ruid == "" then
+			return nil
+		end
+
+		local items = self:GetDisplayCostumeItemsByCategory(category)
+		for _, tShopItem in ipairs(items) do
+			if tShopItem ~= nil and (tShopItem.ruid or "") == ruid then
+				return tShopItem
+			end
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreCostumeCategorySelection(string category)
+		-- 카테고리 선택을 저장된 치장으로 복원하고 임시 상태를 갱신합니다.
+		if self.previewCostumeCharacterId == "" or category == "" then
+			return
+		end
+
+		self.costumeSelectedByCategory[category] = ""
+		self:RestoreCostumeCategoryToCurrent(category)
+		self:RefreshSelectedCostumeTextsFromCurrentCostume()
+		self:PlayCurrentCostumeBehaviorAction()
+		self:SaveCurrentCostumeDraft()
+		self:RebuildCostumeSlots()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreCostumeCategoryToCurrent(string category)
+		-- 선택 카테고리의 장착 값을 저장된 치장으로 되돌립니다.
+		if self.previewCostumeCharacterId == "" then
+			return
+		end
+
+		local tCurrentCostume = _CharacterCostumeManager:ClientGetCostume(self.previewCostumeCharacterId)
+		local currentRuid = self:GetCostumeDataRuidByCategory(tCurrentCostume, category)
+		self:ApplyCostumeOverrideForCategory(category, currentRuid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCostumeDataRuidByCategory(any tCostumeData, string category)
+		-- 저장된 치장 데이터에서 카테고리의 리소스를 읽습니다.
+		if tCostumeData == nil then
+			return ""
+		end
+
+		if category == "hair" then
+			return tCostumeData.hair or ""
+		elseif category == "clothes" then
+			return tCostumeData.longcoat or ""
+		elseif category == "shoes" then
+			return tCostumeData.shoes or ""
+		elseif category == "hat" then
+			return tCostumeData.cap or ""
+		elseif category == "goods" then
+			return tCostumeData.oneHandedWeapon or ""
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCostumeOverrideForCategory(string category, string ruid)
+		-- 치장 카테고리에 맞는 장착 슬롯을 미리보기에 적용합니다.
+		self.View:ApplyCostumeOverride(category, ruid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void NotifyBadgesChanged()
+		-- 앱 방문 상태가 바뀌면 스마트폰 메뉴 배지를 다시 집계합니다.
+		_SmartPhoneUILogic:RefreshNewContentBadges()
+	end
+
+end

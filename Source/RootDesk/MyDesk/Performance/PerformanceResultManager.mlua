@@ -1,12 +1,6 @@
----@description "공연 결과 매니저. 공연 종료 시 서버 권위로 6개 점수(보컬/댄스/비주얼/팬덤투표/현장반응/총점)를 산출하고 클리어를 판정해 요청한 클라이언트로 동기화한다."
+---@description "캐릭터 스탯 기반 공연 점수 산출과 서버 권위 클리어 판정, 결과 동기화"
 @Logic
 script PerformanceResultManager extends Logic
-
-	-- 팬덤 투표 점수 가중치 (팬덤 투표 = 현재 팬덤 수 × weight)
-	property number fandomVoteWeight = 1.5
-
-	-- 현장 반응 점수: 공연 중 미니게임 성공 1회당 점수
-	property number liveReactionPerSuccess = 1000
 
 	-- 팀 스탯 가중치: 센터 캐릭터 스탯에 곱하는 배율 (서브는 1)
 	property number centerStatWeight = 1.4
@@ -19,44 +13,232 @@ script PerformanceResultManager extends Logic
 	property number subStatMultiplier = 8
 	property number subStatMax = 7500
 
-	-- 스탯 총점(주스탯+부스탯1+부스탯2) 최대 (팬덤/현장반응 제외)
+	-- 스탯 총점(주스탯+부스탯1+부스탯2) 최대
 	property number statTotalMax = 30000
 
+	property integer stageRewardMeso = 500
+
+	property integer stageRewardIntimacy = 50
+
+	property any pendingStageReward = nil
+
+	-- 서버에서 승인한 현재 스테이지 공연 시도와 확정 결과
+	property any tStageAttempt = nil
+
 	@ExecSpace("Server")
-	method void RequestFinishPerformance(string performanceId, table tRoleAssignmentPlain)
-		-- 클라이언트가 공연 정상 종료 시 결과 산출을 서버에 요청 (서버 권위)
-		if performanceId == nil or performanceId == "" then
-			log_warning("[PerformanceResult] performanceId가 비어 있음")
+	method void RequestBeginPerformance(string performanceId, table tRoleAssignmentPlain, string requestId)
+		-- 요청 소유자와 현재 스테이지·편성을 검증한 뒤 서버 시계로 공연 시도 승인
+		local tStage = self:GetCurrentStageForUser(performanceId, senderUserId)
+		local tAssignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, senderUserId)
+		local tHeader = _PerformanceMaster:GetPerformance(performanceId)
+		if requestId == nil or requestId == "" or tStage == nil or tAssignment == nil or tHeader == nil
+			or type(tHeader.length) ~= "number" or tHeader.length ~= tHeader.length
+			or tHeader.length <= 0 or tHeader.length == math.huge
+			or self:IsUserInPerformanceMap(senderUserId) == false then
+			log_warning("[PerformanceResult] 공연 시작 거부 id=" .. tostring(performanceId))
+			self:SyncPerformanceStart(requestId, performanceId, "", {}, senderUserId)
 			return
 		end
 
-		local tScore = self:ComputeScore(performanceId, tRoleAssignmentPlain)
+		local tAttempt = PerformanceStageAttempt()
+		tAttempt.attemptId = _UtilLogic:NewGuid()
+		tAttempt.requestId = requestId
+		tAttempt.userId = senderUserId
+		tAttempt.stageId = tStage.stageId
+		tAttempt.performanceId = performanceId
+		tAttempt.startedAt = _UtilLogic.ServerElapsedSeconds
+		tAttempt.duration = tHeader.length
+		tAttempt.targetScore = tStage.targetScore
+		tAttempt.tRoleAssignment = tAssignment:Copy()
+		self.pendingStageReward = nil
+		self.tStageAttempt = tAttempt
+		log("[PerformanceResult] 공연 시작 승인 stage=" .. tAttempt.stageId .. " id=" .. performanceId)
+		self:SyncPerformanceStart(requestId, performanceId, tAttempt.attemptId, tAssignment:ToPlainTable(), senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestFinishPerformance(string performanceId, table tRoleAssignmentPlain, string attemptId)
+		-- 서버가 승인한 공연 시도·경과 시간·편성이 일치할 때만 결과 확정
+		local tStage = self:GetCurrentStageForUser(performanceId, senderUserId)
+		local tAssignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, senderUserId)
+		local tAttempt = self.tStageAttempt
+		if tStage == nil or tAssignment == nil or tAttempt == nil or tAttempt.isFinished
+			or attemptId == nil or attemptId == "" or tAttempt.attemptId ~= attemptId
+			or tAttempt.userId ~= senderUserId or tAttempt.stageId ~= tStage.stageId
+			or tAttempt.performanceId ~= performanceId or tAttempt.targetScore ~= tStage.targetScore
+			or self:IsSameAssignment(tAttempt.tRoleAssignment, tAssignment) == false
+			or self:IsUserInPerformanceMap(senderUserId) == false
+			or _UtilLogic.ServerElapsedSeconds - tAttempt.startedAt < tAttempt.duration then
+			log_warning("[PerformanceResult] 공연 결과 요청 거부 id=" .. tostring(performanceId))
+			return
+		end
+
+		local tScore = self:ComputeScore(performanceId, tAttempt.tRoleAssignment:ToPlainTable())
+		if tScore == nil then return end
+		tAttempt.tScore = tScore
+		tAttempt.isFinished = true
+		self.pendingStageReward = nil
+		if tScore.isClear then self.pendingStageReward = { stageId = tStage.stageId, characterIds = { tAttempt.tRoleAssignment.center, tAttempt.tRoleAssignment.subL, tAttempt.tRoleAssignment.subR } } end
 		-- 요청한 클라이언트에게만 결과를 동기화 (마지막 인자 = 대상 userId)
 		self:SyncPerformanceResult(performanceId, tScore, senderUserId)
 	end
 
 	@ExecSpace("ServerOnly")
-	method any ComputeScore(string performanceId, table tRoleAssignmentPlain)
-		-- 6개 점수를 산출해 plain table로 반환
-		-- return: { vocal, dance, visual, fandomVote, liveReaction, total, clearScore, isClear }
-		local assignment = PerformanceRoleAssignment():FromPlainTable(tRoleAssignmentPlain)
+	method boolean ApplyStageReward(string stageId, string forUserId)
+		-- 스테이지 완료 경로에서 서버가 확인한 클리어 보상을 적용합니다. 저장은 스텝 완료 시 함께 처리합니다.
+		local reward = self.pendingStageReward
+		if reward == nil or reward.stageId ~= stageId or self:CanCompleteStage(forUserId) == false or _CharacterManager:CanUseCharacters(forUserId) == false then return false end
 
-		-- 공연 헤더에서 스탯 가중치와 클리어 기준을 가져옴 (공연마다 보컬/댄스/비주얼 중요도가 다름)
+		local progressDelta = ProgressStatDelta()
+		progressDelta.meso = self.stageRewardMeso
+		if _ProgressManager:ApplyProgressStat(progressDelta:ToPlainTable()) == false then return false end
+
+		for _, characterId in ipairs(reward.characterIds) do
+			local characterDelta = CharacterStatDelta()
+			characterDelta.characterId = characterId
+			characterDelta.intimacy = self.stageRewardIntimacy
+			_CharacterManager:ApplyCharacterStat(characterDelta:ToPlainTable())
+		end
+
+		self:ResetStageReward()
+		_CharacterManager:PushCharactersToClient(forUserId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ResetStageReward()
+		-- 새 스테이지 시작 또는 보상 적용 후 이전 공연의 보상 대기 정보를 비웁니다.
+		self.pendingStageReward = nil
+	end
+
+	@ExecSpace("Server")
+	method void RequestDebugFinishPerformance(string performanceId, table tRoleAssignmentPlain, boolean isClear)
+		-- 메이커에서만 확정 결과를 만들어 실제 스테이지 완료 및 보상 경로를 테스트합니다.
+		if Environment:IsMakerPlay() == false then return end
+		local stage = self:GetCurrentStageForUser(performanceId, senderUserId)
+		local assignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, senderUserId)
+		if stage == nil or assignment == nil then return end
+		local score = self:ComputeScore(performanceId, assignment:ToPlainTable())
+		if score == nil then return end
+		score.total = isClear and math.max(0, stage.targetScore) or 0
+		score.isClear = isClear
+		local attempt = PerformanceStageAttempt()
+		attempt.attemptId = _UtilLogic:NewGuid()
+		attempt.userId = senderUserId
+		attempt.stageId = stage.stageId
+		attempt.performanceId = performanceId
+		attempt.targetScore = stage.targetScore
+		attempt.tRoleAssignment = assignment:Copy()
+		attempt.tScore = score
+		attempt.isFinished = true
+		self.tStageAttempt = attempt
+		self.pendingStageReward = nil
+		if isClear then self.pendingStageReward = { stageId = stage.stageId, characterIds = { assignment.center, assignment.subL, assignment.subR } } end
+		self:SyncPerformanceResult(performanceId, score, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestCancelPerformance(string requestId, string performanceId, string attemptId)
+		-- 본인이 시작한 미완료 공연만 취소, 이전 요청으로 새 공연을 취소하지 않도록 식별자 확인
+		local tAttempt = self.tStageAttempt
+		if tAttempt == nil or tAttempt.isFinished or tAttempt.userId ~= senderUserId
+			or tAttempt.performanceId ~= performanceId then return end
+		local matchesRequest = requestId ~= nil and requestId ~= "" and requestId == tAttempt.requestId
+		local matchesAttempt = attemptId ~= nil and attemptId ~= "" and attemptId == tAttempt.attemptId
+		if matchesRequest == false and matchesAttempt == false then return end
+		self:ClearStageAttempt()
+		log("[PerformanceResult] 공연 시도 취소 id=" .. performanceId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetCurrentStageForUser(string performanceId, string forUserId)
+		-- 현재 진행 소유자·공연 단계·StageTable의 공연 및 목표 점수 검증
+		if _ProgressManager == nil or _StageMaster == nil or _PerformanceMaster == nil
+			or _ProgressManager:CanUseProgress(forUserId) == false then return nil end
+		local tProgress = _ProgressManager:ServerGetProgress()
+		if tProgress == nil or tProgress.eCurrentStep ~= _EProgressStep.Performance then return nil end
+		local tStage = _StageMaster:GetStage(tProgress.eCurrentStage)
+		if tStage == nil or tStage.performanceId ~= performanceId
+			or _StageMaster:IsUsableStage(tStage) == false then return nil end
+		return tStage
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ValidateRoleAssignment(any tPlain, string forUserId)
+		-- 현재 편성의 서로 다른 보유 캐릭터 세 명만 역할 배정에 허용
+		if type(tPlain) ~= "table" or _CharacterManager == nil
+			or _CharacterManager:CanUseCharacters(forUserId) == false then return nil end
+		if type(tPlain.center) ~= "string" or type(tPlain.subL) ~= "string"
+			or type(tPlain.subR) ~= "string" then return nil end
+		local ids = { tPlain.center, tPlain.subL, tPlain.subR }
+		if _CharacterManager:CanSetStageCharacters(ids) == false then return nil end
+		for _, characterId in ipairs(ids) do
+			if _CharacterManager:IsActiveCharacter(characterId) == false then return nil end
+		end
+		return PerformanceRoleAssignment():FromPlainTable(tPlain)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsSameAssignment(PerformanceRoleAssignment tLeft, PerformanceRoleAssignment tRight)
+		-- 시작 시 승인한 역할 배정과 종료 요청의 역할 배정 비교
+		return tLeft ~= nil and tRight ~= nil and tLeft.center == tRight.center
+			and tLeft.subL == tRight.subL and tLeft.subR == tRight.subR
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsUserInPerformanceMap(string forUserId)
+		-- 공연 시작·종료 요청이 실제 공연 맵에서 발생했는지 확인
+		local player = _UserService:GetUserEntityByUserId(forUserId)
+		return isvalid(player) and isvalid(player.CurrentMap)
+			and player.CurrentMap.Name == _PerformanceConductor.performanceMapName
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanCompleteStage(string forUserId)
+		-- 현재 스테이지에 연결된 서버 확정 성공 결과만 단계 완료에 허용
+		local tAttempt = self.tStageAttempt
+		if tAttempt == nil or tAttempt.userId ~= forUserId or tAttempt.isFinished == false
+			or tAttempt.tScore == nil or tAttempt.tScore.isClear ~= true then return false end
+		local tStage = self:GetCurrentStageForUser(tAttempt.performanceId, forUserId)
+		return tStage ~= nil and tAttempt.stageId == tStage.stageId
+			and tAttempt.targetScore == tStage.targetScore and tAttempt.tScore.total >= tStage.targetScore
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearStageAttempt()
+		-- 완료·재접속·스테이지 재선택 시 이전 공연 시도 무효화
+		self.tStageAttempt = nil
+		self.pendingStageReward = nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 공연 시도 및 결과 정리
+		self:ClearStageAttempt()
+	end
+
+	@ExecSpace("Client")
+	method void SyncPerformanceStart(string requestId, string performanceId, string attemptId, table tAssignmentPlain)
+		-- 시작 승인 결과를 해당 클라이언트의 대기 중인 공연에 전달
+		_PerformanceConductor:OnPerformanceStartResponse(requestId, performanceId, attemptId, tAssignmentPlain)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ComputeScore(string performanceId, table tRoleAssignmentPlain)
+		-- 캐릭터 스탯 점수를 산출해 결과 UI용 plain table로 반환
+		-- return: { vocal, dance, visual, fandomVote, liveReaction, total, clearScore, isClear }
+		local tStage = self:GetCurrentStageForUser(performanceId, _ProgressManager.currentUserId)
+		local tAssignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, _ProgressManager.currentUserId)
+		local tHeader = _PerformanceMaster:GetPerformance(performanceId)
+		if tStage == nil or tAssignment == nil or tHeader == nil then return nil end
+		local assignment = tAssignment
+
+		-- 공연 헤더는 스탯 가중치, 클리어 기준은 현재 StageTable의 목표 점수 사용
 		-- tHeader: PerformanceRow
-		local tHeader = nil
-		if _PerformanceMaster ~= nil then
-			tHeader = _PerformanceMaster:GetPerformance(performanceId)
-		end
-		local vocalWeight = 1
-		local danceWeight = 1
-		local visualWeight = 1
-		local clearScore = 0
-		if tHeader ~= nil then
-			vocalWeight = tHeader.vocalWeight
-			danceWeight = tHeader.danceWeight
-			visualWeight = tHeader.visualWeight
-			clearScore = tHeader.clearScore
-		end
+		local vocalWeight = tHeader.vocalWeight
+		local danceWeight = tHeader.danceWeight
+		local visualWeight = tHeader.visualWeight
+		local clearScore = tStage.targetScore
 
 		-- 포지션별 캐릭터 데이터 조회 (센터/서브L/서브R)
 		-- centerChar/subLChar/subRChar: CharacterData 또는 nil
@@ -73,23 +255,8 @@ script PerformanceResultManager extends Logic
 		local dance = self:ComputeStatScore(centerChar, subLChar, subRChar, "dance", mainStatKey)
 		local visual = self:ComputeStatScore(centerChar, subLChar, subRChar, "visual", mainStatKey)
 
-		-- 팬덤 투표 = 현재 팬덤 수 × 가중치
-		local fandom = 0
-		if _ProgressManager ~= nil then
-			-- tProgress: ProgressData
-			local tProgress = _ProgressManager:ServerGetProgress()
-			if tProgress ~= nil then
-				fandom = tProgress.fandom
-			end
-		end
-		local fandomVote = math.floor(fandom * self.fandomVoteWeight)
-
-		-- 현장 반응 = 공연 중 미니게임 성공 수 × 성공당 점수
-		local successCount = 0
-		if _MiniGameManager ~= nil then
-			successCount = _MiniGameManager:CountPerformanceSuccess(performanceId)
-		end
-		local liveReaction = math.floor(successCount * self.liveReactionPerSuccess)
+		-- 미니게임 보너스 폐지, 결과 UI 계약을 위한 현장 반응 필드 유지
+		local liveReaction = 0
 
 		-- 스탯 총점(주스탯+부스탯1+부스탯2)은 statTotalMax(기본 30000)로 제한
 		local statTotal = vocal + dance + visual
@@ -97,8 +264,8 @@ script PerformanceResultManager extends Logic
 			statTotal = self.statTotalMax
 		end
 
-		-- 총점 & 클리어 판정: 팬덤투표·현장반응(QTE)은 statTotalMax와 무관하게 기존처럼 별도 합산
-		local total = statTotal + fandomVote + liveReaction
+		-- 팬덤·응원·미니게임 가산 없이 스탯 총점으로 클리어 판정
+		local total = statTotal
 		local isClear = total >= clearScore
 
 		local tScore = {}
@@ -107,7 +274,8 @@ script PerformanceResultManager extends Logic
 		tScore.visual = visual
 		tScore.mainStat = mainStatKey
 		tScore.statTotal = statTotal
-		tScore.fandomVote = fandomVote
+		-- 기존 결과 UI 계약을 위한 비활성 점수 필드 유지
+		tScore.fandomVote = 0
 		tScore.liveReaction = liveReaction
 		tScore.total = total
 		tScore.clearScore = clearScore
@@ -119,7 +287,6 @@ script PerformanceResultManager extends Logic
 			" mainStat=" .. tostring(mainStatKey) ..
 			" statTotal=" .. tostring(statTotal) ..
 			" weights(v/d/vi)=" .. tostring(vocalWeight) .. "/" .. tostring(danceWeight) .. "/" .. tostring(visualWeight) ..
-			" fandomVote=" .. tostring(fandomVote) ..
 			" liveReaction=" .. tostring(liveReaction) ..
 			" total=" .. tostring(total) ..
 			" clearScore=" .. tostring(clearScore) ..

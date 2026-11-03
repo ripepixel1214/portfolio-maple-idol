@@ -1,0 +1,35 @@
+@Logic
+@ExecSpace("ClientOnly")
+script LocaleTextUtil extends Logic
+
+	-- Public API
+
+	-- LocaleDataSet의 키를 현재 언어 문자열로 변환합니다.
+
+	method string GetText(string key)
+		return _LocalizationService:GetText(key)
+	end
+
+	-- LocaleDataSet 템플릿에 순서 기반 인자를 적용합니다.
+	method string Format(string key, any value1, any value2, any value3, any value4)
+		if value4 ~= nil and value4 ~= "" then
+			return _LocalizationService:GetTextFormat(key, value1, value2, value3, value4)
+		end
+		if value3 ~= nil then
+			return _LocalizationService:GetTextFormat(key, value1, value2, value3)
+		end
+		if value2 ~= nil then
+			return _LocalizationService:GetTextFormat(key, value1, value2)
+		end
+		if value1 ~= nil then
+			return _LocalizationService:GetTextFormat(key, value1)
+		end
+
+		return _LocalizationService:GetText(key)
+	end
+
+	method void SetLocalizedText(any renderer, string key, any value1, any value2, any value3)
+		renderer.Text = self:Format(key, value1, value2, value3, "")
+	end
+
+end

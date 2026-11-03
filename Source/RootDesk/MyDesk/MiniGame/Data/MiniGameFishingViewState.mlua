@@ -1,0 +1,9 @@
+---@description "낚시 View에 전달할 표시 상태"
+@Struct
+script MiniGameFishingViewState
+	property any tState = nil
+	property boolean requestPending = false
+	property boolean canClose = false
+	property number snapshotAge = 0
+	property number playerX = 550
+end

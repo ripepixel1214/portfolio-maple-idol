@@ -7,6 +7,8 @@ script DialogMaster extends Logic
 
 	property boolean isCached = false
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 다이얼로그 마스터 테이블을 캐싱합니다.
 		self:CacheAll()
@@ -65,10 +67,10 @@ script DialogMaster extends Logic
 		local speakerActorId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speakerActorId", "")
 		local speakerNameOverrideKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speakerNameOverrideKey", "")
 		local speakerNameOverride = ""
-		if _LocalizationLogic ~= nil then
-			message = _LocalizationLogic:GetText(messageKey, "")
+		if _LocaleTextUtil ~= nil then
+			message = _LocaleTextUtil:GetText(messageKey)
 			if speakerNameOverrideKey ~= "" then
-				speakerNameOverride = _LocalizationLogic:GetText(speakerNameOverrideKey, "")
+				speakerNameOverride = _LocaleTextUtil:GetText(speakerNameOverrideKey)
 			end
 		end
 		local tokens = _DialogParser:Parse(message)

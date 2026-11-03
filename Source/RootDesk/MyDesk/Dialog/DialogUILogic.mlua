@@ -69,6 +69,8 @@ script DialogUILogic extends Logic
 
 	property any tLines = {}
 
+	property boolean allowLineEvents = true
+
 	property integer lineIdx = 0
 
 	property string currentLeftKey = ""
@@ -112,6 +114,10 @@ script DialogUILogic extends Logic
 	property Vector2 middlePixelCharacterBaseSize = Vector2(0, 0)
 
 	property Vector2 rightPixelCharacterBaseSize = Vector2(0, 0)
+
+	-- 크기 메타데이터 누락 시 사용하는 최초 픽셀 슬롯 크기
+	@HideFromInspector
+	property any pixelCharacterInitialSizeBySide = {}
 
 	property Vector2 leftPixelCharacterBottomCenter = Vector2(0, 0)
 
@@ -240,6 +246,11 @@ script DialogUILogic extends Logic
 		self.leftPixelCharacterBaseSize = self:GetPixelCharacterSize(self.eCharacterSide.Left)
 		self.middlePixelCharacterBaseSize = self:GetPixelCharacterSize(self.eCharacterSide.Middle)
 		self.rightPixelCharacterBaseSize = self:GetPixelCharacterSize(self.eCharacterSide.Right)
+		self.pixelCharacterInitialSizeBySide = {
+			[self.eCharacterSide.Left] = Vector2(self.leftPixelCharacterBaseSize.x, self.leftPixelCharacterBaseSize.y),
+			[self.eCharacterSide.Middle] = Vector2(self.middlePixelCharacterBaseSize.x, self.middlePixelCharacterBaseSize.y),
+			[self.eCharacterSide.Right] = Vector2(self.rightPixelCharacterBaseSize.x, self.rightPixelCharacterBaseSize.y)
+		}
 		self.leftPixelCharacterBottomCenter = self:GetRendererBottomCenter(self.leftPixelCharacter)
 		self.middlePixelCharacterBottomCenter = self:GetRendererBottomCenter(self.middlePixelCharacter)
 		self.rightPixelCharacterBottomCenter = self:GetRendererBottomCenter(self.rightPixelCharacter)
@@ -371,8 +382,6 @@ script DialogUILogic extends Logic
 		end
 
 		self:SetDialogButtonsEnabled(event.isOpen ~= true)
-		log("[DialogUILogic] settlementVisible=" .. tostring(event.isOpen == true)
-			.. " buttonsEnabled=" .. tostring(event.isOpen ~= true))
 	end
 
 	@ExecSpace("ClientOnly")
@@ -704,8 +713,39 @@ script DialogUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
+	method void OpenText(string dialogId, string message)
+		-- 데이터 테이블을 거치지 않는 동적 한 줄 문구를 일반 다이얼로그 화면으로 표시합니다.
+		local options = DialogOpenOptions()
+		options.dialogId = dialogId
+		options.overrideTableOption = true
+		self:OpenTextWithOptions(dialogId, message, options)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenTextWithOptions(string dialogId, string message, DialogOpenOptions options)
+		-- 동적 한 줄 문구와 액터 바인딩을 포함한 표시 옵션을 한 번에 적용합니다.
+		options.dialogId = dialogId
+		options.overrideTableOption = true
+		self:ApplyOpenOptions(options)
+		self:ApplyDialogBGM()
+		self.currentDialogId = dialogId
+		self:Initialize()
+		local line = {
+			index = 1,
+			tokens = _DialogParser:Parse(message)
+		}
+		if options.useActorBinding == true then
+			line.speakerActorId = "{bind}"
+			line.leftActorId = "{bind}"
+		end
+		self.tLines = {line}
+		self:BeginPresentation()
+	end
+
+	@ExecSpace("ClientOnly")
 	method void ApplyOpenOptions(DialogOpenOptions options)
-		-- 전달된 옵션을 현재 다이얼로그 세션의 표시 설정과 페이드 종료 설정으로 복사합니다.
+		-- 대화 실행·연출 옵션을 현재 세션에 복사
+		self.allowLineEvents = options.allowLineEvents
 		self.actorBindings = nil
 		if options.useActorBinding == true then
 			self.actorBindings = {
@@ -911,6 +951,7 @@ script DialogUILogic extends Logic
 		self:ResetCharacterSlot(self.eCharacterSide.Right)
 		self.root.Enable = false
 		self.actorBindings = nil
+		self.allowLineEvents = true
 		self.currentDialogId = ""
 		self.currentBackgroundId = ""
 		self.currentDialogBgmRuid = ""
@@ -991,6 +1032,16 @@ script DialogUILogic extends Logic
 		self.currentDialogId = dialogId or ""
 		self:Initialize()
 		self.tLines = _DialogMaster:GetDialogLines(dialogId)
+		if not self.allowLineEvents then
+			-- 공유 대사 캐시는 보존하고 문구 없이 이벤트만 있는 행을 재생 목록에서 제외
+			local textLines = {}
+			for _, line in ipairs(self.tLines) do
+				if (line.eventId or "") == "" or (line.messageKey or "") ~= "" then
+					textLines[#textLines + 1] = line
+				end
+			end
+			self.tLines = textLines
+		end
 
 		if #self.tLines <= 0 then
 			log_warning("[DialogUILogic] Dialog not found: " .. dialogId)
@@ -1463,6 +1514,7 @@ script DialogUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method boolean LineHasEvent(integer lineIndex)
 		-- 지정한 대사 라인에 실행할 eventId가 있는지 확인합니다.
+		if not self.allowLineEvents then return false end
 		if lineIndex <= 0 or lineIndex > #self.tLines then
 			return false
 		end
@@ -1474,6 +1526,7 @@ script DialogUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void ExecuteLineEvent(any tLine)
 		-- 현재 다이얼로그 라인에 연결된 이벤트가 있으면 EventExecutor에 실행을 요청합니다.
+		if not self.allowLineEvents then return end
 		if tLine == nil or tLine.eventId == nil or tLine.eventId == "" then
 			return
 		end
@@ -1607,7 +1660,7 @@ script DialogUILogic extends Logic
 			return self:GetLocalPlayerDisplayName()
 		end
 
-		return _RuntimeActorManager:ClientGetActorName(actorId)
+		return _RuntimeActorManager:ClientGetLocalizedActorName(actorId)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -2642,7 +2695,8 @@ script DialogUILogic extends Logic
 		local nativeSize = resourceSize
 		if nativeSize == nil or nativeSize.x <= 0 or nativeSize.y <= 0 then
 			log_warning("[DialogUILogic] 픽셀 리소스 크기 메타가 없어 슬롯 기본 크기를 사용합니다. ImageResourceMetaTable의 width,height를 채워주세요.")
-			nativeSize = self:GetPixelCharacterBaseSize(side)
+			-- 확대 결과를 다시 원본 크기로 사용하지 않도록 최초 슬롯 크기 참조
+			nativeSize = self.pixelCharacterInitialSizeBySide[side] or Vector2(0, 0)
 		end
 
 		local scale = self.pixelCharacterScale * self.responsiveCharacterHeightScale

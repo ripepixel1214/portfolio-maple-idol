@@ -1,0 +1,75 @@
+-- CharacterBaseStatTable을 로드하고 캐릭터별 기본 스탯 row를 캐싱합니다.
+@Logic
+script CharacterBaseStatMaster extends Logic
+
+	property boolean IsCharacterBaseStatLoaded = false
+
+	-- CharacterBaseStatRow list
+	property any tCharacterBaseStats = {}
+
+	-- CharacterBaseStatRow
+	property any tCharacterBaseStatById = {}
+
+	method void OnBeginPlay()
+		-- 로직 시작 때 캐릭터 기본 스탯 마스터 데이터를 로드합니다.
+		self:LoadCharactersBaseStat()
+	end
+
+	method void LoadCharactersBaseStat()
+		-- 캐릭터 기본 스탯 테이블의 행을 읽고 캐릭터 id 기준으로 캐싱합니다.
+		self.tCharacterBaseStats = {}
+		self.tCharacterBaseStatById = {}
+		self.IsCharacterBaseStatLoaded = false
+		local loadedCount = 0
+		
+		local dataSet = _DataService:GetTable("CharacterBaseStatTable")
+		
+		if dataSet == nil then
+			log_warning("[CharacterBaseStatMaster] CharacterBaseStatTable not found")
+			return
+		end
+		
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local id = _DataTableUtil:SafeGetString(dataSet, rowIndex, "actorId", "")
+		
+			if id ~= "" then
+				local tCharacterBaseStat = CharacterBaseStatRow()
+				tCharacterBaseStat.id = id
+				tCharacterBaseStat.typeId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "typeId", "")
+				tCharacterBaseStat.vocal = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "vocal", 0)
+				tCharacterBaseStat.dance = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "dance", 0)
+				tCharacterBaseStat.visual = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "visual", 0)
+		
+				table.insert(self.tCharacterBaseStats, tCharacterBaseStat)
+				self.tCharacterBaseStatById[id] = tCharacterBaseStat
+				loadedCount = loadedCount + 1
+			end
+		end
+		
+		self.IsCharacterBaseStatLoaded = true
+	end
+
+	method any GetCharacterBaseStat(string id)
+		-- 캐릭터 id에 해당하는 캐릭터 기본 스탯 row를 반환합니다.
+		if self.IsCharacterBaseStatLoaded == false then
+			self:LoadCharactersBaseStat()
+		end
+		
+		return self.tCharacterBaseStatById[id]
+	end
+
+	method any GetCharacterBaseStats()
+		-- CharacterBaseStatTable row 목록의 복사본을 반환합니다.
+		if self.IsCharacterBaseStatLoaded == false then
+			self:LoadCharactersBaseStat()
+		end
+
+		local tRows = {}
+		for _, tCharacterBaseStat in ipairs(self.tCharacterBaseStats) do
+			table.insert(tRows, tCharacterBaseStat)
+		end
+
+		return tRows
+	end
+
+end

@@ -12,6 +12,8 @@ script ItemMaster extends Logic
 	-- { [type:string] = ItemRow[] }
 	property any tItemsByType = {}
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 로직 시작 시 ItemTable을 읽어 정적 아이템 데이터를 캐싱합니다.
 		self:LoadItems()
@@ -40,9 +42,9 @@ script ItemMaster extends Logic
 				local descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
 				tItem.name = ""
 				tItem.description = ""
-				if _LocalizationLogic ~= nil then
-					tItem.name = _LocalizationLogic:GetText(nameKey, "")
-					tItem.description = _LocalizationLogic:GetText(descriptionKey, "")
+				if _LocaleTextUtil ~= nil then
+					tItem.name = _LocaleTextUtil:GetText(nameKey)
+					tItem.description = _LocaleTextUtil:GetText(descriptionKey)
 				end
 				tItem.image = _DataTableUtil:SafeGetString(dataSet, rowIndex, "image", "")
 				tItem.sortOrder = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "sortOrder", rowIndex)
@@ -59,6 +61,12 @@ script ItemMaster extends Logic
 			end
 		end
 
+		local fishing = _MiniGameFishingRule
+		self:AddFishingItem(fishing.BADGE_ID, fishing.ITEM_TYPE_FAN_PRESENT, "낚시왕 뱃지",
+			"야시장 낚시 게임에서 고득점을 달성하면 주는 뱃지다. 날치의 눈이 섬뜩하게 느껴지는 기분 탓일까...?\n보유 효과: 모든 캐릭터의 생성 기본 능력치 +5%", fishing.BADGE_RUID, 9001)
+		self:AddFishingItem(fishing.COOKIE_ID, fishing.ITEM_TYPE_COOKIE, "야시장 쿠키",
+			"친밀도 UI에서 사용하면 선택한 캐릭터의 친밀도가 5 증가한다", fishing.COOKIE_RUID, 9002)
+
 		table.sort(self.tItems, function(leftItem, rightItem)
 			return self:CompareItemSortOrder(leftItem, rightItem)
 		end)
@@ -69,6 +77,26 @@ script ItemMaster extends Logic
 		end
 
 		self.IsLoaded = true
+	end
+
+	method void AddFishingItem(string itemId, string itemType, string name, string description, string image, integer order)
+		-- 원본 시트에 보상 항목이 등록되면 시트 정의 우선 사용
+		if self.tItemById[itemId] ~= nil then return end
+		local tItem = ItemRow()
+		tItem.itemId = itemId
+		tItem.type = itemType
+		tItem.name = name
+		tItem.description = description
+		if _LocaleTextUtil ~= nil then
+			tItem.name = _LocaleTextUtil:GetText("item." .. itemId .. ".name")
+			tItem.description = _LocaleTextUtil:GetText("item." .. itemId .. ".description")
+		end
+		tItem.image = image
+		tItem.sortOrder = order
+		self.tItemById[itemId] = tItem
+		table.insert(self.tItems, tItem)
+		if self.tItemsByType[itemType] == nil then self.tItemsByType[itemType] = {} end
+		table.insert(self.tItemsByType[itemType], tItem)
 	end
 
 	method any GetItems()
@@ -96,6 +124,8 @@ script ItemMaster extends Logic
 
 		return self.tItemById[itemId]
 	end
+
+	-- Private Methods
 
 	method void EnsureLoaded()
 		-- 캐시가 비어 있으면 ItemTable을 다시 로드합니다.

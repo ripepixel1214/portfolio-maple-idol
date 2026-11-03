@@ -1,0 +1,32 @@
+@Logic
+script EMiniGameKind extends Logic
+
+	-- 프리셋 ID 및 입력 어댑터와 독립적인 게임 규칙 종류
+	property string RAPID_PRESS_COUNT = "RapidPressCount"
+	property string TIMING_ACCURACY = "TimingAccuracy"
+	property string COMMAND_SEQUENCE = "CommandSequence"
+	property string GAUGE_MAINTENANCE = "GaugeMaintenance"
+	property string SHAPE_TRACE = "ShapeTrace"
+	property string DALGONA_DRAW = "DalgonaDraw"
+	property string LUCKY_CUBE = "LuckyCube"
+	property string FISHING = "Fishing"
+	property string SNAIL_LADDER = "SnailLadder"
+
+	method integer GetSupportedInputType(string gameKind)
+		-- 현재 각 게임 규칙이 지원하는 입력 어댑터 검증용 매핑
+		if gameKind == self.RAPID_PRESS_COUNT or gameKind == self.GAUGE_MAINTENANCE then
+			return _EMiniGameInputType.Mash
+		elseif gameKind == self.TIMING_ACCURACY then
+			return _EMiniGameInputType.Timing
+		elseif gameKind == self.COMMAND_SEQUENCE then
+			return _EMiniGameInputType.Command
+		elseif gameKind == self.SHAPE_TRACE then
+			return _EMiniGameInputType.Drag
+		elseif gameKind == self.DALGONA_DRAW or gameKind == self.LUCKY_CUBE or gameKind == self.FISHING
+			or gameKind == self.SNAIL_LADDER then
+			return _EMiniGameInputType.Selection
+		end
+		return _EMiniGameInputType.None
+	end
+
+end

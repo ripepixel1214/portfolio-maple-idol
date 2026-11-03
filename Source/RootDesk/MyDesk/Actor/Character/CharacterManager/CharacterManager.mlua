@@ -1,6 +1,9 @@
 @Logic
 script CharacterManager extends Logic
 
+	@Description("메이커 테스트에서만 전체 캐릭터를 보유 상태로 표시하고 편성을 허용합니다. 실제 해금 데이터는 저장하지 않습니다.")
+	property boolean debugUnlockAllCharacters = true
+
 	property boolean isCharacterArchiveLoaded = false
 
 	-- tCharacters: { CharacterData, CharacterData, ... }
@@ -21,6 +24,10 @@ script CharacterManager extends Logic
 
 	-- 캐릭터 데이터가 저장될 때 함께 확정할 신규 친밀도 에피소드 목록입니다.
 	property any pendingNewIntimacyEpisodeSet = {}
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ServerOnly")
 	method void OnBeginPlay()
@@ -138,8 +145,8 @@ script CharacterManager extends Logic
 
 	@ExecSpace("Server")
 	method boolean RequestUnlockCharacter(string characterId)
-		-- 클라이언트 요청으로 지정한 캐릭터를 해금하고 최신 아카이브를 동기화합니다.
-		if self:CanUseCharacters(senderUserId) == false then
+		-- 메이커 디버그에서만 직접 해금합니다. 실제 해금은 구매·대화의 서버 검증 경로를 사용합니다.
+		if Environment:IsMakerPlay() == false or self:CanUseCharacters(senderUserId) == false then
 			return false
 		end
 
@@ -236,6 +243,7 @@ script CharacterManager extends Logic
 		self.selectedCharacterId = selectedCharacterId
 		self:EnsureSelectedCharacter()
 		self.isCharacterArchiveLoaded = true
+		_TagTrainingManager:RestoreState(tCharactersPlainTable ~= nil and tCharactersPlainTable.trainingState or "")
 		if syncedCharacterCount > 0 then
 			self:SaveCharactersToStorage()
 		end
@@ -317,6 +325,12 @@ script CharacterManager extends Logic
 	end
 
 	@ExecSpace("ServerOnly")
+	method any ServerGetActiveCharacterIds()
+		-- 서버 권위 현재 편성 캐릭터 id 목록의 복사본을 반환합니다.
+		return self:CopyStringList(self.activeCharacterIds)
+	end
+
+	@ExecSpace("ServerOnly")
 	method string ServerGetSelectedCharacterId()
 		-- 서버 권위 선택 캐릭터 id를 반환합니다.
 		if self:IsCharactersLoaded() == false then
@@ -324,6 +338,15 @@ script CharacterManager extends Logic
 		end
 
 		return self.selectedCharacterId
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetCharacterTags(string characterId, string tagsCsv)
+		-- 검증을 마친 태그 목록을 캐릭터 권위 데이터에 적용합니다.
+		local character = self.tCharacterById[characterId]
+		if character == nil then return false end
+		character.tags = tagsCsv
+		return true
 	end
 
 	@ExecSpace("ServerOnly")
@@ -412,6 +435,41 @@ script CharacterManager extends Logic
 	end
 
 	@ExecSpace("ServerOnly")
+	method boolean CanSetStageCharacters(table characterIds)
+		-- 스테이지 편성은 보유한 서로 다른 캐릭터 세 명만 허용하며 메이커 전체 해금 테스트를 반영합니다.
+		if #characterIds ~= 3 then return false end
+		local isDebugUnlocked = self.debugUnlockAllCharacters and Environment:IsMakerPlay()
+		local selectedById = {}
+		for index = 1, 3 do
+			local characterId = characterIds[index]
+			local character = self.tCharacterById[characterId]
+			if character == nil or selectedById[characterId] then return false end
+			if character.isDiscovered ~= true and isDebugUnlocked == false then return false end
+			selectedById[characterId] = true
+		end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ResetActiveCharacterTags()
+		-- 새 스테이지에 참여하는 캐릭터는 이전 스테이지 태그 없이 시작합니다.
+		for _, characterId in ipairs(self.activeCharacterIds) do self.tCharacterById[characterId].tags = "" end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ResetAllCharacterTags()
+		-- 스테이지가 끝나면 모든 캐릭터의 능력치를 기본값으로 되돌리고 피로도와 태그를 비웁니다.
+		for _, character in ipairs(self.tCharacters) do
+			local baseStat = _CharacterBaseStatMaster:GetCharacterBaseStat(character.id)
+			character.vocal = baseStat.vocal
+			character.dance = baseStat.dance
+			character.visual = baseStat.visual
+			character.fatigue = 0
+			character.tags = ""
+		end
+	end
+
+	@ExecSpace("ServerOnly")
 	-- tDelta: CharacterStatDelta:ToPlainTable()
 	method boolean ApplyCharacterStat(table tDelta)
 		-- 캐릭터 스탯 변경량 한 건을 서버 권위 데이터에 적용합니다.
@@ -475,10 +533,12 @@ script CharacterManager extends Logic
 		tCharacter.vocal = _MathUtil:ClampMin(tCharacter.vocal + (vocalDelta or 0), 0)
 		tCharacter.dance = _MathUtil:ClampMin(tCharacter.dance + (danceDelta or 0), 0)
 		tCharacter.visual = _MathUtil:ClampMin(tCharacter.visual + (visualDelta or 0), 0)
-		tCharacter.fatigue = _MathUtil:Clamp((tCharacter.fatigue or 0) + (fatigueDelta or 0), 0, 100)
+		tCharacter.fatigue = _MathUtil:ClampMin((tCharacter.fatigue or 0) + (fatigueDelta or 0), 0)
 		tCharacter.intimacy = _MathUtil:ClampMin((tCharacter.intimacy or 0) + (intimacyDelta or 0), 0)
 		tCharacter.maxIntimacyReached = math.max(tCharacter.maxIntimacyReached or 0, tCharacter.intimacy or 0)
-		self:QueueNewIntimacyEpisodes(characterId, previousMaxIntimacy, tCharacter.maxIntimacyReached)
+		local tRewardData = _FishingRewardLogic.dataByUser[self.currentUserId]
+		local extraIntimacy = tRewardData ~= nil and (tRewardData.intimacyByCharacter[characterId] or 0) or 0
+		self:QueueNewIntimacyEpisodes(characterId, previousMaxIntimacy + extraIntimacy, tCharacter.maxIntimacyReached + extraIntimacy)
 
 		return true
 	end
@@ -533,7 +593,7 @@ script CharacterManager extends Logic
 
 	@ExecSpace("ServerOnly")
 	method void SaveCharactersToStorage()
-		-- 서버 권위 캐릭터 아카이브와 현재 편성 id를 Storage에 저장합니다.
+		-- 서버 권위 캐릭터 아카이브·현재 편성·진행 중인 태그 육성을 함께 저장합니다.
 		if self.currentUserId == nil or self.currentUserId == "" then
 			log_warning("[CharacterManager] currentUserId is required")
 			return
@@ -544,7 +604,7 @@ script CharacterManager extends Logic
 			return
 		end
 
-		_CharacterStorage:SaveCharacterArchiveAsync(self.currentUserId, self.tCharacters, self.activeCharacterIds, self.selectedCharacterId)
+		_CharacterStorage:SaveCharacterArchiveAsync(self.currentUserId, self.tCharacters, self.activeCharacterIds, self.selectedCharacterId, _TagTrainingManager:CreateSaveString())
 		self:FlushPendingNewIntimacyEpisodes()
 	end
 
@@ -657,7 +717,7 @@ script CharacterManager extends Logic
 			table.insert(tCharacters, self:CopyCharacterData(tCharacter))
 		end
 
-		self:SyncCharacters(tCharacters, self:CopyStringList(self.activeCharacterIds), self.selectedCharacterId, forUserId)
+		self:SyncCharacters(tCharacters, self:CopyStringList(self.activeCharacterIds), self.selectedCharacterId, self.debugUnlockAllCharacters, forUserId)
 	end
 
 	@ExecSpace("ServerOnly")
@@ -671,15 +731,19 @@ script CharacterManager extends Logic
 	end
 
 	@ExecSpace("Client")
-	method void SyncCharacters(table tCharacters, table tActiveCharacterIds, string selectedCharacterId)
+	method void SyncCharacters(table tCharacters, table tActiveCharacterIds, string selectedCharacterId, boolean debugUnlockAllCharacters)
 		-- 서버에서 받은 캐릭터 아카이브 캐시 전체와 현재 편성 id를 클라이언트 로컬 캐시에 저장합니다.
 		-- tCharacters: { CharacterData:ToPlainTable(), ... }
 		-- tActiveCharacterIds: { characterId:string, characterId:string, characterId:string }
+		-- 임시 해금 설정을 아카이브와 함께 받아 해제 시 이전 보유 표시가 남지 않게 합니다.
+		self.debugUnlockAllCharacters = debugUnlockAllCharacters and Environment:IsMakerPlay()
 		self.tCharacters = {}
 		self.tCharacterById = {}
 
 		for _, tCharacter in ipairs(tCharacters) do
 			if tCharacter ~= nil and tCharacter.id ~= nil and tCharacter.id ~= "" then
+				-- 전체 해금 테스트는 클라이언트 캐시에만 적용하고 실제 보유 데이터는 유지합니다.
+				if self.debugUnlockAllCharacters and Environment:IsMakerPlay() then tCharacter.isDiscovered = true end
 				table.insert(self.tCharacters, tCharacter)
 				self.tCharacterById[tCharacter.id] = tCharacter
 			end
@@ -697,6 +761,9 @@ script CharacterManager extends Logic
 		if tCharacter == nil or tCharacter.id == nil or tCharacter.id == "" then
 			return
 		end
+
+		-- 한 캐릭터의 능력치가 갱신되어도 메이커의 임시 해금 표시를 유지합니다.
+		if self.debugUnlockAllCharacters and Environment:IsMakerPlay() then tCharacter.isDiscovered = true end
 
 		if self.tCharacterById[tCharacter.id] == nil then
 			table.insert(self.tCharacters, tCharacter)
@@ -719,6 +786,10 @@ script CharacterManager extends Logic
 		self.selectedCharacterId = selectedCharacterId
 		self:SendCharacterChangedEvent(selectedCharacterId)
 	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	method any CopyStringList(any tSourceList)
 		-- tSourceList: { string, string, ... }
@@ -743,7 +814,7 @@ script CharacterManager extends Logic
 		end
 
 		if tCharacter.ToPlainTable ~= nil then
-			return tCharacter:ToPlainTable()
+			return _FishingRewardLogic:ProjectCharacter(self.currentUserId, tCharacter:ToPlainTable())
 		end
 
 		log_warning("[CharacterManager] CopyCharacterData expects CharacterData")

@@ -40,7 +40,7 @@ script ScheduleUILogic extends Logic
 	property ButtonComponent startButton = "6f81cb0e-2275-4e88-95b7-5efba82547dc"
 	property SpriteGUIRendererComponent startButtonBg = "6f81cb0e-2275-4e88-95b7-5efba82547dc"
 	property TextGUIRendererComponent startButtonText = "6f81cb0e-2275-4e88-95b7-5efba82547dc"
-	property Entity startButtonHoverImage = "d2c3a370-350d-432b-abb0-c94e82d20c15"
+	property string defaultStartButtonImageRuid = ""
 	property ButtonComponent closeButton = "633f6b14-e116-4019-8e57-c83b1bff8130"
 	property ButtonComponent characterButton1 = "fb5a4e57-846f-4c68-b7d7-e9c335f8a006"
 	property ButtonComponent characterButton2 = "6efc2dc8-3f84-43f8-82d6-de54f3aef099"
@@ -54,18 +54,18 @@ script ScheduleUILogic extends Logic
 	property TextGUIRendererComponent characterNameText1 = "f361944b-308a-4416-b677-814dd54ecfa9"
 	property TextGUIRendererComponent characterNameText2 = "e570449c-ff5b-41b4-90dc-45c9ce27d8ac"
 	property TextGUIRendererComponent characterNameText3 = "238e69d5-1cfd-4805-8f78-272df35afd32"
-	property TextGUIRendererComponent characterVocalText1 = "ea473205-62f3-45ed-8c8f-bec189483419"
-	property TextGUIRendererComponent characterVocalText2 = "aab434dc-2619-44a1-a061-238fb0202f0f"
-	property TextGUIRendererComponent characterVocalText3 = "95e6555d-73d6-47b3-a69c-db9ab3f1215c"
-	property TextGUIRendererComponent characterDanceText1 = "37fa49ab-29dd-4090-a6cb-aa3ebeb832f0"
-	property TextGUIRendererComponent characterDanceText2 = "2181043c-404b-4f4f-9afc-a927979cd57a"
-	property TextGUIRendererComponent characterDanceText3 = "bb4119c9-c71f-4338-8dae-0c6cced432f0"
-	property TextGUIRendererComponent characterVisualText1 = "e46b3d21-4afa-43fe-b787-59bb8cbfec66"
-	property TextGUIRendererComponent characterVisualText2 = "0f40dc86-1069-4bad-9c60-0efbf427f1bf"
-	property TextGUIRendererComponent characterVisualText3 = "2511381f-2666-4d6b-8d08-8485e41566f1"
-	property TextGUIRendererComponent characterConditionText1 = "83fbd447-7b7d-4c0a-a556-4d2b66682b51"
-	property TextGUIRendererComponent characterConditionText2 = "43767844-2ed7-4325-9e3b-b0f3f0042908"
-	property TextGUIRendererComponent characterConditionText3 = "e85aecce-58d2-430b-9cfa-476356bbf180"
+	property LocalizedFormatTextComponent characterVocalText1 = "ea473205-62f3-45ed-8c8f-bec189483419"
+	property LocalizedFormatTextComponent characterVocalText2 = "aab434dc-2619-44a1-a061-238fb0202f0f"
+	property LocalizedFormatTextComponent characterVocalText3 = "95e6555d-73d6-47b3-a69c-db9ab3f1215c"
+	property LocalizedFormatTextComponent characterDanceText1 = "37fa49ab-29dd-4090-a6cb-aa3ebeb832f0"
+	property LocalizedFormatTextComponent characterDanceText2 = "2181043c-404b-4f4f-9afc-a927979cd57a"
+	property LocalizedFormatTextComponent characterDanceText3 = "bb4119c9-c71f-4338-8dae-0c6cced432f0"
+	property LocalizedFormatTextComponent characterVisualText1 = "e46b3d21-4afa-43fe-b787-59bb8cbfec66"
+	property LocalizedFormatTextComponent characterVisualText2 = "0f40dc86-1069-4bad-9c60-0efbf427f1bf"
+	property LocalizedFormatTextComponent characterVisualText3 = "2511381f-2666-4d6b-8d08-8485e41566f1"
+	property LocalizedFormatTextComponent characterConditionText1 = "83fbd447-7b7d-4c0a-a556-4d2b66682b51"
+	property LocalizedFormatTextComponent characterConditionText2 = "43767844-2ed7-4325-9e3b-b0f3f0042908"
+	property LocalizedFormatTextComponent characterConditionText3 = "e85aecce-58d2-430b-9cfa-476356bbf180"
 	property ButtonComponent activitySlotButton1 = "7f403515-1d45-4c24-842b-18e834ed76af"
 	property ButtonComponent activitySlotButton2 = "e443bc46-1ff0-4dd8-a75c-c6ce92900c0d"
 	property ButtonComponent activitySlotButton3 = "265b07b9-59df-4700-9893-0e9825a6a7f8"
@@ -121,12 +121,15 @@ script ScheduleUILogic extends Logic
 	property any characterChangedHandler = nil
 	property any progressChangedHandler = nil
 
+	-- Public API
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- 스케줄 편성 UI를 초기화하고 디버그 단축키로 열 수 있도록 닫아둡니다.
 		self:ResetSelections()
 		self:PrepareScrollLayouts()
 		self:HideOptionTemplate()
+		self.defaultStartButtonImageRuid = self.startButtonBg.ImageRUID.DataId
 		self:ConnectStaticButtons()
 		if _CharacterManager ~= nil then
 			self.characterChangedHandler = _CharacterManager:ConnectEvent(CharacterChangedEvent, self.OnCharacterChanged)
@@ -218,6 +221,7 @@ script ScheduleUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void Hide()
 		-- 현재 선택 상태는 유지하고 스케줄 편성 UI만 숨깁니다.
+		self.startButtonBg.ImageRUID = DataRef(self.defaultStartButtonImageRuid)
 		if self.root ~= nil then
 			self.root.Enable = false
 		end
@@ -229,6 +233,20 @@ script ScheduleUILogic extends Logic
 		-- 창 닫기 버튼은 선택 상태를 비우지 않고 UI만 숨깁니다.
 		self:Hide()
 	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartButtonStateChanged(ButtonStateChangeEvent event)
+		-- SpriteSwap가 UI 크기를 변경하지 않도록 같은 렌더러의 이미지만 직접 교체합니다.
+		if event.state == ButtonState.Hover then
+			self.startButtonBg.ImageRUID = self.startButton.ImageRUIDs.HighlightedSprite
+		elseif event.state == ButtonState.Pressed then
+			self.startButtonBg.ImageRUID = self.startButton.ImageRUIDs.PressedSprite
+		else
+			self.startButtonBg.ImageRUID = DataRef(self.defaultStartButtonImageRuid)
+		end
+	end
+
+	-- Private Methods
 
 	@ExecSpace("ClientOnly")
 	method void ResetSelections()
@@ -248,16 +266,16 @@ script ScheduleUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshProgress()
-		-- ProgressManager와 GameGoalMaster에서 월, 주차, 다음 공연 예정 문구를 읽어 표시합니다.
+		-- ProgressManager와 StageMaster에서 월, 주차, 다음 공연 예정 문구를 읽어 표시합니다.
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
 		local month = 1
 		local week = 1
-		local goalTextValue = self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+		local goalTextValue = _LocaleTextUtil:GetText(self.UI_GOAL_NONE_KEY)
 		local currentGoal = nil
 		local isPerformanceStep = false
 
 		if progress ~= nil then
-			isPerformanceStep = progress.eCurrentStep == _EProgressStep.Step_Performance
+			isPerformanceStep = progress.eCurrentStep == _EProgressStep.Performance
 			if progress.currentMonth ~= nil and progress.currentMonth > 0 then
 				month = math.floor(progress.currentMonth)
 			end
@@ -266,8 +284,8 @@ script ScheduleUILogic extends Logic
 				week = math.floor(progress.currentWeek)
 			end
 
-			if _GameGoalMaster ~= nil then
-				local goal = _GameGoalMaster:GetGameGoal(progress.gameGoalId)
+			if _StageMaster ~= nil then
+				local goal = _StageMaster:GetStage(progress.eCurrentStage)
 				if goal ~= nil then
 					currentGoal = goal
 					if isPerformanceStep == true then
@@ -279,7 +297,7 @@ script ScheduleUILogic extends Logic
 			end
 		end
 
-		self:SetText(self.monthText, self:FormatLocalized(self.UI_MONTH_KEY, "", month, nil, nil))
+		self:SetText(self.monthText, _LocaleTextUtil:Format(self.UI_MONTH_KEY, month, nil, nil, ""))
 		self:RefreshMonthTextMode(isPerformanceStep)
 		if isPerformanceStep == true then
 			self:SetPerformanceWeekText()
@@ -301,13 +319,13 @@ script ScheduleUILogic extends Logic
 		end
 
 		self:SetText(self.stageGoalNameText, self:NormalizeQuotedText(goal.name or ""))
-		self:SetText(self.stageGoalTargetText, self:FormatLocalized(self.UI_GOAL_TARGET_KEY, "", self:FormatIntegerWithComma(goal.targetScore or 0), nil, nil))
+		self:SetText(self.stageGoalTargetText, _LocaleTextUtil:Format(self.UI_GOAL_TARGET_KEY, self:FormatIntegerWithComma(goal.targetScore or 0), nil, nil, ""))
 		self:SetTextGUI(self.stageGoalDescriptionText, self:NormalizeQuotedText(goal.description or ""))
 	end
 
 	@ExecSpace("ClientOnly")
 	method void RefreshMonthTextMode(boolean isPerformanceStep)
-		-- 공연 단계에서는 MonthText의 스프라이트를 표시하고, 일반 단계에서는 텍스트를 표시합니다.
+		-- 공연 스텝에서는 MonthText의 스프라이트를 표시하고, 일반 스텝에서는 텍스트를 표시합니다.
 		if self.monthPerformanceSprite ~= nil then
 			self.monthPerformanceSprite.Enable = isPerformanceStep
 		end
@@ -321,50 +339,23 @@ script ScheduleUILogic extends Logic
 	method string BuildGoalScheduleText(integer currentMonth, integer currentWeek, any goal)
 		-- 다음 공연까지 남은 주차와 공연명을 스케줄 UI 목표 문구로 변환합니다.
 		if goal == nil then
-			return self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_GOAL_NONE_KEY)
 		end
 
 		local goalName = goal.name or ""
 		if goalName == "" then
-			goalName = self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+			goalName = _LocaleTextUtil:GetText(self.UI_PERFORMANCE_NAME_KEY)
 		end
 
 		local remainWeek = self:GetRemainWeeksUntilGoal(currentMonth, currentWeek, goal.month or 1, goal.week or 1)
-		return self:FormatLocalized(self.UI_GOAL_COUNTDOWN_KEY, "", remainWeek, goalName, nil)
-	end
-
-	@ExecSpace("ClientOnly")
-	method string GetLocalizedText(string key, string fallbackText)
-		-- 현재 locale의 UI 문구를 조회합니다.
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:GetText(key, fallbackText)
-		end
-
-		return fallbackText or ""
-	end
-
-	@ExecSpace("ClientOnly")
-	method string FormatLocalized(string key, string fallbackText, any value1, any value2, any value3)
-		-- 현재 locale의 UI 템플릿에 값을 반영합니다.
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:Format(key, fallbackText, value1, value2, value3, "")
-		end
-
-		return fallbackText or ""
-	end
-
-	@ExecSpace("ClientOnly")
-	method string BuildStatValueText(string statKey, number value)
-		-- 스케줄 아이돌 카드의 locale별 스탯 이름과 값을 조합합니다.
-		local statName = _ScheduleStatTextUtil ~= nil and _ScheduleStatTextUtil:GetLocalizedStatName(statKey, statKey) or statKey
-		return statName .. " : " .. tostring(math.floor(value or 0))
+		return _LocaleTextUtil:Format(self.UI_GOAL_COUNTDOWN_KEY, remainWeek, goalName, nil, "")
 	end
 
 	@ExecSpace("ClientOnly")
 	method string GetGoalNameText(any goal)
 		-- 공연 단계에서 목표 문구 대신 공연명만 반환합니다.
 		if goal == nil or goal.name == nil or goal.name == "" then
-			return self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_PERFORMANCE_NAME_KEY)
 		end
 
 		return goal.name
@@ -414,10 +405,6 @@ script ScheduleUILogic extends Logic
 		if character == nil then
 			if button ~= nil then button.Entity.Enable = false end
 			self:SetText(nameText, "")
-			self:SetText(vocalText, "")
-			self:SetText(danceText, "")
-			self:SetText(visualText, "")
-			self:SetText(conditionText, "")
 			self:SetImage(portrait, self:GetPlaceholderRuid(), false)
 			self:SetImage(conditionIcon, self:GetPlaceholderRuid(), false)
 			return
@@ -426,10 +413,10 @@ script ScheduleUILogic extends Logic
 		if button ~= nil then button.Entity.Enable = true end
 
 		self:SetText(nameText, _RuntimeActorManager:ClientGetActorName(character.id))
-		self:SetText(vocalText, self:BuildStatValueText("vocal", character.vocal or 0))
-		self:SetText(danceText, self:BuildStatValueText("dance", character.dance or 0))
-		self:SetText(visualText, self:BuildStatValueText("visual", character.visual or 0))
-		self:SetText(conditionText, self:BuildStatValueText("fatigue", character.fatigue or 0))
+		vocalText:SetArguments(math.floor(character.vocal or 0), nil, nil, nil)
+		danceText:SetArguments(math.floor(character.dance or 0), nil, nil, nil)
+		visualText:SetArguments(math.floor(character.visual or 0), nil, nil, nil)
+		conditionText:SetArguments(math.floor(character.fatigue or 0), nil, nil, nil)
 
 		self:SetImage(portrait, self:GetCharacterPortraitRuid(character.id), true)
 		self:SetImage(conditionIcon, self:GetConditionIconRuid(character.fatigue or 0), true)
@@ -463,7 +450,7 @@ script ScheduleUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshPanelModeByProgressStep()
-		-- 진행 단계에 맞춰 스케줄 패널과 스테이지 패널의 초기 표시 상태를 갱신합니다.
+		-- 진행 스텝에 맞춰 스케줄 패널과 스테이지 패널의 초기 표시 상태를 갱신합니다.
 		if self:IsPerformanceProgressStep() == true then
 			self:RefreshPostItLayout(true)
 			self.activePostItKey = "stage"
@@ -476,18 +463,18 @@ script ScheduleUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method boolean IsPerformanceProgressStep()
-		-- 현재 진행 단계가 공연 단계인지 확인합니다.
+		-- 현재 진행 스텝이 공연인지 확인합니다.
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
 		if progress == nil or progress.eCurrentStep == nil then
 			return false
 		end
 
-		return progress.eCurrentStep == _EProgressStep.Step_Performance
+		return progress.eCurrentStep == _EProgressStep.Performance
 	end
 
 	@ExecSpace("ClientOnly")
 	method void RefreshPostItLayout(boolean isPerformanceStep)
-		-- 공연 단계에서는 스테이지 포스트잇만 첫 번째 위치에 표시합니다.
+		-- 공연 스텝에서는 스테이지 포스트잇만 첫 번째 위치에 표시합니다.
 		self:SetPostItButtonVisible(self.tabActivityButton, isPerformanceStep == false)
 		self:SetPostItButtonVisible(self.tabPerformanceButton, isPerformanceStep == false)
 		self:SetPostItButtonVisible(self.tabRestButton, isPerformanceStep == false)
@@ -622,7 +609,7 @@ script ScheduleUILogic extends Logic
 		if self.tActivities == nil or #self.tActivities <= 0 then
 			if self.emptyMessageText ~= nil then
 				self.emptyMessageText.Entity.Enable = true
-				self.emptyMessageText.Text = self:GetLocalizedText(self.UI_EMPTY_ACTIVITY_KEY, "")
+				self.emptyMessageText.Text = _LocaleTextUtil:GetText(self.UI_EMPTY_ACTIVITY_KEY)
 			end
 			return
 		end
@@ -1012,15 +999,11 @@ script ScheduleUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshStartButton()
-		-- 5일 편성이 모두 채워졌을 때만 START 버튼을 활성화합니다.
+		-- 현재 패널의 편성이 완료되었을 때만 START 버튼을 활성화합니다.
 		local canStart = self:CanStartCurrentPanel()
-		if self.startButton ~= nil then
-			self.startButton.Enable = canStart
-		end
-		self:SetStartButtonHover(false)
+		self.startButton.Enable = canStart
 
 		if self.startButtonBg ~= nil then
-			self.startButtonBg.ImageRUID = DataRef("02c1c767564543e092dcda2d27bc147d")
 			if canStart == true then
 				self.startButtonBg.Color = Color(1, 1, 1, 1)
 			else
@@ -1034,27 +1017,6 @@ script ScheduleUILogic extends Logic
 			else
 				self.startButtonText.FontColor = Color(0.82, 0.82, 0.82, 1)
 			end
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void SetStartButtonHover(boolean isHover)
-		if self.startButtonHoverImage ~= nil then
-			self.startButtonHoverImage.Enable = isHover
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnStartButtonStateChanged(ButtonStateChangeEvent event)
-		if self:CanStartCurrentPanel() ~= true then
-			self:SetStartButtonHover(false)
-			return
-		end
-
-		if event ~= nil and (event.state == ButtonState.Hover or event.state == ButtonState.Pressed) then
-			self:SetStartButtonHover(true)
-		else
-			self:SetStartButtonHover(false)
 		end
 	end
 
@@ -1168,24 +1130,13 @@ script ScheduleUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method string GetCurrentStagePerformanceId()
-		-- 현재 진행 데이터의 gameGoalId를 공연 ID로 사용합니다.
+		-- 현재 스테이지에 연결된 공연 ID를 반환합니다.
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
-		if progress == nil or progress.gameGoalId == nil or progress.gameGoalId == "" then
+		if progress == nil then
 			return ""
 		end
-
-		if _PerformanceMaster ~= nil and _PerformanceMaster:HasPerformance(progress.gameGoalId) == true then
-			return progress.gameGoalId
-		end
-
-		if _GameGoalMaster ~= nil then
-			local goal = _GameGoalMaster:GetGameGoal(progress.gameGoalId)
-			if goal ~= nil and goal.id ~= nil and goal.id ~= "" then
-				return goal.id
-			end
-		end
-
-		return progress.gameGoalId
+		local stage = _StageMaster:GetStage(progress.eCurrentStage)
+		return stage ~= nil and stage.performanceId or ""
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1212,9 +1163,7 @@ script ScheduleUILogic extends Logic
 		self:AddButtonHandler(self.tabRestButton, function(event) self:OnPostItTabClicked("rest") end)
 		self:AddButtonHandler(self.stageButton, function(event) self:OnStageButtonClicked() end)
 		self:AddButtonHandler(self.startButton, self.OnStartClicked)
-		if self.startButton ~= nil and self.startButton.Entity ~= nil then
-			self.startButtonStateChangedHandler = self.startButton.Entity:ConnectEvent(ButtonStateChangeEvent, self.OnStartButtonStateChanged)
-		end
+		self.startButtonStateChangedHandler = self.startButton.Entity:ConnectEvent(ButtonStateChangeEvent, self.OnStartButtonStateChanged)
 		self:AddButtonHandler(self.closeButton, function(event) self:OnCloseButtonClicked() end)
 	end
 
@@ -1232,11 +1181,6 @@ script ScheduleUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void DisconnectStaticButtons()
 		-- 정적 UI 버튼에 연결한 이벤트 핸들을 모두 해제합니다.
-		if self.startButtonStateChangedHandler ~= nil and self.startButton ~= nil and self.startButton.Entity ~= nil then
-			self.startButton.Entity:DisconnectEvent(ButtonStateChangeEvent, self.startButtonStateChangedHandler)
-			self.startButtonStateChangedHandler = nil
-		end
-
 		if self.tClickHandlers == nil then
 			self.tClickHandlers = {}
 			return
@@ -1247,8 +1191,12 @@ script ScheduleUILogic extends Logic
 				item.entity:DisconnectEvent(ButtonClickEvent, item.clickEventHandler)
 			end
 		end
+		if self.startButtonStateChangedHandler ~= nil then
+			self.startButton.Entity:DisconnectEvent(ButtonStateChangeEvent, self.startButtonStateChangedHandler)
+		end
 
 		self.tClickHandlers = {}
+		self.startButtonStateChangedHandler = nil
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1661,12 +1609,7 @@ script ScheduleUILogic extends Logic
 		self.weekText.IsRichText = true
 		self.weekText.TextSpriteSetId = self:GetScheduleStatTextSpriteSetId()
 
-		local weekTemplate = self:GetLocalizedText(self.UI_WEEK_TITLE_KEY, "")
-		local renderedText, replacedCount = string.gsub(weekTemplate, "{value1}", tostring(week))
-		if replacedCount == 0 then
-			renderedText, _ = string.gsub(weekTemplate, "{week}", tostring(week))
-		end
-		self.weekText.Text = renderedText
+		self.weekText.Text = _LocaleTextUtil:Format(self.UI_WEEK_TITLE_KEY, week, nil, nil, "")
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1681,7 +1624,7 @@ script ScheduleUILogic extends Logic
 		end
 
 		self.weekText.IsRichText = false
-		self.weekText.Text = self:GetLocalizedText(self.UI_PERFORMANCE_WEEK_TITLE_KEY, "")
+		self.weekText.Text = _LocaleTextUtil:GetText(self.UI_PERFORMANCE_WEEK_TITLE_KEY)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1725,7 +1668,7 @@ script ScheduleUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method TextGUIRendererComponent GetCharacterVocalText(integer index)
+	method LocalizedFormatTextComponent GetCharacterVocalText(integer index)
 		-- 캐릭터 카드 번호에 해당하는 보컬 텍스트 컴포넌트를 반환합니다.
 		if index == 1 then return self.characterVocalText1 end
 		if index == 2 then return self.characterVocalText2 end
@@ -1733,7 +1676,7 @@ script ScheduleUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method TextGUIRendererComponent GetCharacterDanceText(integer index)
+	method LocalizedFormatTextComponent GetCharacterDanceText(integer index)
 		-- 캐릭터 카드 번호에 해당하는 댄스 텍스트 컴포넌트를 반환합니다.
 		if index == 1 then return self.characterDanceText1 end
 		if index == 2 then return self.characterDanceText2 end
@@ -1741,7 +1684,7 @@ script ScheduleUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method TextGUIRendererComponent GetCharacterVisualText(integer index)
+	method LocalizedFormatTextComponent GetCharacterVisualText(integer index)
 		-- 캐릭터 카드 번호에 해당하는 비주얼 텍스트 컴포넌트를 반환합니다.
 		if index == 1 then return self.characterVisualText1 end
 		if index == 2 then return self.characterVisualText2 end
@@ -1749,7 +1692,7 @@ script ScheduleUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method TextGUIRendererComponent GetCharacterConditionText(integer index)
+	method LocalizedFormatTextComponent GetCharacterConditionText(integer index)
 		-- 캐릭터 카드 번호에 해당하는 컨디션 텍스트 컴포넌트를 반환합니다.
 		if index == 1 then return self.characterConditionText1 end
 		if index == 2 then return self.characterConditionText2 end
@@ -1817,5 +1760,6 @@ script ScheduleUILogic extends Logic
 		if day == 5 then return self.defaultCharacterSlotIcon5 end
 		return nil
 	end
+
 
 end

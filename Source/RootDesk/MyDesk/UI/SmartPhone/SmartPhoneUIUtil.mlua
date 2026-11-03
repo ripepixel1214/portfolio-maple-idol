@@ -1,0 +1,217 @@
+---@description "스마트폰 UI의 표시·리소스 조회 헬퍼"
+@Logic
+script SmartPhoneUIUtil extends Logic
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method boolean ContainsString(any values, string target)
+		-- 문자열 목록에 지정 값이 포함되는지 확인합니다.
+		if values == nil or target == nil or target == "" then
+			return false
+		end
+
+		for _, value in ipairs(values) do
+			if value == target then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedCharacterName(any character)
+		-- 캐릭터 ID에 대응하는 ActorTable 번역 이름 조회
+		if character == nil then
+			return ""
+		end
+
+		local fallbackName = character.name or ""
+		local characterId = character.id or ""
+		if characterId == "" then
+			return fallbackName
+		end
+
+		local actor = _ActorMaster:GetActor(characterId)
+		if actor == nil then
+			return fallbackName
+		end
+
+		if actor.nameKey ~= nil and actor.nameKey ~= "" then
+			return _LocaleTextUtil:GetText(actor.nameKey)
+		end
+
+		return actor.name or fallbackName
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetTextByCardChild(Entity card, string childName, string value)
+		-- 런타임 카드 하위의 지정된 이름 엔티티에 GUI 문자열을 적용합니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child == nil then
+			return
+		end
+
+		if child.TextGUIRendererComponent ~= nil then
+			child.TextGUIRendererComponent.Text = value or ""
+		elseif child.TextComponent ~= nil then
+			child.TextComponent.Text = value or ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImageByCardChild(Entity card, string childName, string ruid, boolean isFilled)
+		-- 런타임 카드 하위의 지정된 이름 엔티티에 SpriteGUIRendererComponent 이미지를 적용합니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child == nil or child.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		if isFilled ~= true or ruid == nil or ruid == "" then
+			child.SpriteGUIRendererComponent.ImageRUID = DataRef("")
+			child.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		child.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
+		child.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImageColorByCardChild(Entity card, string childName, Color color)
+		-- 카드 하위 이미지의 tint 색상을 변경합니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child == nil or child.SpriteGUIRendererComponent == nil then
+			return
+		end
+
+		child.SpriteGUIRendererComponent.Color = color
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCardChildEnable(Entity card, string childName, boolean enable)
+		-- 런타임 카드 하위의 지정된 이름 엔티티를 켜거나 끕니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child ~= nil then
+			child.Enable = enable
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetGaugeFillByCardChild(Entity card, string childName, number fillAmount)
+		-- 런타임 카드 하위의 지정된 게이지 SliderComponent에 Value를 적용합니다.
+		if card == nil then
+			return
+		end
+
+		local child = card:GetChildByName(childName, true)
+		if child == nil then
+			return
+		end
+
+		if child.SliderComponent ~= nil then
+		child.SliderComponent.Value = _MathUtil:Clamp(fillAmount or 0, 0, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetActorName(string characterId)
+		-- 캐릭터 id를 표시 이름으로 변환합니다.
+		if characterId == nil or characterId == "" then
+			return ""
+		end
+
+		return _ActorMaster:GetActorName(characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCharacterPortraitRuid(string characterId)
+		-- 가로 초상화가 없으면 빈 RUID를 반환합니다.
+		return _RuntimeActorManager:ClientGetActorPortraitHorizontalRuid(characterId, "") or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCharacterVerticalPortraitRuid(string characterId)
+		-- 세로 초상화가 없으면 빈 RUID를 반환합니다.
+		return _RuntimeActorManager:ClientGetActorPortraitRuid(characterId, "") or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundText(TextGUIRendererComponent textComponent, string value)
+		-- UUID로 바인딩된 텍스트 컴포넌트에 표시 문자열을 설정합니다.
+		if isvalid(textComponent) == false then
+			return
+		end
+
+		textComponent.Text = value or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundGuiText(TextGUIRendererComponent textComponent, string value)
+		-- UUID로 바인딩된 TextGUIRendererComponent에 표시 문자열을 설정합니다.
+		if isvalid(textComponent) == false then
+			return
+		end
+
+		textComponent.Text = value or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundImage(SpriteGUIRendererComponent imageComponent, string ruid, boolean isFilled)
+		-- UUID로 바인딩된 이미지 컴포넌트에 RUID 이미지를 설정합니다.
+		if isvalid(imageComponent) == false then
+			return
+		end
+
+		if isFilled ~= true or ruid == nil or ruid == "" then
+			imageComponent.ImageRUID = DataRef("")
+			imageComponent.Color = Color(1, 1, 1, 0)
+			return
+		end
+
+		imageComponent.ImageRUID = DataRef(ruid)
+		imageComponent.Color = Color(1, 1, 1, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundImageColor(SpriteGUIRendererComponent imageComponent, Color color)
+		-- UUID로 바인딩된 이미지 컴포넌트의 tint 색상을 설정합니다.
+		if isvalid(imageComponent) then
+			imageComponent.Color = color
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBoundGaugeFill(SliderComponent sliderComponent, number fillAmount)
+		-- UUID로 바인딩된 게이지 SliderComponent에 Value를 설정합니다.
+		if isvalid(sliderComponent) then
+		sliderComponent.Value = _MathUtil:Clamp(fillAmount or 0, 0, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityEnable(Entity entity, boolean enable)
+		-- 전달받은 UI 엔티티의 Enable을 설정합니다.
+		if isvalid(entity) then
+			entity.Enable = enable
+		end
+	end
+
+end

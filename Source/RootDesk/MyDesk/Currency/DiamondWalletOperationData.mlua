@@ -1,0 +1,48 @@
+@Struct
+script DiamondWalletOperationData
+
+	property string operationId = ""
+	property string kind = ""
+	property string reason = ""
+	property number debit = 0
+	property number credit = 0
+	property string productId = ""
+	property number orderNumber = 0
+	property number beforeBalance = 0
+	property number afterBalance = 0
+	property number revision = 0
+	property string createdAt = ""
+	property table shopItemIds = {}
+	property table characterIds = {}
+
+	method table ToPlainTable()
+		-- 거래 복구와 운영 조회용 원시 데이터 구성
+		return { operationId = self.operationId, kind = self.kind, reason = self.reason,
+			debit = self.debit, credit = self.credit, productId = self.productId,
+			orderNumber = self.orderNumber, beforeBalance = self.beforeBalance,
+			afterBalance = self.afterBalance, revision = self.revision, createdAt = self.createdAt,
+			shopItemIds = self.shopItemIds, characterIds = self.characterIds }
+	end
+
+	method boolean FromPlainTable(any tPlainData)
+		-- 누락되거나 손상된 거래 기록 거부
+		if type(tPlainData) ~= "table" then return false end
+		local strings = { "operationId", "kind", "reason", "productId", "createdAt" }
+		for _, key in ipairs(strings) do
+			if type(tPlainData[key]) ~= "string" then return false end
+			self[key] = tPlainData[key]
+		end
+		local amounts = { "debit", "credit", "orderNumber", "beforeBalance", "afterBalance", "revision" }
+		for _, key in ipairs(amounts) do
+			if _DiamondWalletStorage:IsValidAmount(tPlainData[key]) == false then return false end
+			self[key] = tPlainData[key]
+		end
+		if tPlainData.shopItemIds ~= nil then self.shopItemIds = tPlainData.shopItemIds end
+		if tPlainData.characterIds ~= nil then self.characterIds = tPlainData.characterIds end
+		return _DiamondWalletStorage:IsValidOperation(self) and self.revision > 0 and self.createdAt ~= ""
+			and self.beforeBalance >= self.debit
+			and self.credit <= _DiamondWalletStorage.MAX_SAFE_AMOUNT - (self.beforeBalance - self.debit)
+			and self.afterBalance == self.beforeBalance - self.debit + self.credit
+	end
+
+end

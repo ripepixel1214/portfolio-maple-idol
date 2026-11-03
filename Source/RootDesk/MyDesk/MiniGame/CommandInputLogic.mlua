@@ -1,3 +1,4 @@
+---@description "미니게임 커맨드 입력 처리 로직"
 @Logic
 @ExecSpace("ClientOnly")
 script CommandInputLogic extends Logic
@@ -92,7 +93,7 @@ script CommandInputLogic extends Logic
 			}
 		end
 
-		if Environment:IsMobilePlatform() == true then
+		if _ApplicationService:IsMobilePlatform() == true then
 			self.touchDownHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.OnTouchDown)
 			self.touchUpHandler = _InputService:ConnectEvent(ScreenTouchReleaseEvent, self.OnTouchUp)
 		else

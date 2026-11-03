@@ -1,0 +1,135 @@
+---@description "낚시 클라이언트 세션과 입력 상태 관리"
+@Struct
+script MiniGameFishingModel
+	property string TEXT_UI_FISHING_REJECTED = "ui.fishing.rejected"
+	property number INPUT_SEND_SECONDS = 0.05
+	property any tState = nil
+	property string sessionId = ""
+	property integer inputSequence = 0
+	property boolean requestPending = false
+	property number inputElapsed = 0
+	property number snapshotAge = 0
+	property number localPlayerX = 550
+	property boolean movePending = false
+
+	method void OpenLobby(boolean debugMode)
+		-- 로비 상태와 미리보기 개체 구성
+		self.tState = MiniGameFishingState()
+		self.tState.isDebug = debugMode
+		_MiniGameFishingRule:Populate(self.tState)
+		self.sessionId = ""
+		self.inputSequence = 0
+		self.requestPending = false
+		self.inputElapsed = 0
+		self.movePending = false
+		self.snapshotAge = 0
+		self.localPlayerX = self.tState.playerX
+	end
+
+	method void BeginSession(any tContext)
+		-- 서버 실행 정보로 입력 순번과 보간 상태 초기화
+		self.tState = MiniGameFishingState()
+		self.sessionId = tContext.sessionId
+		self.inputSequence = 0
+		self.requestPending = false
+		self.inputElapsed = 0
+		self.movePending = false
+		self.snapshotAge = 0
+		self.localPlayerX = self.tState.playerX
+	end
+
+	method boolean TryStart()
+		-- 시작 연타와 서버 응답 대기 중 재요청 차단
+		if self.requestPending or self.tState == nil or self.tState.stage ~= _MiniGameFishingRule.STAGE_READY then return false end
+		self.requestPending = true
+		return true
+	end
+
+	method boolean CanMove()
+		-- 서버가 허용한 진행 및 비스턴 상태에서만 조준 이동 허용
+		return self.tState ~= nil and self.tState.stage == _MiniGameFishingRule.STAGE_PLAYING and self.tState.stun <= 0
+	end
+
+	method boolean Move(number x)
+		-- 표시 좌표를 게임 범위로 제한하고 변경된 조준만 전송 대기
+		if not self:CanMove() or x ~= x or math.abs(x) == math.huge then return false end
+		local rule = _MiniGameFishingRule
+		local nextX = math.max(rule.PLAYER_MARGIN, math.min(rule.WIDTH - rule.PLAYER_MARGIN, x))
+		if self.localPlayerX ~= nextX then self.movePending = true end
+		self.localPlayerX = nextX
+		return true
+	end
+
+	method any BuildInput(string action)
+		-- 세션 입력 순번 증가 후 런타임 참조 없는 입력 Struct 생성
+		if self.sessionId == "" then return nil end
+		self.inputSequence = self.inputSequence + 1
+		local tInput = MiniGameFishingInputData()
+		tInput.action = action
+		tInput.x = self.localPlayerX
+		tInput.sequence = self.inputSequence
+		if action == _MiniGameFishingRule.ACTION_MOVE then self.movePending = false end
+		return tInput
+	end
+
+	method boolean ApplyState(string sessionId, any tState)
+		-- 다른 세션과 역순 응답 폐기, 서버 스턴 시 발사 열로 조준 복원
+		if self.sessionId ~= sessionId or tState == nil
+			or (self.tState ~= nil and tState.revision <= self.tState.revision) then return false end
+		self.tState = tState
+		self.snapshotAge = 0
+		self.requestPending = false
+		if tState.stun > 0 or tState.stage ~= _MiniGameFishingRule.STAGE_PLAYING then
+			self.localPlayerX = tState.playerX
+			self.movePending = false
+			self.inputElapsed = 0
+		end
+		return true
+	end
+
+	method void RejectStart()
+		-- 거절 응답 후 로비 입력 재허용
+		self.requestPending = false
+		if self.tState ~= nil then self.tState.message = self.TEXT_UI_FISHING_REJECTED end
+	end
+
+	method boolean IsResultConfirmed()
+		-- 영속 보상 확정 결과 여부 확인
+		return self.tState ~= nil and self.tState.stage == _MiniGameFishingRule.STAGE_RESULT and self.tState.rewardConfirmed
+	end
+
+	method boolean CanClose()
+		-- 입장 및 정산 대기 중 닫기 차단
+		return self.tState ~= nil and not self.requestPending
+			and self.tState.stage ~= _MiniGameFishingRule.STAGE_SETTLING
+			and self.tState.stage ~= _MiniGameFishingRule.STAGE_STARTING
+	end
+
+	method void CompleteSession()
+		-- 확정 결과는 유지하고 서버 입력 경로만 해제
+		self.sessionId = ""
+		self.requestPending = false
+	end
+
+	method boolean Update(number delta)
+		-- 보간은 매 프레임 진행하고 변경된 조준만 기존 간격으로 전송
+		self.snapshotAge = self.snapshotAge + math.max(0, delta)
+		if not self:CanMove() then return false end
+		self.inputElapsed = math.min(self.INPUT_SEND_SECONDS, self.inputElapsed + math.max(0, delta))
+		if not self.movePending or self.inputElapsed < self.INPUT_SEND_SECONDS then return false end
+		self.inputElapsed = 0
+		return true
+	end
+
+	method any GetViewState()
+		-- Model과 공유하지 않는 표시용 상태 복사 생성
+		local tViewState = MiniGameFishingViewState()
+		tViewState.tState = MiniGameFishingState()
+		tViewState.tState:FromPlainTable(self.tState:ToPlainTable())
+		tViewState.requestPending = self.requestPending
+		tViewState.canClose = self:CanClose()
+		tViewState.snapshotAge = self.snapshotAge
+		tViewState.playerX = self.localPlayerX
+		return tViewState
+	end
+end

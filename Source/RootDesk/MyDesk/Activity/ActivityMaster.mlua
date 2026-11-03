@@ -10,13 +10,37 @@ script ActivityMaster extends Logic
 	-- ActivityRow
 	property any tActivities = {}
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	method any GetActivity(string id)
+		-- 서버/클라이언트 공용: id에 해당하는 활동 row를 반환합니다.
+		if self.IsActivityLoaded == false then self:LoadActivities() end
+		return self.tActivityById[id]
+	end
+
+	method table GetAllActivities()
+		-- 서버/클라이언트 공용: 전체 활동 row 목록을 반환합니다.
+		if self.IsActivityLoaded == false then self:LoadActivities() end
+		return self.tActivities
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	method void OnBeginPlay()
-		-- 로직 시작 시 활동 마스터 데이터를 로드합니다.
+		-- 서버/클라이언트 공용: 로직 시작 시 활동 마스터 데이터를 로드합니다.
 		self:LoadActivities()
 	end
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	method void LoadActivities()
-		-- 활동 테이블을 읽고 activityId 기준으로 캐싱합니다.
+		-- 서버/클라이언트 공용: 활동 테이블을 읽고 activityId 기준으로 캐싱합니다.
 		self.tActivityById = {}
 		self.tActivities = {}
 		self.IsActivityLoaded = false
@@ -41,8 +65,8 @@ script ActivityMaster extends Logic
 				end
 				activity.nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
 				activity.name = ""
-				if _LocalizationLogic ~= nil then
-					activity.name = _LocalizationLogic:GetText(activity.nameKey, "")
+				if _LocaleTextUtil ~= nil then
+					activity.name = _LocaleTextUtil:GetText(activity.nameKey)
 				end
 				activity.nameColor = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameColor", "")
 				activity.animationKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "animationKey", "")
@@ -61,24 +85,6 @@ script ActivityMaster extends Logic
 		end
 		
 		self.IsActivityLoaded = true
-	end
-
-	method any GetActivity(string id)
-		-- id에 해당하는 활동 row를 반환합니다.
-		if self.IsActivityLoaded == false then
-			self:LoadActivities()
-		end
-		
-		return self.tActivityById[id]
-	end
-
-	method table GetAllActivities()
-		-- 전체 활동 row 목록을 반환합니다.
-		if self.IsActivityLoaded == false then
-			self:LoadActivities()
-		end
-		
-		return self.tActivities
 	end
 
 end

@@ -2,6 +2,28 @@
 @Logic
 script ShopUILogic extends Logic
 
+	property string SLOT_PRICE_TEXT_NAME = "UIText"
+	property any diamondWalletChangedHandler = nil
+	property boolean isPurchasePending = false
+	property integer purchaseResponseTimerId = 0
+	property string UI_PURCHASE_TIMEOUT_KEY = "ui.purchase.timeout"
+	property string purchaseRequestId = ""
+	property boolean isIdolView = false
+	property string CharacterShopItemId = "character_angelic_buster"
+	property string UI_CURRENCY_MESO_KEY = "ui.currency.meso"
+	property string UI_CURRENCY_DIAMOND_KEY = "ui.currency.diamond"
+	property string UI_CURRENCY_NIGHT_MARKET_KEY = "ui.currency.night_market_coin"
+	property string UI_CURRENCY_LEGACY_KEY = "ui.currency.legacy_world_coin"
+	property string UI_PURCHASE_FAILED_KEY = "ui.shop.purchase_failed"
+	property string UI_PURCHASE_CHECKING_KEY = "ui.purchase.checking"
+
+	property TextGUIRendererComponent CharacterPriceText = "90719740-d9fe-4d75-98c9-59e670a4a4f0"
+	property TextGUIRendererComponent CharacterGrantText = "fb0258f9-1043-4204-b3cf-b7f3828b80c5"
+	property TextGUIRendererComponent PurchaseConfirmText = "24077f24-9c55-4d3e-a17f-0c232ecb8128"
+	property string UI_CHARACTER_GRANT_KEY = "ui.shop.character_grant"
+	property string UI_CART_COUNT_KEY = "ui.shop.cart_count"
+	property string UI_PURCHASE_DETAILS_KEY = "ui.shop.purchase_confirm_details"
+
 	property string UI_OWNED_KEY = "ui.shop.owned"
 
 	property string UI_BEHAVIOR_DEFAULT_KEY = "ui.shop.behavior.default"
@@ -209,6 +231,7 @@ script ShopUILogic extends Logic
 		self:ConnectBehaviorButtons()
 		self:ConnectViewTabs()
 		self:ConnectProgressChanged()
+		self.diamondWalletChangedHandler = _DiamondWalletLogic:ConnectEvent(DiamondWalletChangedEvent, self.OnDiamondWalletChanged)
 		self:ConnectShopItemChanged()
 		self:ShowCategory(self.currentCategory)
 		self:RefreshActivePortraits()
@@ -247,6 +270,9 @@ script ShopUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
 		-- 런타임 슬롯과 이벤트 핸들러를 정리합니다.
+		if self.purchaseResponseTimerId > 0 then _TimerService:ClearTimer(self.purchaseResponseTimerId) end
+		self.purchaseResponseTimerId = 0
+		self.isPurchasePending = false
 		self:ClearRuntimeSlots()
 		self:DisconnectCategoryTabs()
 		self:DisconnectCharacterChanged()
@@ -255,6 +281,10 @@ script ShopUILogic extends Logic
 		self:DisconnectBehaviorButtons()
 		self:DisconnectViewTabs()
 		self:DisconnectProgressChanged()
+		if self.diamondWalletChangedHandler ~= nil then
+			_DiamondWalletLogic:DisconnectEvent(DiamondWalletChangedEvent, self.diamondWalletChangedHandler)
+			self.diamondWalletChangedHandler = nil
+		end
 		self:DisconnectShopItemChanged()
 		self:DisconnectBuyButtons()
 		self:DisconnectShopToggle()
@@ -281,11 +311,12 @@ script ShopUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnCharacterChanged(any characterChangedEvent)
-		-- 액티브 캐릭터가 바뀌면 초상화를 다시 받아 표시하고, 기본 미리보기 캐릭터를 보장합니다.
+		-- 구매로 변경된 캐릭터 보유 여부와 기존 미리보기 갱신
 		self:RefreshActivePortraits()
 		self:EnsureDefaultPreviewCharacter()
+		self:RebuildSlots()
+		self:RefreshSelectedCoinText()
 	end
-
 	@ExecSpace("ClientOnly")
 	method void EnsureDefaultPreviewCharacter()
 		-- 아직 선택된 미리보기 캐릭터가 없으면 첫 번째 액티브 캐릭터를 기본으로 미리보기합니다.
@@ -532,7 +563,13 @@ script ShopUILogic extends Logic
 			self:SetSlotOwned(slot)
 		else
 			self:SetSlotCoin(slot, tShopItem.coinType or "")
-			self:SetSlotPrice(slot, tShopItem.price or 0)
+				self:SetSlotPrice(slot, tShopItem.price or 0)
+			local priceEntity = slot:GetChildByName(self.SLOT_PRICE_TEXT_NAME, true)
+			if priceEntity ~= nil and priceEntity.TextGUIRendererComponent ~= nil then
+				priceEntity.TextGUIRendererComponent.BestFit = true
+				priceEntity.TextGUIRendererComponent.MinSize = 12
+				priceEntity.TextGUIRendererComponent.Text = self:FormatIntegerWithComma(tShopItem.price or 0) .. " " .. self:GetCoinLabel(tShopItem.coinType)
+			end
 		end
 	end
 
@@ -549,9 +586,9 @@ script ShopUILogic extends Logic
 			worldCoinIcon.Enable = false
 		end
 
-		local priceText = slot:GetChildByName("UIText", true)
+		local priceText = slot:GetChildByName(self.SLOT_PRICE_TEXT_NAME, true)
 		if priceText ~= nil and priceText.TextGUIRendererComponent ~= nil then
-			priceText.TextGUIRendererComponent.Text = self:GetLocalizedText(self.UI_OWNED_KEY, "")
+			priceText.TextGUIRendererComponent.Text = _LocaleTextUtil:GetText(self.UI_OWNED_KEY)
 			-- 재화 아이콘이 없으므로 텍스트의 x 위치만 32로 옮긴다(y는 유지).
 			if priceText.UITransformComponent ~= nil then
 				local currentPosition = priceText.UITransformComponent.anchoredPosition
@@ -562,14 +599,15 @@ script ShopUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method boolean IsShopItemOwned(string shopItemId)
-		-- 클라이언트 캐시 기준 해당 상점 아이템 보유 여부를 반환합니다.
-		if shopItemId == nil or shopItemId == "" or _ShopItemManager == nil then
-			return false
+		-- 치장 소유 목록과 캐릭터 아카이브의 실제 보유 상태 조회
+		if shopItemId == nil or shopItemId == "" then return false end
+		local tItem = _ShopItemMaster:GetShopItemById(shopItemId)
+		if tItem ~= nil and (tItem.characterId or "") ~= "" then
+			local tCharacter = _CharacterManager:ClientGetCharacterById(tItem.characterId)
+			if tCharacter ~= nil and tCharacter.isDiscovered then return true end
 		end
-
 		return _ShopItemManager:ClientHasShopItem(shopItemId)
 	end
-
 	@ExecSpace("ClientOnly")
 	method void SetSlotIcon(Entity slot, any tShopItem)
 		-- tShopItem: ShopItemRow
@@ -615,7 +653,7 @@ script ShopUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void SetSlotPrice(Entity slot, integer price)
 		-- 슬롯 하단 가격 텍스트를 갱신합니다. 0 이하이면 빈 문자열입니다.
-		local priceText = slot:GetChildByName("UIText", true)
+		local priceText = slot:GetChildByName(self.SLOT_PRICE_TEXT_NAME, true)
 		if priceText == nil or priceText.TextGUIRendererComponent == nil then
 			return
 		end
@@ -680,6 +718,15 @@ script ShopUILogic extends Logic
 			return
 		end
 
+		if self.isPurchasePending or (tShopItem.characterId or "") ~= "" then return end
+		if not self:IsShopItemOwned(shopItemId) then
+			for selectedCategory, selectedId in pairs(self.tSelectedByCategory) do
+				local tSelected = _ShopItemMaster:GetShopItemById(selectedId)
+				if tSelected ~= nil and not self:IsShopItemOwned(selectedId) and tSelected.coinType ~= tShopItem.coinType then
+					self:RestoreCategoryToBase(selectedCategory)
+				end
+			end
+		end
 		local category = tShopItem.category or ""
 		local itemRuid = tShopItem.ruid or ""
 		local selectedShopItemId = self.tSelectedByCategory[category] or ""
@@ -723,7 +770,7 @@ script ShopUILogic extends Logic
 			return ""
 		end
 		if itemName ~= "" and shopItemId ~= "" and self:IsShopItemOwned(shopItemId) then
-			return itemName .. " (" .. self:GetLocalizedText(self.UI_OWNED_KEY, "") .. ")"
+			return itemName .. " (" .. _LocaleTextUtil:GetText(self.UI_OWNED_KEY) .. ")"
 		end
 
 		return itemName
@@ -1141,14 +1188,14 @@ script ShopUILogic extends Logic
 	method string GetBehaviorLabel(integer index)
 		-- 동작 인덱스에 대응하는 표시 라벨을 반환합니다.
 		if index == 1 then
-			return self:GetLocalizedText(self.UI_BEHAVIOR_DEFAULT_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_DEFAULT_KEY)
 		elseif index == 2 then
-			return self:GetLocalizedText(self.UI_BEHAVIOR_WALK_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_WALK_KEY)
 		elseif index == 3 then
-			return self:GetLocalizedText(self.UI_BEHAVIOR_MOTION_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_MOTION_KEY)
 		end
 
-		return self:GetLocalizedText(self.UI_BEHAVIOR_DEFAULT_KEY, "")
+		return _LocaleTextUtil:GetText(self.UI_BEHAVIOR_DEFAULT_KEY)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1198,21 +1245,25 @@ script ShopUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void ShowDecoView()
 		-- 치장 조합(ItemPanel + selectedItemPanel + characterShowWindowPanel)을 켜고 IdolPanel을 끕니다.
+		self.isIdolView = false
 		self:SetPanelEnable(self.ItemPanelEntity, true)
 		self:SetPanelEnable(self.SelectedItemPanelEntity, true)
 		self:SetPanelEnable(self.CharacterShowWindowPanelEntity, true)
 		self:SetPanelEnable(self.IdolPanelEntity, false)
 		self:UpdateTabSprites(true)
+		self:RefreshSelectedCoinText()
 	end
 
 	@ExecSpace("ClientOnly")
 	method void ShowIdolView()
 		-- IdolPanel을 켜고 치장 조합 3개를 끕니다(상호 배타).
+		self.isIdolView = true
 		self:SetPanelEnable(self.ItemPanelEntity, false)
 		self:SetPanelEnable(self.SelectedItemPanelEntity, false)
 		self:SetPanelEnable(self.CharacterShowWindowPanelEntity, false)
 		self:SetPanelEnable(self.IdolPanelEntity, true)
 		self:UpdateTabSprites(false)
+		self:RefreshSelectedCoinText()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1319,6 +1370,7 @@ script ShopUILogic extends Logic
 		self:ResetSelectionToCurrentCostume()
 		log("[ShopUILogic][Baseline] shop opened with empty selected texts character=" .. (self.previewCharacterId or ""))
 		self:ShowDecoView()
+		_ShopItemManager:RequestRefreshShop()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1364,10 +1416,10 @@ script ShopUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnIdolBuyClicked(ButtonClickEvent event)
-		-- 시즌 BuyButton으로 준비 팝업을 엽니다.
-		self:OpenPreparePanel()
+		-- 시즌 캐릭터를 기존 구매 확인 경로로 연결
+		if not self.isIdolView then return end
+		self:OnBuyButtonClicked(event)
 	end
-
 	@ExecSpace("ClientOnly")
 	method void OnPrepareExitClicked(ButtonClickEvent event)
 		-- Exit 버튼으로 준비 팝업을 닫습니다.
@@ -1422,7 +1474,7 @@ script ShopUILogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void OnProgressChanged(any progressChangedEvent)
 		-- 진행 데이터가 바뀌면 월드 코인 표시를 갱신합니다.
-		self:RefreshWorldCoinText()
+		self:RefreshSelectedCoinText()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1452,60 +1504,55 @@ script ShopUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshWorldCoinText()
-		-- 현재 임시 월드 코인(tempWorldCoin)을 월드 코인 텍스트에 콤마 포맷으로 표시합니다.
-		if self.WorldCoinText == nil then
-			return
-		end
-
-		local tempWorldCoin = 0
-		if _ProgressManager ~= nil then
-			local progress = _ProgressManager:ClientGetProgress()
-			if progress ~= nil and progress.tempWorldCoin ~= nil then
-				tempWorldCoin = progress.tempWorldCoin
-			end
-		end
-
-		self.WorldCoinText.Text = self:FormatIntegerWithComma(tempWorldCoin)
+		-- 선택 재화의 보유량 표시, 미로드 다이아몬드를 0으로 표시하지 않음
+		if self.WorldCoinText == nil then return end
+		local coinType = self:GetSelectedCoinType()
+		local balance = self:GetClientCoinBalance(coinType)
+		self.WorldCoinText.BestFit = true
+		self.WorldCoinText.MinSize = 12
+		self.WorldCoinText.MaxSize = 26
+		local icon = self.WorldCoinText.Entity.Parent:GetChildByName("sprite", true)
+		if icon ~= nil then icon.Enable = false end
+		self.WorldCoinText.Text = self:GetCoinLabel(coinType) .. " " .. (balance == nil and "…" or self:FormatIntegerWithComma(balance))
 	end
-
 	@ExecSpace("ClientOnly")
 	method void RefreshSelectedCoinText()
-		-- 현재 선택된 worldCoin 아이템 price 합계를 표시합니다.
-		local selectedWorldCoinTotal = self:GetSelectedWorldCoinTotal()
+		-- 선택 합계와 보유 잔액을 같은 재화 기준으로 갱신
+		local total = self:GetSelectedWorldCoinTotal()
 		if self.SelectedCoinText ~= nil then
-			self.SelectedCoinText.Text = self:FormatIntegerWithComma(selectedWorldCoinTotal)
+			self.SelectedCoinText.Text = self:FormatIntegerWithComma(math.max(0, total))
+			local icon = self.SelectedCoinText.Entity.Parent:GetChildByName("coinSprite", true)
+			if icon ~= nil then icon.Enable = false end
 		end
-
-		self:RefreshBuyButtonState(selectedWorldCoinTotal)
+		self:RefreshWorldCoinText()
+		self:RefreshCharacterProductDetails()
+		self:RefreshBuyButtonState(total)
 	end
-
 	@ExecSpace("ClientOnly")
 	method void RefreshBuyButtonState(integer selectedWorldCoinTotal)
-		-- 구매할 아이템이 있을 때만 버튼 입력을 활성화하며, 비활성 상태는 ButtonComponent의 DisabledColor를 사용합니다.
-		if self.BuyButton == nil or self.BuyButton.Entity == nil then
-			return
-		end
-
-		self.BuyButton.Entity.Enable = true
-		self.BuyButton.Enable = selectedWorldCoinTotal > 0
+		-- 잔액·선택·응답 대기 상태로 구매와 확인 버튼 활성화
+		local ids = self:GetSelectedWorldCoinItemIds()
+		local balance = self:GetClientCoinBalance(self:GetSelectedCoinType())
+		local enabled = not self.isPurchasePending and #ids > 0 and selectedWorldCoinTotal >= 0
+			and balance ~= nil and balance >= selectedWorldCoinTotal
+		if self.BuyButton ~= nil then self.BuyButton.Enable = enabled end
+		if self.IdolBuyButton ~= nil then self.IdolBuyButton.Enable = enabled and self.isIdolView end
+		if self.EnsureBuyConfirmButton ~= nil then self.EnsureBuyConfirmButton.Enable = enabled end
 	end
-
 	@ExecSpace("ClientOnly")
 	method integer GetSelectedWorldCoinTotal()
-		-- 선택된 아이템 중 coinType이 worldCoin이고 아직 보유하지 않은 것들의 price 합계를 반환합니다.
+		-- 같은 재화의 선택 상품 합산
 		local total = 0
-		if _ShopItemMaster ~= nil and self.tSelectedByCategory ~= nil then
-			for category, shopItemId in pairs(self.tSelectedByCategory) do
-				local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
-				if tShopItem ~= nil and (tShopItem.coinType or "") == "worldCoin" and self:IsShopItemOwned(shopItemId) == false then
-					total = total + (tShopItem.price or 0)
-				end
-			end
+		local coinType = ""
+		for _, id in ipairs(self:GetSelectedWorldCoinItemIds()) do
+			local tItem = _ShopItemMaster:GetShopItemById(id)
+			if coinType ~= "" and coinType ~= tItem.coinType then return -1 end
+			coinType = tItem.coinType
+			if tItem.price > _ProgressManager.MAX_SAFE_CURRENCY_AMOUNT - total then return -1 end
+			total = total + tItem.price
 		end
-
 		return total
 	end
-
 	@ExecSpace("ClientOnly")
 	method void ConnectBuyButtons()
 		-- 구매하기 버튼과 확인 팝업 취소 버튼 클릭을 연결합니다.
@@ -1544,14 +1591,11 @@ script ShopUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnBuyButtonClicked(ButtonClickEvent event)
-		-- 선택한 worldCoin 합계가 0 초과일 때만 구매 확인 팝업을 엽니다.
-		if self:GetSelectedWorldCoinTotal() <= 0 then
-			return
-		end
-
+		-- 서버 확인 전 선택 재화·상품·금액 안내
+		if self.isPurchasePending or #self:GetSelectedWorldCoinItemIds() == 0 or self:GetSelectedWorldCoinTotal() < 0 then return end
 		self:OpenEnsureBuyPanel()
+		_UIToast:ShowMessage(self:GetCoinLabel(self:GetSelectedCoinType()) .. " " .. self:FormatIntegerWithComma(self:GetSelectedWorldCoinTotal()))
 	end
-
 	@ExecSpace("ClientOnly")
 	method void OnEnsureBuyCancelClicked(ButtonClickEvent event)
 		-- 취소 버튼으로 구매 확인 팝업을 닫습니다.
@@ -1560,35 +1604,56 @@ script ShopUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnEnsureBuyConfirmClicked(ButtonClickEvent event)
-		-- 확인 버튼으로 선택된 worldCoin 아이템 결제를 서버에 요청하고 팝업을 닫습니다.
-		local tPurchaseIds = self:GetSelectedWorldCoinItemIds()
-		if _ShopItemManager ~= nil and #tPurchaseIds > 0 then
-			-- 실제 차감/검증/저장은 서버가 수행한다. 결과는 서버 Push로 코인/보유가 갱신된다.
-			_ShopItemManager:RequestPurchaseItems(tPurchaseIds)
-		end
-
-		self:CloseEnsureBuyPanel()
+		-- 가격은 서버에서 재검증하고 응답 전 중복 요청 차단
+		if self.isPurchasePending then return end
+		local ids = self:GetSelectedWorldCoinItemIds()
+		if #ids == 0 then return end
+		self.purchaseRequestId = _UtilLogic:NewGuid()
+		self.isPurchasePending = true
+		self:RefreshSelectedCoinText()
+		_UIToast:ShowMessage(_LocaleTextUtil:GetText(self.UI_PURCHASE_CHECKING_KEY))
+		local requestId = self.purchaseRequestId
+		self.purchaseResponseTimerId = _TimerService:SetTimerOnce(function()
+			if self.isPurchasePending and self.purchaseRequestId == requestId then
+				self.isPurchasePending = false
+				self.purchaseRequestId = ""
+				self.purchaseResponseTimerId = 0
+				self:CloseEnsureBuyPanel()
+				_UIToast:ShowMessage(_LocaleTextUtil:GetText(self.UI_PURCHASE_TIMEOUT_KEY))
+				_ShopItemManager:RequestRefreshShop()
+				self:RefreshSelectedCoinText()
+			end
+		end, 15)
+		_ShopItemManager:RequestPurchaseWithFeedback(ids, requestId)
 	end
-
 	@ExecSpace("ClientOnly")
 	method any GetSelectedWorldCoinItemIds()
-		-- 선택된 아이템 중 coinType이 worldCoin이고 아직 보유하지 않은 것들의 shopItemId 목록을 반환합니다.
-		local tIds = {}
-		if _ShopItemMaster ~= nil and self.tSelectedByCategory ~= nil then
-			for category, shopItemId in pairs(self.tSelectedByCategory) do
-				local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
-				if tShopItem ~= nil and (tShopItem.coinType or "") == "worldCoin" and self:IsShopItemOwned(shopItemId) == false then
-					table.insert(tIds, shopItemId)
-				end
+		-- 기존 호출 이름을 유지하고 모든 재화의 선택 목록 반환
+		local ids = {}
+		if self.isIdolView then
+			local id = self:ResolveCharacterShopItemId()
+			if id ~= "" and not self:IsShopItemOwned(id) then table.insert(ids, id) end
+		else
+			for _, id in pairs(self.tSelectedByCategory or {}) do
+				if _ShopItemMaster:GetShopItemById(id) ~= nil and not self:IsShopItemOwned(id) then table.insert(ids, id) end
 			end
 		end
-
-		return tIds
+		table.sort(ids)
+		return ids
 	end
-
 	@ExecSpace("ClientOnly")
 	method void OpenEnsureBuyPanel()
 		-- 구매 확인 팝업을 엽니다.
+		local names = {}
+		for _, id in ipairs(self:GetSelectedWorldCoinItemIds()) do
+			local tItem = _ShopItemMaster:GetShopItemById(id)
+			table.insert(names, _LocaleTextUtil:GetText(tItem.nameKey))
+		end
+		local productLabel = table.concat(names, ", ")
+		if #names > 1 then productLabel = _LocaleTextUtil:Format(self.UI_CART_COUNT_KEY, #names, nil, nil, "") end
+		if self.PurchaseConfirmText ~= nil then
+			_LocaleTextUtil:SetLocalizedText(self.PurchaseConfirmText, self.UI_PURCHASE_DETAILS_KEY, productLabel, self:GetCoinLabel(self:GetSelectedCoinType()), self:FormatIntegerWithComma(self:GetSelectedWorldCoinTotal()))
+		end
 		self:SetPanelEnable(self.EnsureBuyPanelEntity, true)
 		self:RefreshDimmer()
 	end
@@ -1600,15 +1665,6 @@ script ShopUILogic extends Logic
 		self:RefreshDimmer()
 	end
 
-	@ExecSpace("ClientOnly")
-	method string GetLocalizedText(string key, string fallbackText)
-		-- 현재 locale의 UI 문구를 조회합니다.
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:GetText(key, fallbackText)
-		end
-
-		return fallbackText or ""
-	end
 
 	@ExecSpace("ClientOnly")
 	method string FormatIntegerWithComma(number value)
@@ -1625,6 +1681,93 @@ script ShopUILogic extends Logic
 		end
 
 		return formattedText
+	end
+
+
+	@ExecSpace("ClientOnly")
+	method string ResolveCharacterShopItemId()
+		-- 설정된 시즌 상품 우선, 미설정 시 유일한 캐릭터 상품만 연결
+		if self.CharacterShopItemId ~= "" then
+			local tConfigured = _ShopItemMaster:GetShopItemById(self.CharacterShopItemId)
+			if tConfigured ~= nil and (tConfigured.characterId or "") ~= "" then return self.CharacterShopItemId end
+			return ""
+		end
+		local result = ""
+		for _, tItem in ipairs(_ShopItemMaster:GetShopItems() or {}) do
+			if (tItem.characterId or "") ~= "" then
+				if result ~= "" then return "" end
+				result = tItem.shopItemId
+			end
+		end
+		return result
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetSelectedCoinType()
+		-- 선택이 없으면 기본 메소 보유량 표시
+		local ids = self:GetSelectedWorldCoinItemIds()
+		if #ids > 0 then return _ShopItemMaster:GetShopItemById(ids[1]).coinType end
+		return _ShopItemMaster.COIN_TYPE_MESO
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetClientCoinBalance(string coinType)
+		-- 전용 지갑과 진행 데이터의 잔액 분리 조회
+		if coinType == _ShopItemMaster.COIN_TYPE_DIAMOND then return _DiamondWalletLogic:ClientGetBalance() end
+		local progress = _ProgressManager:ClientGetProgress()
+		if progress == nil then return nil end
+		if coinType == _ShopItemMaster.COIN_TYPE_MESO then return progress.meso or 0 end
+		if coinType == _ShopItemMaster.COIN_TYPE_NIGHT_MARKET then return progress.nightMarketCoin or 0 end
+		if coinType == _ShopItemMaster.COIN_TYPE_LEGACY_WORLD_COIN then return progress.tempWorldCoin or 0 end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCoinLabel(string coinType)
+		-- 재화별 번역 키 사용, 레거시 임시 재화는 실제 월드 코인과 구분
+		if coinType == _ShopItemMaster.COIN_TYPE_MESO then return _LocaleTextUtil:GetText(self.UI_CURRENCY_MESO_KEY) end
+		if coinType == _ShopItemMaster.COIN_TYPE_DIAMOND then return _LocaleTextUtil:GetText(self.UI_CURRENCY_DIAMOND_KEY) end
+		if coinType == _ShopItemMaster.COIN_TYPE_NIGHT_MARKET then return _LocaleTextUtil:GetText(self.UI_CURRENCY_NIGHT_MARKET_KEY) end
+		return _LocaleTextUtil:GetText(self.UI_CURRENCY_LEGACY_KEY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDiamondWalletChanged(DiamondWalletChangedEvent event)
+		-- 유료 지갑 확정 잔액 변경을 상점에도 반영
+		self:RefreshSelectedCoinText()
+	end
+
+	@ExecSpace("Client")
+	method void ReceivePurchaseResult(string requestId, boolean success)
+		-- 현재 요청의 결과만 반영하고 저장 실패 시 새로고침 안내
+		if not self.isPurchasePending or requestId ~= self.purchaseRequestId then return end
+		if self.purchaseResponseTimerId > 0 then _TimerService:ClearTimer(self.purchaseResponseTimerId) end
+		self.purchaseResponseTimerId = 0
+		self.isPurchasePending = false
+		self.purchaseRequestId = ""
+		if success then self:CloseEnsureBuyPanel()
+		else _UIToast:ShowMessage(_LocaleTextUtil:GetText(self.UI_PURCHASE_FAILED_KEY)) end
+		self:RebuildSlots()
+		self:RefreshSelectedTextsFromSelections()
+		self:RefreshSelectedCoinText()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCharacterProductDetails()
+		-- 실제 상품 가격과 캐릭터 지급만 표시해 미구현 묶음 보상 안내 제거
+		local id = self:ResolveCharacterShopItemId()
+		local tItem = id ~= "" and _ShopItemMaster:GetShopItemById(id) or nil
+		if self.CharacterPriceText ~= nil then
+			self.CharacterPriceText.Text = tItem ~= nil and self:FormatIntegerWithComma(tItem.price) or "—"
+		end
+		if self.CharacterGrantText ~= nil then
+			local name = tItem ~= nil and _LocaleTextUtil:GetText(tItem.nameKey) or "—"
+			_LocaleTextUtil:SetLocalizedText(self.CharacterGrantText, self.UI_CHARACTER_GRANT_KEY, name, nil, nil)
+		end
+		if self.IdolBuyButton ~= nil and self.IdolBuyButton.Entity ~= nil then
+			local coin = self.IdolBuyButton.Entity:GetChildByName("coin", true)
+			if coin ~= nil then coin.Enable = false end
+		end
 	end
 
 end

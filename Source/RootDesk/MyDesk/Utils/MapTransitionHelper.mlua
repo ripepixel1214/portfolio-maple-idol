@@ -14,6 +14,35 @@ script MapTransitionHelper extends Logic
 
 	property boolean isFadeInStarted = false
 
+	-- 현재 전환의 이동 콜백 실행 여부
+	property boolean isMoveActionDispatched = false
+
+	-- 이전 전환의 지연 콜백 차단용 번호
+	property integer transitionSequence = 0
+
+	-- 진행 중인 전환 이후 실행할 이동 요청
+	property any queuedMoveActions = {}
+
+	---@type MapTransitionRequestData
+	property any tActiveRequest = nil
+
+	---@type MapTransitionResultData
+	property any tPendingResult = nil
+
+	property any pendingFadeInCallback = nil
+
+	property boolean isShuttingDown = false
+
+	property string REASON_CANCELLED = "cancelled"
+
+	property string REASON_FADE_OUT_TIMEOUT = "fade_out_timeout"
+
+	property string REASON_ARRIVAL_TIMEOUT = "arrival_timeout"
+
+	property string REASON_MOVE_ACTION_FAILED = "move_action_failed"
+
+	property string REASON_PLAY_ENDED = "play_ended"
+
 	property string pendingMapName = ""
 
 	property number pendingElapsed = 0
@@ -29,36 +58,52 @@ script MapTransitionHelper extends Logic
 	property number worldViewHeightAtZoom100 = 0
 
 	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 새 플레이 세션의 이동 요청 접수 허용
+		self.isShuttingDown = false
+	end
+
+	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
-		-- 서버 RPC 맵 이동이 실제로 완료되어 목표 맵에 도착했는지 기다립니다.
+		-- 페이드와 이동 대기를 구분하고 모든 종료 경로에서 결과 통지
 		if self.isWaitingMapTransition == false then
 			return
 		end
 
 		self.pendingElapsed = self.pendingElapsed + delta
+		local fadeTimeout = math.max(self.transitionDuration, 0) + self.transitionTimeout
+		if self.isFadeInStarted == true then
+			if self.pendingElapsed >= fadeTimeout then
+				log_warning("[MapTransition] fade in callback timed out map=" .. tostring(self.pendingMapName))
+				if _ScreenEffectUILogic ~= nil
+					and _ScreenEffectUILogic.onEffectComplete == self.pendingFadeInCallback
+					and _ScreenEffectUILogic:IsBlackHeld() == false then
+					_ScreenEffectUILogic:Clear()
+				end
+				self:Complete()
+			end
+			return
+		end
+
+		if self.isMoveActionDispatched == false then
+			if self.pendingElapsed >= fadeTimeout then
+				self:FinishTransition(false, self.REASON_FADE_OUT_TIMEOUT)
+			end
+			return
+		end
 
 		local player = _UserService.LocalPlayer
 		local currentMap = player ~= nil and player.CurrentMap or nil
 		local isArrived = isvalid(currentMap) and currentMap.Name == self.pendingMapName
-		local isTimedOut = self.pendingElapsed >= self.transitionTimeout
-		if isArrived == false and isTimedOut == false then
-			return
+		local isConfirmed = self.tActiveRequest.requiresArrivalConfirmation == false
+			or self.tActiveRequest.isArrivalConfirmed == true
+		local arrivalTimeout = self.tActiveRequest.arrivalTimeout > 0
+			and self.tActiveRequest.arrivalTimeout or self.transitionTimeout
+		if isArrived == true and isConfirmed == true and self:IsTargetMapCameraReady(currentMap) == true then
+			self:FinishTransition(true, "")
+		elseif self.pendingElapsed >= arrivalTimeout then
+			self:FinishTransition(false, self.REASON_ARRIVAL_TIMEOUT)
 		end
-
-		if isArrived == true and isTimedOut == false and self:IsTargetMapCameraReady(currentMap) == false then
-			return
-		end
-
-		if self.isFadeInStarted then
-			return
-		end
-
-		self.isFadeInStarted = true
-		if isTimedOut == true then
-			log_warning("[MapTransition] readiness timed out map=" .. tostring(self.pendingMapName))
-		end
-
-		self:StartFadeIn()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -68,12 +113,14 @@ script MapTransitionHelper extends Logic
 			return false
 		end
 
+		---@type CameraControlComponent
 		local cameraControl = currentMap:GetComponent("script.CameraControlComponent")
-		if isvalid(cameraControl) == false or cameraControl.targetCamera == nil then
+		if isvalid(cameraControl) == false then
 			return true
 		end
 
-		local targetCamera = cameraControl.targetCamera
+		local targetCamera = cameraControl:GetMapCamera()
+		if targetCamera == nil then return true end
 		local currentCamera = _CameraService:GetCurrentCameraComponent()
 		if currentCamera ~= targetCamera then
 			return false
@@ -130,49 +177,167 @@ script MapTransitionHelper extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
-		-- 진행 중인 맵 전환 상태와 예약된 타이머를 정리합니다.
+		-- 플레이 종료 시 활성·대기 요청에 종료 결과 통지
+		self.isShuttingDown = true
+		local queuedRequests = self.queuedMoveActions
+		self.queuedMoveActions = {}
+		if self.tActiveRequest ~= nil then
+			self.tPendingResult = self:CreateResult(self.tActiveRequest, false, self.REASON_PLAY_ENDED)
+		end
 		self:Complete()
+		for _, tRequest in ipairs(queuedRequests) do
+			self:NotifyCompleted(tRequest, self:CreateResult(tRequest, false, self.REASON_PLAY_ENDED))
+		end
 	end
 
 	@ExecSpace("ClientOnly")
 	method void RequestMoveToMap(string targetMapName, any mapMoveAction)
-		-- 페이드아웃 후 서버 맵 이동 요청을 보내고, 실제 목표 맵 도착까지 페이드인을 지연합니다.
-		if mapMoveAction == nil then
+		-- 기존 호출부의 두 인자 이동 API 유지
+		self:RequestMoveToMapWithResult(targetMapName, mapMoveAction, nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer RequestMoveToMapWithResult(string targetMapName, any mapMoveAction, any onCompleted)
+		-- 완료 결과와 취소용 전환 ID를 제공하는 이동 요청 등록
+		local tRequest = MapTransitionRequestData()
+		tRequest.targetMapName = targetMapName
+		tRequest.moveAction = mapMoveAction
+		tRequest.onCompleted = onCompleted
+		return self:SubmitRequest(tRequest)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer SubmitRequest(MapTransitionRequestData tRequest)
+		-- 콜백 실행 전에 전환 ID를 확정하고 내부 요청 Struct 등록
+		if self.isShuttingDown == true or tRequest == nil or tRequest.transitionId ~= 0
+			or tRequest.targetMapName == nil or tRequest.targetMapName == ""
+			or type(tRequest.moveAction) ~= "function" then
+			return 0
+		end
+
+		self.transitionSequence = self.transitionSequence + 1
+		tRequest.transitionId = self.transitionSequence
+		table.insert(self.queuedMoveActions, tRequest)
+		if self.isWaitingMapTransition == true then
+			log("[MapTransition] queued map=" .. tostring(tRequest.targetMapName)
+				.. " count=" .. tostring(#self.queuedMoveActions))
+		end
+		self:StartNextMove()
+		return tRequest.transitionId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartNextMove()
+		-- 진행 중인 전환이 없을 때 가장 먼저 등록된 요청 실행
+		if self.isShuttingDown == true or self.isWaitingMapTransition == true or #self.queuedMoveActions == 0 then
 			return
 		end
 
-		self.pendingMapName = targetMapName or ""
+		local tRequest = table.remove(self.queuedMoveActions, 1)
+		self:BeginMoveToMap(tRequest)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginMoveToMap(MapTransitionRequestData tRequest)
+		-- 요청 소유권 설정과 페이드아웃 이후 이동 콜백 예약
+		local transitionId = tRequest.transitionId
+		self.tActiveRequest = tRequest
+		self.tPendingResult = nil
+		self.pendingMapName = tRequest.targetMapName
 		self.pendingElapsed = 0
 		self.isWaitingMapTransition = true
 		self.isFadeInStarted = false
+		self.isMoveActionDispatched = false
+		log("[MapTransition] started id=" .. tostring(transitionId)
+			.. " map=" .. tostring(self.pendingMapName))
 		if self:CaptureWorldViewReference() == false then
-			log_warning("[MapTransition] failed to capture world view reference map=" .. tostring(targetMapName))
+			log_warning("[MapTransition] failed to capture world view reference map=" .. tostring(self.pendingMapName))
 		end
 		self:BeginImmediateCameraMode()
 
-		-- 이미 덮여있다면 곧바로 mapMoveAction 실행
+		-- 이미 덮인 화면에서는 이동 콜백 즉시 실행
 		if _ScreenEffectUILogic ~= nil then
 			if _ScreenEffectUILogic.currentAlpha >= 0.99 then
-				mapMoveAction()
+				self:ExecuteMoveAction(transitionId)
 				return
 			end
 
 			_ScreenEffectUILogic:FadeOut(self.transitionDuration, function()
-				mapMoveAction()
+				self:ExecuteMoveAction(transitionId)
 			end)
 			return
 		end
 
-		mapMoveAction()
+		self:ExecuteMoveAction(transitionId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ExecuteMoveAction(integer transitionId)
+		-- 현재 전환에 해당하는 이동 콜백을 한 번만 실행
+		if self:IsCurrentTransition(transitionId) == false
+			or self.isFadeInStarted == true
+			or self.isMoveActionDispatched == true then
+			return
+		end
+
+		self.isMoveActionDispatched = true
+		self.pendingElapsed = 0
+		log("[MapTransition] dispatched id=" .. tostring(transitionId)
+			.. " map=" .. tostring(self.pendingMapName))
+		local moveAction = self.tActiveRequest.moveAction
+		self.tActiveRequest.moveAction = nil
+		local success, errorMessage = pcall(moveAction)
+		if success == false and self:IsCurrentTransition(transitionId) == true then
+			log_error("[MapTransition] move action failed id=" .. tostring(transitionId) .. " error=" .. tostring(errorMessage))
+			self:FinishTransition(false, self.REASON_MOVE_ACTION_FAILED)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsCurrentTransition(integer transitionId)
+		-- 활성 요청에 대한 지연 콜백 소유권 확인
+		return self.isWaitingMapTransition == true and self.tActiveRequest ~= nil
+			and self.tActiveRequest.transitionId == transitionId
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ConfirmArrival(integer transitionId)
+		-- 서버 도착 결과를 이미 이동 요청이 실행된 해당 전환에만 반영
+		if self:IsCurrentTransition(transitionId) == false
+			or self.isMoveActionDispatched == false or self.isFadeInStarted == true then
+			return false
+		end
+		self.tActiveRequest.isArrivalConfirmed = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishTransition(boolean success, string reason)
+		-- 전환 결과 보관 후 화면 복구 시작
+		if self.tActiveRequest == nil then
+			return
+		end
+		self.tPendingResult = self:CreateResult(self.tActiveRequest, success, reason)
+		self:StartFadeIn()
 	end
 
 	@ExecSpace("ClientOnly")
 	method void StartFadeIn()
-		-- 목표 맵 도착 후 한 박자 정착 시간을 둔 뒤 화면을 다시 보여줍니다.
+		-- 현재 전환의 화면 복구를 한 번 시작하고 완료 콜백 소유권 확인
+		if self.isWaitingMapTransition == false or self.isFadeInStarted == true then
+			return
+		end
+
+		self.isFadeInStarted = true
+		self.pendingElapsed = 0
+		local transitionId = self.tActiveRequest.transitionId
 		if _ScreenEffectUILogic ~= nil then
-			_ScreenEffectUILogic:FadeIn(self.transitionDuration, function()
-				self:Complete()
-			end)
+			self.pendingFadeInCallback = function()
+				if self:IsCurrentTransition(transitionId) == true then
+					self:Complete()
+				end
+			end
+			_ScreenEffectUILogic:FadeIn(self.transitionDuration, self.pendingFadeInCallback)
 			return
 		end
 
@@ -181,23 +346,77 @@ script MapTransitionHelper extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void Complete()
-		-- 맵 전환 대기를 끝내고 임시 카메라 컷 모드를 원래 상태로 복구합니다.
+		-- 현재 전환 상태와 카메라 블렌드 복구 이후 다음 대기 요청 시작
+		local tRequest = self.tActiveRequest
+		local tResult = self.tPendingResult
+		self.tActiveRequest = nil
+		self.tPendingResult = nil
+		self.pendingFadeInCallback = nil
 		self.isWaitingMapTransition = false
 		self.isFadeInStarted = false
+		self.isMoveActionDispatched = false
 		self.pendingMapName = ""
 		self.pendingElapsed = 0
 		self:EndImmediateCameraMode()
+		if tRequest ~= nil then
+			self:NotifyCompleted(tRequest, tResult or self:CreateResult(tRequest, false, self.REASON_CANCELLED))
+		end
+		self:StartNextMove()
+	end
+
+	@ExecSpace("ClientOnly")
+	method MapTransitionResultData CreateResult(MapTransitionRequestData tRequest, boolean success, string reason)
+		-- 요청 ID와 목적지가 포함된 전환 결과 생성
+		local tResult = MapTransitionResultData()
+		tResult.transitionId = tRequest.transitionId
+		tResult.targetMapName = tRequest.targetMapName
+		tResult.success = success
+		tResult.reason = reason or ""
+		return tResult
+	end
+
+	@ExecSpace("ClientOnly")
+	method void NotifyCompleted(MapTransitionRequestData tRequest, MapTransitionResultData tResult)
+		-- 콜백 참조를 먼저 해제하고 결과를 한 번 통지
+		local onCompleted = tRequest.onCompleted
+		tRequest.onCompleted = nil
+		tRequest.moveAction = nil
+		log("[MapTransition] completed id=" .. tostring(tResult.transitionId)
+			.. " map=" .. tostring(tResult.targetMapName)
+			.. " success=" .. tostring(tResult.success) .. " reason=" .. tostring(tResult.reason))
+		if onCompleted ~= nil then
+			local success, errorMessage = pcall(onCompleted, tResult)
+			if success == false then
+				log_error("[MapTransition] completion callback failed error=" .. tostring(errorMessage))
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CancelTransition(integer transitionId, string reason)
+		-- 요청 ID가 일치하는 활성 또는 대기 전환만 취소
+		if self:IsCurrentTransition(transitionId) == true then
+			self:FinishTransition(false, reason)
+			return true
+		end
+		for index, tRequest in ipairs(self.queuedMoveActions) do
+			if tRequest.transitionId == transitionId then
+				table.remove(self.queuedMoveActions, index)
+				self:NotifyCompleted(tRequest, self:CreateResult(tRequest, false, reason))
+				return true
+			end
+		end
+		return false
 	end
 
 	@ExecSpace("ClientOnly")
 	method void CancelPendingTransition()
-		-- 서버가 이동 요청을 거절한 경우 현재 화면을 복구하고 전환 대기 종료
-		if self.isWaitingMapTransition == false then
+		-- 기존 활성 전환 취소 API 유지
+		if self.tActiveRequest == nil then
 			return
 		end
 
-		self.isFadeInStarted = true
-		self:StartFadeIn()
+		self:CancelTransition(self.tActiveRequest.transitionId, self.REASON_CANCELLED)
 	end
 
 	@ExecSpace("ClientOnly")

@@ -1,0 +1,147 @@
+-- TagTrainingManager가 사용하는 서버 권위 육성 카드 해금 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script TrainingCardStorage extends Logic
+
+	property string storageKey = "trainingCardUnlockData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedString = ""
+
+	property boolean canSave = false
+
+	property boolean isSaveInProgress = false
+
+	property string pendingUserId = ""
+
+	property string pendingString = ""
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
+	method table LoadTrainingCards(string userId)
+		-- 전용 저장 데이터를 읽고 최초 1회는 기존 활동 해금 저장에서 육성 카드 ID를 이관합니다.
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedString = userStorage:GetAndWait(self.storageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			local migratedCardIds = self:LoadLegacyTrainingCardIds(userStorage, userId)
+			if migratedCardIds == nil then return nil end
+			self.loadedString = ""
+			self.canSave = true
+			self:SaveTrainingCardsAsync(userId, migratedCardIds)
+			return migratedCardIds
+		end
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.canSave = false
+			return nil
+		end
+		local cardIds = self:CreateTrainingCardIdsFromString(storedString)
+		if cardIds == nil then
+			log_warning("[TrainingCardStorage] invalid save data")
+			self.canSave = false
+			return nil
+		end
+		self.loadedString = storedString
+		self.canSave = true
+		return cardIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveTrainingCardsAsync(string userId, table cardIds)
+		-- 추가 해금 육성 카드 ID를 최신 v1 문자열로 비동기 저장합니다.
+		if self.canSave == false then return end
+		local saveString = self:CreateTrainingCardsString(cardIds)
+		if saveString == self.loadedString then return end
+		if self.isSaveInProgress then
+			self.pendingUserId = userId
+			self.pendingString = saveString
+			return
+		end
+		self:SaveStringAsync(userId, saveString)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
+	method table LoadLegacyTrainingCardIds(any userStorage, string userId)
+		-- 기존 activityUnlockData에서 TrainingCardTable에 존재하는 ID만 추려 전용 저장으로 이관합니다.
+		local errorCode, legacyString = userStorage:GetAndWait(_ActivityStorage.activityStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) or legacyString == nil or legacyString == "" then return {} end
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			return nil
+		end
+		local ok, legacyData = pcall(function() return _UtilLogic:StringToTable(legacyString) end)
+		if ok == false or legacyData == nil then return nil end
+		local cardIds = {}
+		local cardCount = math.floor(tonumber(legacyData.activityCount) or 0)
+		for index = 1, cardCount do
+			local cardId = tostring(legacyData["activityId" .. tostring(index)] or "")
+			if _TrainingDataMaster:GetTrainingCard(cardId) ~= nil then self:AddCardId(cardIds, cardId) end
+		end
+		return cardIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveStringAsync(string userId, string saveString)
+		-- 직렬화된 해금 목록을 전용 키에 저장합니다.
+		self.isSaveInProgress = true
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.storageKey, saveString, function(errorCode, key)
+			if _DataStorageErrorUtil:IsOk(errorCode) then
+				self.loadedString = saveString
+			else
+				_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			end
+			self.isSaveInProgress = false
+			self:SavePending()
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SavePending()
+		-- 저장 중 들어온 가장 최근 요청을 이전 저장 완료 뒤 이어서 처리합니다.
+		if self.pendingString == "" then return end
+		local userId = self.pendingUserId
+		local saveString = self.pendingString
+		self.pendingUserId = ""
+		self.pendingString = ""
+		if saveString ~= self.loadedString then self:SaveStringAsync(userId, saveString) end
+	end
+
+	@ExecSpace("ServerOnly")
+	method table CreateTrainingCardIdsFromString(string saveString)
+		-- v1 flat 저장 문자열을 추가 해금 육성 카드 ID 목록으로 복원합니다.
+		if saveString == nil or saveString == "" then return {} end
+		local ok, data = pcall(function() return _UtilLogic:StringToTable(saveString) end)
+		if ok == false or data == nil or tonumber(data.saveVersion) ~= self.currentSaveVersion then return nil end
+		local cardIds = {}
+		local cardCount = math.floor(tonumber(data.trainingCardCount) or 0)
+		for index = 1, cardCount do self:AddCardId(cardIds, tostring(data["trainingCardId" .. tostring(index)] or "")) end
+		return cardIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateTrainingCardsString(table cardIds)
+		-- 추가 해금 육성 카드 ID 목록을 v1 flat 저장 문자열로 변환합니다.
+		local normalizedCardIds = {}
+		for _, cardId in ipairs(cardIds) do self:AddCardId(normalizedCardIds, cardId) end
+		local data = {saveVersion = self.currentSaveVersion, trainingCardCount = #normalizedCardIds}
+		for index, cardId in ipairs(normalizedCardIds) do data["trainingCardId" .. tostring(index)] = cardId end
+		return _UtilLogic:TableToString(data)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddCardId(table cardIds, string cardId)
+		-- 빈 값과 중복을 제외한 육성 카드 ID만 목록에 추가합니다.
+		if cardId == "" then return end
+		for _, savedCardId in ipairs(cardIds) do if savedCardId == cardId then return end end
+		table.insert(cardIds, cardId)
+	end
+
+end

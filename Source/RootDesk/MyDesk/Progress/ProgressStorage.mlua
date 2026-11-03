@@ -1,10 +1,75 @@
 -- ProgressManager가 사용하는 서버 권위 진행 데이터를 UserDataStorage에서 불러오거나 저장합니다.
 @Logic
 script ProgressStorage extends Logic
+	@ExecSpace("ServerOnly")
+	method boolean SaveProgressConfirmed(string userId, any tProgressData)
+		-- 기존 진행 저장 호출을 문자열 기반 확정 저장으로 전달
+		return self:SaveProgressStringConfirmed(userId, self:CreateProgressString(tProgressData))
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SaveProgressStringConfirmed(string userId, string progressString)
+		-- 저장 경합 없이 잔액 확정, 결과 불명 시 원본 덮어쓰기 차단
+		if userId == nil or userId == "" or progressString == "" or not self.CanSaveProgress
+			or not _DiamondWalletLogic:IsInitializedForUser(userId) then return false end
+		if not self:WaitForPendingProgressSave() then return false end
+		if progressString == self.LastLoadedProgressString then return true end
+
+		local expectedString = self.LastLoadedProgressString
+		self.IsProgressSaveInProgress = true
+		local ok, confirmed = pcall(function()
+			local storage = _DataStorageService:GetUserDataStorage(userId)
+			local code, storedRaw = storage:UpdateAndWait(self.ProgressStorageKey, expectedString, progressString)
+			if code == 0 then return true end
+			_DataStorageErrorUtil:LogWarning(code, userId)
+			local readCode, storedString = storage:GetAndWait(self.ProgressStorageKey)
+			if readCode == 0 and storedString == progressString then return true end
+			-- 시간 초과·경합·조회 실패는 재접속 전까지 추가 저장 보류
+			if code == _DataStorageErrorUtil.TimedOut or readCode ~= 0 or storedString ~= expectedString then
+				self.CanSaveProgress = false
+			end
+			return false
+		end)
+		self.IsProgressSaveInProgress = false
+		if not ok then
+			self.CanSaveProgress = false
+			log_error("[ProgressStorage] confirmed save exception userId=" .. tostring(userId) .. " error=" .. tostring(confirmed))
+			return false
+		end
+		if confirmed then self.LastLoadedProgressString = progressString end
+		return confirmed
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateCurrencyProgressString(any tProgressData, string currencyId, integer balance)
+		-- 현재 진행 필드를 보존하고 거래 잔액만 바꾼 저장 스냅샷 생성
+		local tPlainData = tProgressData:ToPlainTable()
+		tPlainData[currencyId] = balance
+		tPlainData.saveVersion = self.currentSaveVersion
+		return _UtilLogic:TableToString(tPlainData)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean WaitForPendingProgressSave()
+		-- 기존 저장과 최신 대기 요청을 한 번 처리한 뒤 확정 거래 진입
+		if not self.CanSaveProgress then return false end
+		if not self.IsProgressSaveInProgress then self:CheckPendingProgress() end
+		local deadline = _UtilLogic.ServerElapsedSeconds + self.CONFIRMED_SAVE_WAIT_SECONDS
+		while self.IsProgressSaveInProgress do
+			if _UtilLogic.ServerElapsedSeconds >= deadline then
+				log_warning("[ProgressStorage] confirmed save waiting timed out")
+				return false
+			end
+			wait(0.1)
+		end
+		return self.CanSaveProgress and self.PendingProgressSaveString == ""
+	end
+
+	property number CONFIRMED_SAVE_WAIT_SECONDS = 10
 
 	property string ProgressStorageKey = "progressData"
 
-	property integer currentSaveVersion = 1
+	property integer currentSaveVersion = 8
 
 	property string LastLoadedProgressString = ""
 
@@ -67,6 +132,10 @@ script ProgressStorage extends Logic
 	@ExecSpace("ServerOnly")
 	method void SaveProgressByUserIdAsync(string userId, any tProgressData)
 		-- 유저 진행 데이터를 비동기 저장으로 요청합니다.
+		if _DiamondWalletLogic:IsInitializedForUser(userId) == false then
+			log_warning("[ProgressStorage] save blocked until legacy diamond migration is durable")
+			return
+		end
 		if self.CanSaveProgress == false then
 			log_warning("[ProgressStorage] progress save skipped because storage load failed")
 			return
@@ -84,17 +153,14 @@ script ProgressStorage extends Logic
 		end
 
 		local progressString = self:CreateProgressString(tProgressData)
-		if progressString == self.LastLoadedProgressString then
-			return
-		end
-
+		-- 진행 중인 저장이 이전 잔액을 쓸 수 있으므로 최신 요청을 먼저 보존
+		self.PendingProgressSaveUserId = userId
+		self.PendingProgressSaveString = progressString
 		if self.IsProgressSaveInProgress then
-			self.PendingProgressSaveUserId = userId
-			self.PendingProgressSaveString = progressString
 			return
 		end
 
-		self:SaveProgressStringAsync(userId, progressString)
+		self:CheckPendingProgress()
 	end
 
 	@ExecSpace("ServerOnly")
@@ -102,10 +168,16 @@ script ProgressStorage extends Logic
 		-- 직렬화된 진행 데이터 문자열을 UserDataStorage에 비동기로 저장합니다.
 		self.IsProgressSaveInProgress = true
 
-		local userStorage = _DataStorageService:GetUserDataStorage(userId)
-		userStorage:SetAsync(self.ProgressStorageKey, progressString, function(errorCode, key)
-			self:OnProgressSaveCompleted(userId, progressString, errorCode)
+		local ok, errorMessage = pcall(function()
+			local userStorage = _DataStorageService:GetUserDataStorage(userId)
+			userStorage:SetAsync(self.ProgressStorageKey, progressString, function(errorCode, key)
+				self:OnProgressSaveCompleted(userId, progressString, errorCode)
+			end)
 		end)
+		if not ok then
+			log_error("[ProgressStorage] save exception userId=" .. tostring(userId) .. " error=" .. tostring(errorMessage))
+			self:OnProgressSaveCompleted(userId, progressString, -1)
+		end
 	end
 
 	@ExecSpace("ServerOnly")
@@ -113,22 +185,31 @@ script ProgressStorage extends Logic
 		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청을 이어서 처리합니다.
 		if _DataStorageErrorUtil:IsOk(errorCode) == false then
 			_DataStorageErrorUtil:LogWarning(errorCode, userId)
-		else
-			self.LastLoadedProgressString = progressString
-			self.CanSaveProgress = true
+			self.IsProgressSaveInProgress = false
+			-- 실패한 최신 데이터를 유지하고 다음 저장 요청에서 재시도
+			if self.PendingProgressSaveString == "" then
+				self.PendingProgressSaveUserId = userId
+				self.PendingProgressSaveString = progressString
+			end
+			log_warning("[ProgressStorage] progress save failed; latest snapshot remains pending")
+			return
 		end
 
+		self.LastLoadedProgressString = progressString
+		self.CanSaveProgress = true
 		self.IsProgressSaveInProgress = false
 		self:CheckPendingProgress()
 
-		local tProgressData = self:DecodeProgressData(self.LastLoadedProgressString)
-		log(tProgressData:ToLogString("save complete"))
+		local tProgressData = self:DecodeProgressData(progressString)
+		if tProgressData ~= nil then
+			log(tProgressData:ToLogString("save complete"))
+		end
 	end
 
 	@ExecSpace("ServerOnly")
 	method void CheckPendingProgress()
 		-- 대기 중인 최신 진행 데이터 저장 요청이 있으면 이어서 비동기 저장합니다.
-		if self.PendingProgressSaveString == "" then
+		if not self.CanSaveProgress or self.IsProgressSaveInProgress or self.PendingProgressSaveString == "" then
 			return
 		end
 
@@ -178,6 +259,19 @@ script ProgressStorage extends Logic
 		if saveVersion == 0 or saveVersion == 1 then
 			return self:CreateProgressFromPlainTableV1(tPlainTableData)
 		end
+		if saveVersion == 2 then
+			return self:CreateProgressFromPlainTableV2(tPlainTableData)
+		end
+		if saveVersion == 3 then
+			return self:CreateProgressFromPlainTableV3(tPlainTableData)
+		end
+		if saveVersion == 4 then
+			return self:CreateProgressFromPlainTableV4(tPlainTableData)
+		end
+
+		if saveVersion == 5 or saveVersion == 6 or saveVersion == 7 or saveVersion == 8 then
+			return self:CreateProgressFromPlainTableV5(tPlainTableData)
+		end
 
 		log_warning("[ProgressStorage] unsupported progress saveVersion=" .. tostring(saveVersion))
 		return nil
@@ -185,16 +279,146 @@ script ProgressStorage extends Logic
 
 	@ExecSpace("ServerOnly")
 	method any CreateProgressFromPlainTableV1(any tPlainTableData)
-		-- v1 plain table을 ProgressData 값으로 정규화합니다.
+		-- 기존 4단계 Step 기반 v1 데이터를 현재 Stage와 Step 값으로 마이그레이션합니다.
+		local currentStage = 1
+		local legacyStep = self:NormalizeInteger(tPlainTableData.eCurrentStep, 0, 0)
+		local currentStep = self:MigrateLegacyStepToCurrentStep(legacyStep)
+		if currentStep == _EProgressStep.StageSelect then
+			currentStage = 0
+		end
+		local tProgress = self:CreateProgressFromPlainTableCurrent(tPlainTableData, self:MigrateLegacyStageId(currentStage), currentStep)
+		if tProgress == nil then return nil end
+		tProgress.currentMapId = self:ResolveLegacyMapId(tProgress.eCurrentStep)
+		return tProgress
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTableV2(any tPlainTableData)
+		-- v2는 양쪽 브랜치에서 다른 형태로 사용했으므로 Stage 필드 유무로 구분해 복원합니다.
+		if tPlainTableData.eCurrentStage == nil then
+			-- 메인의 v2는 기존 Step 구조에 야시장 코인을 추가한 데이터입니다.
+			return self:CreateProgressFromPlainTableV1(tPlainTableData)
+		end
+
+		local tDefaultProgress = self:CreateDefaultProgress()
+		local currentStage = 1
+		local currentStep = self:NormalizeInteger(tPlainTableData.eCurrentStage, tDefaultProgress.eCurrentStep, 0)
+		if _EProgressStep:IsValidStep(currentStep) == false then
+			currentStep = tDefaultProgress.eCurrentStep
+		end
+		if currentStep == _EProgressStep.StageSelect then
+			currentStage = 0
+		end
+		local tProgress = self:CreateProgressFromPlainTableCurrent(tPlainTableData, self:MigrateLegacyStageId(currentStage), currentStep)
+		if tProgress == nil then return nil end
+		tProgress.currentMapId = self:ResolveLegacyMapId(tProgress.eCurrentStep)
+		return tProgress
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTableV3(any tPlainTableData)
+		-- 현재 실제 Stage와 Step이 분리된 v3 데이터를 정규화합니다.
+		local tDefaultProgress = self:CreateDefaultProgress()
+		local currentStage = self:NormalizeInteger(tPlainTableData.eCurrentStage, 0, 0)
+		local currentStep = self:NormalizeInteger(tPlainTableData.eCurrentStep, tDefaultProgress.eCurrentStep, 0)
+		if _EProgressStep:IsValidStep(currentStep) == false then
+			currentStep = tDefaultProgress.eCurrentStep
+		end
+
+		if currentStep == _EProgressStep.StageSelect then
+			currentStage = 0
+		elseif currentStage <= 0 then
+			currentStage = 1
+		end
+
+		local tProgress = self:CreateProgressFromPlainTableCurrent(tPlainTableData, self:MigrateLegacyStageId(currentStage), currentStep)
+		if tProgress == nil then return nil end
+		tProgress.currentMapId = self:ResolveLegacyMapId(tProgress.eCurrentStep)
+		return tProgress
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTableV4(any tPlainTableData)
+		-- 현재 Stage·Step·맵·좌표가 분리된 v4 데이터를 정규화합니다.
+		local tDefaultProgress = self:CreateDefaultProgress()
+		local currentStage = self:NormalizeInteger(tPlainTableData.eCurrentStage, 0, 0)
+		local currentStep = self:NormalizeInteger(tPlainTableData.eCurrentStep, tDefaultProgress.eCurrentStep, 0)
+		if _EProgressStep:IsValidStep(currentStep) == false then
+			currentStep = tDefaultProgress.eCurrentStep
+		end
+
+		if currentStep == _EProgressStep.StageSelect then
+			currentStage = 0
+		elseif currentStage <= 0 then
+			currentStage = 1
+		end
+
+		return self:CreateProgressFromPlainTableCurrent(tPlainTableData, self:MigrateLegacyStageId(currentStage), currentStep)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTableV5(any tPlainTableData)
+		-- 문자열 스테이지 ID를 사용하는 v5~v8 데이터 복원
+		local tDefaultProgress = self:CreateDefaultProgress()
+		local currentStage = self:NormalizeString(tPlainTableData.eCurrentStage, tDefaultProgress.eCurrentStage)
+		local currentStep = self:NormalizeInteger(tPlainTableData.eCurrentStep, tDefaultProgress.eCurrentStep, 0)
+		if _EProgressStep:IsValidStep(currentStep) == false then
+			currentStep = tDefaultProgress.eCurrentStep
+		end
+		if currentStep == _EProgressStep.StageSelect then
+			currentStage = ""
+		end
+
+		return self:CreateProgressFromPlainTableCurrent(tPlainTableData, currentStage, currentStep)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string MigrateLegacyStageId(integer legacyStage)
+		-- v1~v4에서 저장한 숫자 스테이지 ID를 변경된 문자열 ID로 변환합니다.
+		local tLegacyStageIds = { [1] = "stage_debut", [2] = "stage_dummy_2", [3] = "stage_dummy_3" }
+		return tLegacyStageIds[legacyStage] or ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method string ResolveLegacyMapId(integer currentStep)
+		-- 맵 ID가 없던 v1~v3 저장 좌표의 기존 대상 맵을 보존합니다.
+		if currentStep == _EProgressStep.StageSelect then
+			return "Map_Studio"
+		end
+		if currentStep == _EProgressStep.Outdoor then
+			return "Map_Downtown"
+		end
+
+		return "Map_Studio"
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer MigrateLegacyStepToCurrentStep(integer legacyStep)
+		-- v1의 Step 값을 현재 Step 값으로 변환합니다. 제거된 데모 종료 값과 비정상 값은 선택 화면으로 보냅니다.
+		if legacyStep == 1 then
+			return _EProgressStep.BeforeTraining
+		end
+		if legacyStep == 2 then
+			return _EProgressStep.AfterTraining
+		end
+		if legacyStep == 3 then
+			return _EProgressStep.Outdoor
+		end
+		if legacyStep == 4 then
+			return _EProgressStep.Performance
+		end
+
+		return _EProgressStep.StageSelect
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateProgressFromPlainTableCurrent(any tPlainTableData, string currentStage, integer currentStep)
+		-- 공통 진행 필드를 현재 ProgressData 구조로 복원합니다.
 		local tDefaultProgress = self:CreateDefaultProgress()
 
 		local tProgress = ProgressData()
-		tProgress.gameGoalId = self:NormalizeString(tPlainTableData.gameGoalId, tDefaultProgress.gameGoalId)
-		local eCurrentStep = self:NormalizeInteger(tPlainTableData.eCurrentStep, tDefaultProgress.eCurrentStep, 0)
-		if _EProgressStep:IsValidStep(eCurrentStep) == false then
-			eCurrentStep = tDefaultProgress.eCurrentStep
-		end
-		tProgress.eCurrentStep = eCurrentStep
+		tProgress.eCurrentStage = currentStage
+		tProgress.eCurrentStep = currentStep
 		local currentMonth = self:NormalizeInteger(tPlainTableData.currentMonth, tDefaultProgress.currentMonth, 1)
 		local currentWeek = self:NormalizeInteger(tPlainTableData.currentWeek, tDefaultProgress.currentWeek, 1)
 		while currentWeek > 4 do
@@ -204,9 +428,11 @@ script ProgressStorage extends Logic
 		tProgress.currentMonth = currentMonth
 		tProgress.currentWeek = currentWeek
 		tProgress.actionPoint = self:NormalizeInteger(tPlainTableData.actionPoint, tDefaultProgress.actionPoint, 0)
-		tProgress.groupMeso = self:NormalizeInteger(tPlainTableData.groupMeso, tDefaultProgress.groupMeso, 0)
-		tProgress.tempWorldCoin = self:NormalizeInteger(tPlainTableData.tempWorldCoin, tDefaultProgress.tempWorldCoin, 0)
+		tProgress.meso = self:NormalizeCurrencyBalance(tPlainTableData.meso, tDefaultProgress.meso)
+		tProgress.nightMarketCoin = self:NormalizeCurrencyBalance(tPlainTableData.nightMarketCoin, tDefaultProgress.nightMarketCoin)
+		tProgress.tempWorldCoin = self:NormalizeCurrencyBalance(tPlainTableData.tempWorldCoin, tDefaultProgress.tempWorldCoin)
 		tProgress.fandom = self:NormalizeInteger(tPlainTableData.fandom, tDefaultProgress.fandom, 0)
+		tProgress.currentMapId = self:NormalizeString(tPlainTableData.currentMapId, tDefaultProgress.currentMapId)
 		tProgress.positionX = self:NormalizeNumber(tPlainTableData.positionX, tDefaultProgress.positionX)
 		tProgress.positionY = self:NormalizeNumber(tPlainTableData.positionY, tDefaultProgress.positionY)
 		-- 저장 문자열(CSV)을 완료 집합 테이블로 복원. 레거시 단일 boolean 세이브 마이그레이션 포함.
@@ -223,7 +449,33 @@ script ProgressStorage extends Logic
 		end
 		tProgress.completedTutorials = completedSet
 
+		if self:NormalizeSavedStage(tProgress) == false then return nil end
 		return tProgress
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean NormalizeSavedStage(any tProgress)
+		-- 삭제된 스테이지만 선택 상태로 복구, 테이블 로드 실패 시 원본 저장 보호
+		if tProgress.eCurrentStep == _EProgressStep.StageSelect then return true end
+		if _StageMaster == nil then return false end
+		local tStages = _StageMaster:GetStages()
+		if _StageMaster.IsLoaded == false or tStages == nil or #tStages == 0 then
+			log_warning("[ProgressStorage] 스테이지 검증 보류: 유효한 StageTable 로드 실패")
+			return false
+		end
+		if _StageMaster:IsUsableStage(_StageMaster:GetStage(tProgress.eCurrentStage)) then return true end
+
+		log_warning("[ProgressStorage] 삭제된 스테이지 복구 id=" .. tostring(tProgress.eCurrentStage))
+		local tDefaultProgress = self:CreateDefaultProgress()
+		tProgress.eCurrentStage = tDefaultProgress.eCurrentStage
+		tProgress.eCurrentStep = tDefaultProgress.eCurrentStep
+		tProgress.currentMonth = tDefaultProgress.currentMonth
+		tProgress.currentWeek = tDefaultProgress.currentWeek
+		tProgress.actionPoint = tDefaultProgress.actionPoint
+		tProgress.currentMapId = tDefaultProgress.currentMapId
+		tProgress.positionX = tDefaultProgress.positionX
+		tProgress.positionY = tDefaultProgress.positionY
+		return true
 	end
 
 	@ExecSpace("ServerOnly")
@@ -248,6 +500,16 @@ script ProgressStorage extends Logic
 	end
 
 	@ExecSpace("ServerOnly")
+	method integer NormalizeCurrencyBalance(any value, integer defaultValue)
+		-- 기존 잔액의 정수 변환을 유지하며 비정상 숫자는 기본값으로 복원
+		local numberValue = tonumber(value)
+		if numberValue == nil or numberValue ~= numberValue or math.abs(numberValue) > _ProgressManager.MAX_SAFE_CURRENCY_AMOUNT then
+			return defaultValue
+		end
+		return math.floor(_MathUtil:ClampMin(numberValue, 0))
+	end
+
+	@ExecSpace("ServerOnly")
 	method number NormalizeNumber(any value, number defaultValue)
 		-- 좌표처럼 음수도 가능한 숫자 값을 안전하게 보정합니다.
 		local numberValue = tonumber(value)
@@ -261,25 +523,17 @@ script ProgressStorage extends Logic
 	@ExecSpace("ServerOnly")
 	method any CreateDefaultProgress()
 		-- 저장 데이터가 없을 때 사용할 기본 진행 데이터를 만듭니다.
-		local gameGoalId = "perf_01"
-		if _GameGoalMaster ~= nil then
-			local tGameGoals = _GameGoalMaster:GetGameGoals()
-			if tGameGoals ~= nil and #tGameGoals > 0 then
-				local tFirstGoal = tGameGoals[1]
-				if tFirstGoal ~= nil and tFirstGoal.id ~= nil and tFirstGoal.id ~= "" then
-					gameGoalId = tFirstGoal.id
-				end
-			end
-		end
-
 		local tProgressData = ProgressData()
-		tProgressData.gameGoalId = gameGoalId
+		tProgressData.eCurrentStage = ""
+		tProgressData.eCurrentStep = _EProgressStep.StageSelect
 		tProgressData.currentMonth = 1
 		tProgressData.currentWeek = 1
 		tProgressData.actionPoint = 2
-		tProgressData.groupMeso = 500
+		tProgressData.meso = 500
+		tProgressData.nightMarketCoin = 0
 		tProgressData.tempWorldCoin = 1000
 		tProgressData.fandom = 0
+		tProgressData.currentMapId = ""
 		tProgressData.positionX = 0
 		tProgressData.positionY = 0
 

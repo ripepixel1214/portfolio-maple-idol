@@ -53,6 +53,8 @@ script PerformanceScoreUILogic extends Logic
 	@HideFromInspector
 	property boolean scoreRollActive = false
 
+	-- Public API
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- 시작 시 결과 UI를 숨기고 Next 버튼 이벤트를 연결
@@ -78,10 +80,10 @@ script PerformanceScoreUILogic extends Logic
 		-- 성공/실패 라벨
 		if isvalid(self.resultText) then
 			if self.isClear then
-				self.resultText.Text = self:GetLocalizedText(self.UI_SUCCESS_KEY, "")
+				self.resultText.Text = _LocaleTextUtil:GetText(self.UI_SUCCESS_KEY)
 				self.resultText.FontColor = Color(1.0, 0.83, 0.31, 1.0)
 			else
-				self.resultText.Text = self:GetLocalizedText(self.UI_FAILURE_KEY, "")
+				self.resultText.Text = _LocaleTextUtil:GetText(self.UI_FAILURE_KEY)
 				self.resultText.FontColor = Color(1.0, 0.42, 0.42, 1.0)
 			end
 		end
@@ -194,16 +196,6 @@ script PerformanceScoreUILogic extends Logic
 		end
 	end
 
-	@ExecSpace("ClientOnly")
-	method string GetLocalizedText(string key, string fallbackText)
-		-- 현재 locale의 UI 문구 조회
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:GetText(key, fallbackText)
-		end
-
-		return fallbackText or ""
-	end
-
 	method string FormatNumber(number value)
 		-- 정수를 천 단위 콤마 문자열로 변환 (예: 999999 → "999,999")
 		local n = math.floor(value)
@@ -228,6 +220,8 @@ script PerformanceScoreUILogic extends Logic
 			_PerformancePostFlowLogic:Proceed(self.currentPerformanceId, self.isClear)
 		end
 	end
+
+	-- Private Methods
 
 	@ExecSpace("ClientOnly")
 	method void ConnectNextButton()

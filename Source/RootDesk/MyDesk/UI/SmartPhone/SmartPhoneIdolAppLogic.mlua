@@ -1,0 +1,702 @@
+---@description "스마트폰 아이돌 앱의 목록, 프로필, 에피소드와 방문 상태."
+@Logic
+script SmartPhoneIdolAppLogic extends Logic
+	property any cookieClickHandler = nil
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCookie()
+		if self.View == nil then return end
+		local tData = _FishingRewardLogic.tClientData
+		self.View:SetCookieState(tData ~= nil and tData.cookies or 0, self.selectedIdolCharacterId ~= "")
+	end
+
+	property ButtonComponent MenuButton = "00011228-124c-415c-abe8-10a5638e3bc3"
+
+	property Entity MenuNewBadgeEntity = "bca5bad8-07e6-4da4-967b-f5f7ab651f09"
+
+	property IdolAppViewComponent View = "c784197e-278c-47e5-a21a-5eed8f1c2215"
+
+	property boolean IsInitialized = false
+
+	property boolean IsOpen = false
+
+	property any idolEpisodeClickHandlers = {}
+
+	property string selectedIdolCharacterId = ""
+
+	property any idolNewCharacterSnapshotSet = {}
+
+	property any idolNewBadgeByCharacterId = {}
+
+	property string idolEpisodeNewSnapshotCharacterId = ""
+
+	property any idolEpisodeNewSnapshotSet = {}
+
+	property integer MinIdolCardCount = 14
+
+	property any idolRuntimeCards = {}
+
+	property any idolCardClickHandlers = {}
+
+	-- SmartPhoneUILogic이 검사하는 앱 계약 메서드입니다.
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		-- UI 참조와 초기 표시 상태를 준비합니다. 이벤트는 모든 앱의 초기화 후 연결합니다.
+		if self.IsInitialized then
+			return true
+		end
+
+		if self.View == nil then
+			return false
+		end
+
+		self:ClearIdolRuntimeCards()
+		self.View:Initialize()
+		self.IsInitialized = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectEvents()
+		-- 스마트폰 관리자가 모든 앱의 초기화를 마친 뒤 입력과 데이터 이벤트를 연결합니다.
+		self:ConnectIdolEpisodeButtons()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		-- 스마트폰 관리자가 초기화를 마친 앱을 열고 현재 데이터로 표시를 갱신합니다.
+		self.IsOpen = true
+		self:HandleIdolPageNewContent()
+		self:Refresh()
+		self:HandleIdolEpisodeNewContent(self.selectedIdolCharacterId)
+		self.View:SetVisible(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 초기화된 앱의 방문 상태를 정리하고 화면을 닫습니다.
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		self.IsOpen = false
+		self.View:SetVisible(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Refresh()
+		-- 기존 데이터 매니저에서 앱의 최신 표시 데이터를 읽습니다.
+		self:RefreshIdolCharacters()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshLocalized()
+		-- 언어 변경에 맞춰 앱의 동적 텍스트를 다시 표시합니다.
+		self:Refresh()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnNewContentChanged()
+		-- 열린 아이돌 앱의 캐릭터와 에피소드 알림을 반영합니다.
+		if self.IsOpen == false then
+			return
+		end
+
+		self:CaptureIdolNewCharactersWhileOpen()
+		self:CaptureIdolEpisodeNewContentForSelectedCharacter()
+		self:RefreshIdolCharacters()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean RefreshBadges()
+		-- 아이돌과 친밀도 에피소드의 미확인 상태를 메뉴에 전달합니다.
+		local hasNew = _NewContentManager:ClientHasAnyNewContent("character", "idol") or _NewContentManager:ClientHasAnyNewContent("intimacyEpisode", "")
+		local hasAppNew = hasNew or self:HasIdolNewCharacterSnapshot() or self:HasIdolEpisodeNewSnapshot()
+		_SmartPhoneUIUtil:SetEntityEnable(self.MenuNewBadgeEntity, hasAppNew)
+		return hasAppNew
+	end
+
+	-- Private Methods
+
+	@ExecSpace("ClientOnly")
+	method void ConnectIdolEpisodeButtons()
+		-- 프로필 에피소드 버튼을 선택된 아이돌의 친밀도 다이얼로그와 연결합니다.
+		self:DisconnectIdolEpisodeButtons()
+		if isvalid(self.View.CookieButton) then
+			self.cookieClickHandler = self.View.CookieButton:ConnectEvent(ButtonClickEvent, function()
+				if self.selectedIdolCharacterId ~= "" then _FishingRewardLogic:UseCookie(self.selectedIdolCharacterId) end
+			end)
+		end
+
+		for index, episodeView in ipairs(self.View.Episodes) do
+			local storyIndex = index
+			local episodeButton = episodeView:GetClickEntity()
+			local clickHandler = episodeButton:ConnectEvent(ButtonClickEvent, function()
+				self:OnIdolEpisodeClicked(storyIndex)
+			end)
+
+			table.insert(self.idolEpisodeClickHandlers, { entity = episodeButton, eventHandler = clickHandler })
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectIdolEpisodeButtons()
+		if self.cookieClickHandler ~= nil and self.View ~= nil and isvalid(self.View.CookieButton) then
+			self.View.CookieButton:DisconnectEvent(ButtonClickEvent, self.cookieClickHandler)
+			self.cookieClickHandler = nil
+		end
+		-- 프로필 에피소드 버튼에 연결된 클릭 핸들러를 해제합니다.
+		if self.idolEpisodeClickHandlers == nil then
+			self.idolEpisodeClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.idolEpisodeClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.idolEpisodeClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdolEpisodeClicked(integer storyIndex)
+		-- 선택된 아이돌의 해금된 친밀도 에피소드 다이얼로그를 엽니다.
+		if self.selectedIdolCharacterId == "" then
+			return
+		end
+
+		local character = _CharacterManager:ClientGetCharacterById(self.selectedIdolCharacterId)
+		if character == nil or self:IsLockedIdolCharacter(character) then
+			return
+		end
+
+		local maxIntimacyLevel = self:GetCharacterMaxIntimacyLevel(character)
+		if self:IsIdolStoryUnlocked(maxIntimacyLevel, storyIndex) == false then
+			return
+		end
+
+		local episodeLevel = _IntimacyLevelMaster:GetUnlockLevel("story", storyIndex)
+		if episodeLevel <= 0 then
+			log_warning("[SmartPhoneUILogic] Intimacy story unlock level not found. storyIndex=" .. tostring(storyIndex))
+			return
+		end
+
+		local dialogId = _IntimacyEpisodeMaster:GetDialogId(character.id or "", episodeLevel)
+		if dialogId == "" then
+			log_warning("[SmartPhoneUILogic] Intimacy episode dialog not found. characterId=" .. tostring(character.id or "") .. ", level=" .. tostring(episodeLevel))
+			return
+		end
+
+		local backgroundId = _IntimacyEpisodeMaster:GetBackground(character.id or "", episodeLevel)
+		self:DismissIdolEpisodeNewBadge(character.id or "", storyIndex)
+		_ScreenEffectUILogic:Transition(0.5, function()
+			self:OpenIdolEpisodeDialog(dialogId, backgroundId)
+		end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenIdolEpisodeDialog(string dialogId, string backgroundId)
+		-- 친밀도 에피소드 다이얼로그를 배경 옵션과 함께 엽니다.
+		local options = DialogOpenOptions()
+		options.dialogId = dialogId or ""
+		options.backgroundId = backgroundId or ""
+		options.closeWithFade = true
+		_DialogUILogic:Open(options)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureIdolNewCharactersWhileOpen()
+		-- 아이돌 페이지를 보고 있는 중 새로 해금된 캐릭터도 현재 방문 스냅샷에 합칩니다.
+		local characterIds = _NewContentManager:ClientGetNewContentIds("character", "idol")
+		for _, characterId in ipairs(characterIds) do
+			if characterId ~= nil and characterId ~= "" then
+				self.idolNewCharacterSnapshotSet[characterId] = true
+			end
+		end
+
+		if #characterIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("character", "idol")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleIdolPageNewContent()
+		-- 아이돌 페이지 진입 시 신규 캐릭터를 스냅샷으로 보존하고 서버의 미확인 상태는 읽음 처리합니다.
+		self:ClearIdolNewCharacterSnapshot()
+		self:ClearIdolEpisodeNewSnapshot()
+		local characterIds = _NewContentManager:ClientGetNewContentIds("character", "idol")
+		for _, characterId in ipairs(characterIds) do
+			if characterId ~= nil and characterId ~= "" then
+				self.idolNewCharacterSnapshotSet[characterId] = true
+			end
+		end
+		self:NotifyBadgesChanged()
+
+		if #characterIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("character", "idol")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdolNewCharacterSnapshot()
+		-- 아이돌 페이지를 벗어나거나 스마트폰을 닫을 때 방문 중 신규 표시를 정리합니다.
+		self.idolNewCharacterSnapshotSet = {}
+		self.idolNewBadgeByCharacterId = {}
+		self:NotifyBadgesChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasIdolNewCharacterSnapshot()
+		-- 현재 아이돌 페이지 방문 스냅샷에 신규 캐릭터가 남아 있는지 반환합니다.
+		for _, isNew in pairs(self.idolNewCharacterSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsIdolCharacterNewInSnapshot(any character)
+		-- 지정 캐릭터가 현재 아이돌 방문에서 신규 표시 대상인지 반환합니다.
+		if character == nil or self:IsLockedIdolCharacter(character) then
+			return false
+		end
+
+		local characterId = character.id or ""
+		return characterId ~= "" and self.idolNewCharacterSnapshotSet[characterId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissIdolCharacterNewBadge(string characterId)
+		-- 캐릭터 카드를 직접 확인하면 해당 카드의 방문 중 신규 표시만 즉시 제거합니다.
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		self.idolNewCharacterSnapshotSet[characterId] = nil
+		self:RefreshIdolCharacterNewBadge(characterId)
+		self:NotifyBadgesChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleIdolEpisodeNewContent(string characterId)
+		-- 선택 캐릭터의 신규 에피소드를 방문 스냅샷으로 보존하고 서버의 미확인 상태는 읽음 처리합니다.
+		self:ClearIdolEpisodeNewSnapshot()
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		self.idolEpisodeNewSnapshotCharacterId = characterId
+		self:CaptureIdolEpisodeNewContentForSelectedCharacter()
+		self:RefreshIdolEpisodeNewBadges()
+		self:RefreshIdolCharacterNewBadge(characterId)
+		self:NotifyBadgesChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CaptureIdolEpisodeNewContentForSelectedCharacter()
+		-- 현재 선택 캐릭터에서 새로 동기화된 친밀도 에피소드를 방문 스냅샷에 합칩니다.
+		local characterId = self.selectedIdolCharacterId or ""
+		if characterId == "" then
+			return
+		end
+
+		if self.idolEpisodeNewSnapshotCharacterId ~= characterId then
+			self.idolEpisodeNewSnapshotCharacterId = characterId
+			self.idolEpisodeNewSnapshotSet = {}
+		end
+
+		local contentIds = _NewContentManager:ClientGetNewContentIds("intimacyEpisode", characterId)
+		for _, contentId in ipairs(contentIds) do
+			if contentId ~= nil and contentId ~= "" then
+				self.idolEpisodeNewSnapshotSet[contentId] = true
+			end
+		end
+
+		if #contentIds > 0 then
+			_NewContentManager:RequestAcknowledgeCategory("intimacyEpisode", characterId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdolEpisodeNewSnapshot()
+		-- 아이돌 페이지 또는 선택 캐릭터를 벗어날 때 방문 중 에피소드 신규 표시를 정리합니다.
+		local previousCharacterId = self.idolEpisodeNewSnapshotCharacterId
+		self.idolEpisodeNewSnapshotCharacterId = ""
+		self.idolEpisodeNewSnapshotSet = {}
+		self:RefreshIdolEpisodeNewBadges()
+		self:RefreshIdolCharacterNewBadge(previousCharacterId)
+		self:NotifyBadgesChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasIdolEpisodeNewSnapshot()
+		-- 현재 방문 중인 에피소드의 NEW 항목이 남아 있는지 확인합니다.
+		for _, isNew in pairs(self.idolEpisodeNewSnapshotSet) do
+			if isNew == true then
+				return true
+			end
+		end
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ShouldShowIdolCharacterNewBadge(string characterId)
+		-- 신규 캐릭터이거나 확인하지 않은 친밀도 에피소드가 있으면 캐릭터 카드에도 빨간점을 표시합니다.
+		if characterId == nil or characterId == "" then
+			return false
+		end
+
+		if self.idolNewCharacterSnapshotSet[characterId] == true then
+			return true
+		end
+
+		if self.idolEpisodeNewSnapshotCharacterId == characterId and self:HasIdolEpisodeNewSnapshot() then
+			return true
+		end
+
+		return _NewContentManager:ClientHasAnyNewContent("intimacyEpisode", characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolCharacterNewBadge(string characterId)
+		-- 캐릭터 카드의 NEW 배지를 최신 방문 상태로 갱신합니다.
+		if characterId == nil or characterId == "" then
+			return
+		end
+
+		local badge = self.idolNewBadgeByCharacterId[characterId]
+		if badge ~= nil and isvalid(badge) then
+			badge.Enable = self:ShouldShowIdolCharacterNewBadge(characterId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolEpisodeNewBadges()
+		-- 현재 선택 캐릭터의 에피소드 행별 신규 표시를 갱신합니다.
+		local isSelectedSnapshot = self.selectedIdolCharacterId ~= ""
+			and self.idolEpisodeNewSnapshotCharacterId == self.selectedIdolCharacterId
+		for storyIndex, episodeView in ipairs(self.View.Episodes) do
+			local contentId = tostring(storyIndex)
+			local isNew = isSelectedSnapshot and self.idolEpisodeNewSnapshotSet[contentId] == true
+			episodeView:SetNewBadge(isNew)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DismissIdolEpisodeNewBadge(string characterId, integer storyIndex)
+		-- 에피소드를 직접 열면 해당 행의 방문 중 신규 표시를 제거합니다.
+		if characterId == nil or characterId == ""
+			or self.idolEpisodeNewSnapshotCharacterId ~= characterId then
+			return
+		end
+
+		self.idolEpisodeNewSnapshotSet[tostring(storyIndex)] = nil
+		self:RefreshIdolEpisodeNewBadges()
+		self:RefreshIdolCharacterNewBadge(characterId)
+		self:NotifyBadgesChanged()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolCharacters()
+		-- 캐릭터 매니저 데이터로 아이돌 카드를 다시 만들되 최소 슬롯 수를 보장합니다.
+		local characters = _CharacterManager:ClientGetCharacters()
+
+		local cardCount = #characters
+		if cardCount < self.MinIdolCardCount then
+			cardCount = self.MinIdolCardCount
+		end
+
+		self:RebuildIdolCards(characters, cardCount)
+		self:RefreshSelectedIdolInfo(characters)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RebuildIdolCards(any characters, integer cardCount)
+		-- 첫 번째 카드를 런타임 카드로 복제하고 보유 캐릭터 또는 잠금 슬롯 정보를 채웁니다.
+		self:ClearIdolRuntimeCards()
+
+		for index = 1, cardCount do
+			local cardView = self.View:CreateCard(self:GetIdolRuntimeCardName(index))
+			if cardView ~= nil then
+				self:SetIdolCard(cardView, characters[index])
+				self:ConnectIdolCardClick(cardView.Entity, characters[index])
+				table.insert(self.idolRuntimeCards, cardView.Entity)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearIdolRuntimeCards()
+		-- 런타임 카드 삭제 전에 연결된 클릭 이벤트를 먼저 정리합니다.
+		self:DisconnectIdolCardClicks()
+		-- 목록을 다시 만들기 전에 런타임에서 생성한 아이돌 카드를 제거합니다.
+
+		if self.idolRuntimeCards == nil then
+			self.idolRuntimeCards = {}
+			return
+		end
+
+		for _, card in ipairs(self.idolRuntimeCards) do
+			if isvalid(card) then
+				card:Destroy()
+			end
+		end
+
+		self.idolRuntimeCards = {}
+		self.idolNewBadgeByCharacterId = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectIdolCardClick(Entity card, any character)
+		-- 보유 캐릭터 카드에 클릭 이벤트를 연결해 Info 패널을 해당 캐릭터 정보로 갱신합니다.
+		if card == nil or self:IsLockedIdolCharacter(character) then
+			return
+		end
+
+		local characterId = character.id or ""
+		if characterId == "" then
+			return
+		end
+
+		local capturedCharacterId = characterId
+		local clickHandler = card:ConnectEvent(ButtonClickEvent, function()
+			self:OnIdolCardClicked(capturedCharacterId)
+		end)
+
+		table.insert(self.idolCardClickHandlers, { entity = card, eventHandler = clickHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectIdolCardClicks()
+		-- 런타임 아이돌 카드에 연결했던 클릭 이벤트 핸들러를 모두 해제합니다.
+		if self.idolCardClickHandlers == nil then
+			self.idolCardClickHandlers = {}
+			return
+		end
+
+		for _, item in ipairs(self.idolCardClickHandlers) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+
+		self.idolCardClickHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnIdolCardClicked(string characterId)
+		-- 선택한 아이돌 카드의 캐릭터 정보를 Info 패널에 반영합니다.
+		if characterId == "" then
+			return
+		end
+
+		local character = _CharacterManager:ClientGetCharacterById(characterId)
+		if character == nil then
+			return
+		end
+
+		self.selectedIdolCharacterId = characterId
+		self:SetIdolInfo(character)
+		self:HandleIdolEpisodeNewContent(characterId)
+		self:DismissIdolCharacterNewBadge(characterId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshSelectedIdolInfo(any characters)
+		-- 목록을 다시 만든 뒤 기존 선택 캐릭터를 유지하고, 없으면 첫 보유 캐릭터를 Info에 표시합니다.
+		local selectedCharacter = nil
+		if self.selectedIdolCharacterId ~= "" then
+			selectedCharacter = self:FindCharacterInList(characters, self.selectedIdolCharacterId)
+		end
+
+		if selectedCharacter == nil then
+			selectedCharacter = characters[1]
+		end
+
+		self:SetIdolInfo(selectedCharacter)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any FindCharacterInList(any characters, string characterId)
+		-- 캐릭터 목록에서 지정한 id의 캐릭터 데이터를 찾습니다.
+		if characters == nil or characterId == "" then
+			return nil
+		end
+
+		for _, character in ipairs(characters) do
+			if character ~= nil and character.id == characterId then
+				return character
+			end
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolInfo(any character)
+		-- 선택된 캐릭터의 초상화, 이름, 친밀도 레벨, 에피소드 잠금 상태를 Info 패널에 적용합니다.
+		self:RefreshIdolEpisodeLabels()
+		if self:IsLockedIdolCharacter(character) then
+			self.selectedIdolCharacterId = ""
+			self:RefreshCookie()
+			self.View:ShowLockedProfile()
+			self:SetIdolEpisodeLocks(0)
+			self:RefreshIdolEpisodeNewBadges()
+			return
+		end
+
+		local intimacyLevel = self:GetCharacterIntimacyLevel(character)
+		local maxIntimacyLevel = self:GetCharacterMaxIntimacyLevel(character)
+		self.selectedIdolCharacterId = character.id or ""
+		self:RefreshCookie()
+		self.View:ShowProfile(
+			_SmartPhoneUIUtil:GetLocalizedCharacterName(character),
+			intimacyLevel,
+			self:GetCharacterIntimacyGaugeRatio(character),
+			_SmartPhoneUIUtil:GetCharacterVerticalPortraitRuid(character.id),
+			self.selectedIdolCharacterId
+		)
+		self:SetIdolEpisodeLocks(maxIntimacyLevel)
+		self:RefreshIdolEpisodeNewBadges()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolEpisodeLocks(integer intimacyLevel)
+		-- 친밀도 story 해금 여부를 버튼 상태와 Lock 이미지에 함께 반영합니다.
+		for index, episodeView in ipairs(self.View.Episodes) do
+			local isUnlocked = self:IsIdolStoryUnlocked(intimacyLevel, index)
+			episodeView:SetLocked(isUnlocked == false)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshIdolEpisodeLabels()
+		-- 각 에피소드는 같은 번호의 친밀도 레벨에 연결합니다.
+		for level, episodeView in ipairs(self.View.Episodes) do
+			episodeView:SetLevel(level)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsIdolStoryUnlocked(integer intimacyLevel, integer storyIndex)
+		-- 친밀도 레벨 마스터에 등록된 story 해금 여부를 반환합니다.
+		return _IntimacyLevelMaster:IsUnlockIndexUnlocked(intimacyLevel, "story", storyIndex)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIdolCard(any cardView, any character)
+		-- 아이돌 카드 복제본 하나에 캐릭터 정보 또는 잠금 슬롯 표시를 적용합니다.
+		if self:IsLockedIdolCharacter(character) then
+			cardView:ShowLocked()
+			return
+		end
+
+		local level = self:GetCharacterIntimacyLevel(character)
+		local characterId = character.id or ""
+		cardView:ShowCharacter(
+			_SmartPhoneUIUtil:GetLocalizedCharacterName(character),
+			level,
+			self:GetCharacterIntimacyGaugeRatio(character),
+			_SmartPhoneUIUtil:GetCharacterVerticalPortraitRuid(character.id),
+			self:ShouldShowIdolCharacterNewBadge(characterId)
+		)
+		if characterId ~= "" then
+			self.idolNewBadgeByCharacterId[characterId] = cardView:GetNewBadgeEntity()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsLockedIdolCharacter(any character)
+		-- character: CharacterData. 미발견이거나 ???로 표시되는 아이돌 카드인지 확인합니다.
+		if character == nil then
+			return true
+		end
+
+		if character.isDiscovered == false then
+			return true
+		end
+
+		local characterName = character.name or ""
+		if characterName == "" or characterName == "???" then
+			return true
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCharacterIntimacyLevel(any character)
+		-- CharacterData의 친밀도 수치를 IntimacyLevelMaster 기준 친밀도 레벨로 변환합니다.
+		if character == nil then
+			return 0
+		end
+
+		return _IntimacyLevelMaster:GetCurrentLevel(character.intimacy or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCharacterMaxIntimacyLevel(any character)
+		-- CharacterData의 최고 친밀도 기록을 IntimacyLevelMaster 기준 친밀도 레벨로 변환합니다.
+		if character == nil then
+			return 0
+		end
+
+		return _IntimacyLevelMaster:GetCurrentLevel(character.maxIntimacyReached or character.intimacy or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetCharacterIntimacyGaugeRatio(any character)
+		-- character: CharacterData. 현재 친밀도 경험치가 현재 레벨 구간에서 차지하는 비율을 반환합니다.
+		if character == nil then
+			return 0
+		end
+
+		return self:GetIntimacyGaugeRatio(character.intimacy or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method number GetIntimacyGaugeRatio(number intimacy)
+		-- 현재 친밀도 경험치를 다음 레벨까지의 게이지 비율로 변환합니다.
+		local safeIntimacy = intimacy or 0
+		local currentLevel = _IntimacyLevelMaster:GetCurrentLevel(safeIntimacy)
+		local currentLevelData = _IntimacyLevelMaster:GetLevelData(currentLevel)
+		local nextLevelData = _IntimacyLevelMaster:GetLevelData(currentLevel + 1)
+		if nextLevelData == nil then
+			return 1
+		end
+
+		local currentCut = 0
+		if currentLevelData ~= nil and currentLevelData.intimacyCut ~= nil then
+			currentCut = currentLevelData.intimacyCut
+		end
+
+		local nextCut = nextLevelData.intimacyCut or currentCut
+		if nextCut <= currentCut then
+			return 1
+		end
+
+		local ratio = (safeIntimacy - currentCut) / (nextCut - currentCut)
+		return _MathUtil:Clamp(ratio or 0, 0, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetIdolRuntimeCardName(integer index)
+		-- 아이돌 카드 인덱스를 런타임 전용 복제 카드 이름으로 변환합니다.
+		if index < 10 then
+			return "RuntimeCard0" .. tostring(index)
+		end
+
+		return "RuntimeCard" .. tostring(index)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void NotifyBadgesChanged()
+		-- 앱 방문 상태가 바뀌면 스마트폰 메뉴 배지를 다시 집계합니다.
+		_SmartPhoneUILogic:RefreshNewContentBadges()
+	end
+
+end

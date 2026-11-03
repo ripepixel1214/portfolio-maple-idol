@@ -1,0 +1,48 @@
+---@description "달팽이 사다리 클라이언트 입력과 표시 상태"
+@Struct
+script MiniGameSnailLadderModel
+	property string sessionId = ""
+	property any tState = nil
+	property boolean requestPending = false
+
+	method void OpenLobby(integer balance, boolean debugMode)
+		-- 실제 또는 테스트 코인 잔액으로 로비 상태 구성
+		local rule = _MiniGameSnailLadderRule
+		self.sessionId = ""
+		self.tState = MiniGameSnailLadderState()
+		self.tState.stage = rule.STAGE_LOBBY
+		self.tState.bet = rule.ENTRY_COIN
+		self.tState.balance = math.max(0, math.floor(balance))
+		self.tState.isDebug = debugMode
+		self.requestPending = false
+	end
+
+	method boolean TryChoose(integer lane)
+		-- 중복 입력과 부족 잔액을 차단하고 서버 응답 대기
+		local rule = _MiniGameSnailLadderRule
+		if self.tState == nil or self.requestPending or not rule:IsValidLane(lane) then return false end
+		if self.tState.stage ~= rule.STAGE_LOBBY and self.tState.stage ~= rule.STAGE_READY then return false end
+		if self.tState.balance < rule.ENTRY_COIN then return false end
+		self.tState.selectedLane = lane
+		self.requestPending = true
+		return true
+	end
+
+	method boolean ApplyState(string targetSessionId, any tState)
+		-- 다른 세션과 역순 상태 갱신 폐기
+		if self.tState == nil or self.sessionId ~= targetSessionId or tState == nil then return false end
+		if tState.revision <= self.tState.revision then return false end
+		self.tState = tState
+		self.requestPending = false
+		return true
+	end
+
+	method boolean CanClose()
+		-- 배팅 및 결과 처리 중 화면 종료 차단
+		local rule = _MiniGameSnailLadderRule
+		return self.tState ~= nil and not self.requestPending
+			and (self.tState.stage == rule.STAGE_LOBBY
+				or self.tState.stage == rule.STAGE_READY
+				or self.tState.stage == rule.STAGE_RESULT)
+	end
+end

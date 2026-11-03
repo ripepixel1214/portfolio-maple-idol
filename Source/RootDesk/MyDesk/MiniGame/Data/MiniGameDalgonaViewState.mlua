@@ -1,0 +1,22 @@
+---@description "달고나 미니게임 화면 표시 데이터"
+@Struct
+script MiniGameDalgonaViewState
+
+	property string sessionId = ""
+	property integer betAmount = 0
+	property integer balance = 0
+	property boolean showResult = false
+	property boolean showPlacement = false
+	property boolean showBetting = false
+	property boolean canStart = false
+	property boolean canBetMinus = false
+	property boolean canBetPlus = false
+	property boolean showDrawButton = false
+	property boolean canDraw = false
+	property any blockIds = {}
+	property any blockCells = {}
+	property any placements = {}
+	property any canDrag = {}
+	property any tDrawResult = nil
+
+end

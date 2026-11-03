@@ -1,0 +1,260 @@
+@Logic
+script DiamondWalletLogic extends Logic
+
+	property any tWalletByUserId = {}
+	property any busyByUserId = {}
+	property any shopRecoveryBlockedByUserId = {}
+	property boolean isClientWalletLoaded = false
+	property number clientBalance = 0
+	property number clientRevision = -1
+	property number clientStateSequence = -1
+	property any stateSequenceByUserId = {}
+	property string REASON_GAME_TRANSACTION = "game_transaction"
+	property string REASON_WORLD_SHOP = "world_shop_purchase"
+	property any refreshRequestedAtByUserId = {}
+
+	@ExecSpace("ServerOnly")
+	method boolean IsInitializedForUser(string forUserId)
+		-- 진행 저장이 레거시 다이아몬드를 제거해도 안전한지 확인
+		return self.tWalletByUserId[forUserId] ~= nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean LoadForUser(string forUserId)
+		-- 지갑 초기 이관과 보관 대기 거래 복구 후 표시 잔액 전송
+		if forUserId == nil or forUserId == "" or self.busyByUserId[forUserId] == true then return false end
+		self.busyByUserId[forUserId] = true
+		local ok, tResult = pcall(function()
+			local userStorage = _DataStorageService:GetUserDataStorage(forUserId)
+			local tLoaded = _DiamondWalletStorage:LoadOrCreateWallet(userStorage)
+			if tLoaded.success then
+				local finalized = _DiamondWalletStorage:FinalizePendingOperation(userStorage, tLoaded)
+				if not finalized and tLoaded.tWallet.tPendingOperation ~= nil
+					and #tLoaded.tWallet.tPendingOperation.shopItemIds > 0 then
+					self:BlockPendingShopWrites(forUserId)
+					tLoaded.success = false
+					tLoaded.reason = _DiamondWalletStorage.REASON_PENDING_JOURNAL
+				elseif finalized then
+					tLoaded = _DiamondWalletStorage:ReadWallet(userStorage)
+				end
+			end
+			return tLoaded
+		end)
+		self.busyByUserId[forUserId] = nil
+		if ok == false or tResult.success == false then
+			self:BlockPendingShopWrites(forUserId)
+			self.tWalletByUserId[forUserId] = nil
+			self:SyncWalletUnavailable(self:NextStateSequence(forUserId), forUserId)
+			log_warning("[DiamondWallet] load rejected user=" .. forUserId .. " reason=" .. tostring(ok and tResult.reason or tResult))
+			return false
+		end
+		self.shopRecoveryBlockedByUserId[forUserId] = nil
+		self:AcceptConfirmedWallet(forUserId, tResult.tWallet)
+		self:FlushDeferredShopCharacterSave(forUserId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetBalance(string forUserId)
+		-- 저장 완료된 서버 지갑 캐시 잔액 조회
+		local tWallet = self.tWalletByUserId[forUserId]
+		return tWallet ~= nil and tWallet.balance or nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetBalance()
+		-- 미로드 상태를 실제 잔액 0과 구분
+		if self.isClientWalletLoaded == false then return nil end
+		return self.clientBalance
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryApplyTransaction(string forUserId, integer debit, integer credit, string operationId, string reason)
+		-- 재시도 시 호출자가 보존한 동일 거래 ID 사용
+		return self:TryApplyTransactionWithId(forUserId, operationId, debit, credit, reason)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryApplyTransactionWithId(string forUserId, string operationId, integer debit, integer credit, string reason)
+		-- 재시도에도 동일한 ID를 사용하는 서버 전용 지급·차감
+		if type(forUserId) ~= "string" or forUserId == "" or type(operationId) ~= "string" or operationId == ""
+			or #operationId + #_DiamondWalletStorage.GAME_RECORD_PREFIX > 100
+			or type(reason) ~= "string" or reason == ""
+			or _DiamondWalletStorage:IsValidAmount(debit) == false or _DiamondWalletStorage:IsValidAmount(credit) == false then return false end
+		local tOperation = DiamondWalletOperationData()
+		tOperation.operationId = operationId
+		tOperation.kind = _DiamondWalletStorage.KIND_GAME
+		tOperation.reason = reason
+		tOperation.debit = debit
+		tOperation.credit = credit
+		return self:ExecuteOperation(forUserId, tOperation)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryProcessPurchase(any purchaseInfo, integer diamondAmount)
+		-- 플랫폼 콜백의 구매 정보만 서버 지갑 거래로 변환
+		if purchaseInfo == nil or purchaseInfo.UserId == nil or purchaseInfo.UserId == ""
+			or purchaseInfo.PurchaseId == nil or purchaseInfo.PurchaseId == ""
+			or purchaseInfo.ProductId == nil or purchaseInfo.ProductId == ""
+			or _DiamondWalletStorage:IsValidAmount(purchaseInfo.OrderNumber) == false then return false end
+		local tOperation = DiamondWalletOperationData()
+		tOperation.operationId = purchaseInfo.PurchaseId
+		tOperation.kind = _DiamondWalletStorage.KIND_PURCHASE
+		tOperation.reason = self.REASON_WORLD_SHOP
+		tOperation.productId = purchaseInfo.ProductId
+		tOperation.orderNumber = purchaseInfo.OrderNumber
+		tOperation.credit = diamondAmount
+		return self:ExecuteOperation(purchaseInfo.UserId, tOperation)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ExecuteOperation(string forUserId, DiamondWalletOperationData tOperation)
+		-- 같은 인스턴스의 중복 실행 차단 및 저장 성공 이후에만 캐시 반영
+		if forUserId == nil or forUserId == "" or self.busyByUserId[forUserId] == true then return false end
+		if _UserDataManager ~= nil and _UserDataManager.isResetInProgress then return false end
+		self.busyByUserId[forUserId] = true
+		local ok, tResult = pcall(function()
+			return _DiamondWalletStorage:ApplyOperation(_DataStorageService:GetUserDataStorage(forUserId), tOperation)
+		end)
+		self.busyByUserId[forUserId] = nil
+		if ok == false then
+			if #tOperation.shopItemIds > 0 then self:BlockPendingShopWrites(forUserId) end
+			log_error("[DiamondWallet] transaction exception user=" .. forUserId .. " error=" .. tostring(tResult))
+			return false
+		end
+		if tResult.tWallet ~= nil then self:AcceptConfirmedWallet(forUserId, tResult.tWallet) end
+		if tResult.success == false then
+			if #tOperation.shopItemIds > 0 and tResult.reason ~= _DiamondWalletStorage.REASON_INSUFFICIENT_BALANCE
+				and tResult.reason ~= _DiamondWalletStorage.REASON_INVALID_OPERATION then self:BlockPendingShopWrites(forUserId) end
+			log_warning("[DiamondWallet] transaction rejected id=" .. tOperation.operationId .. " reason=" .. tResult.reason)
+			return false
+		end
+		self:FlushDeferredShopCharacterSave(forUserId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AcceptConfirmedWallet(string forUserId, DiamondWalletData tWallet)
+		-- 늦게 도착한 낮은 버전의 캐시 및 HUD 덮어쓰기 방지
+		local tCached = self.tWalletByUserId[forUserId]
+		if tCached ~= nil and tCached.revision > tWallet.revision then return end
+		self.tWalletByUserId[forUserId] = tWallet
+		local user = _UserService:GetUserEntityByUserId(forUserId)
+		if isvalid(user) then self:SyncWallet(tWallet.balance, tWallet.revision, self:NextStateSequence(forUserId), forUserId) end
+	end
+
+	@ExecSpace("ServerOnly")
+	method number NextStateSequence(string forUserId)
+		-- 잔액 및 조회 실패 통지의 상대적 순서 보존
+		local sequence = (self.stateSequenceByUserId[forUserId] or 0) + 1
+		self.stateSequenceByUserId[forUserId] = sequence
+		return sequence
+	end
+
+	@ExecSpace("Server")
+	method void RequestRefreshWallet()
+		-- 표시 복구용 조회 요청의 소유자 확인 및 호출 빈도 제한
+		if isvalid(_UserService:GetUserEntityByUserId(senderUserId)) == false then return end
+		local now = _UtilLogic.ElapsedSeconds
+		local previous = self.refreshRequestedAtByUserId[senderUserId]
+		if previous ~= nil and now - previous < 5 then return end
+		self.refreshRequestedAtByUserId[senderUserId] = now
+		if self:LoadForUser(senderUserId) and _ProgressManager.currentUserId == senderUserId
+			and _ProgressManager:IsProgressLoaded() == false then
+			_ProgressManager:LoadProgressFromStorage()
+			_ProgressManager:PushProgressToClient(senderUserId)
+		end
+	end
+
+	@ExecSpace("Client")
+	method void SyncWallet(number balance, number revision, number sequence)
+		-- 서버 확정 잔액을 전용 클라이언트 캐시 및 HUD에 반영
+		if revision < self.clientRevision or sequence < self.clientStateSequence then return end
+		self.clientStateSequence = sequence
+		self.clientBalance = balance
+		self.clientRevision = revision
+		self.isClientWalletLoaded = true
+		self:SendWalletChangedEvent()
+	end
+
+	@ExecSpace("Client")
+	method void SyncWalletUnavailable(number sequence)
+		-- 실패한 조회를 잔액 0으로 표시하지 않도록 로드 상태만 갱신
+		if sequence < self.clientStateSequence then return end
+		self.clientStateSequence = sequence
+		self.isClientWalletLoaded = false
+		self:SendWalletChangedEvent()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SendWalletChangedEvent()
+		-- 전용 지갑 표시 변경 이벤트 발행
+		local event = DiamondWalletChangedEvent()
+		event.isLoaded = self.isClientWalletLoaded
+		event.balance = self.clientBalance
+		event.revision = self.clientRevision
+		self:SendEvent(event)
+	end
+
+	method void OnBeginPlay()
+		-- 플레이 세션별 서버·클라이언트 캐시 초기화
+		self.tWalletByUserId = {}
+		self.busyByUserId = {}
+		self.shopRecoveryBlockedByUserId = {}
+		self.refreshRequestedAtByUserId = {}
+		self.stateSequenceByUserId = {}
+		self.isClientWalletLoaded = false
+		self.clientBalance = 0
+		self.clientRevision = -1
+		self.clientStateSequence = -1
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryPurchaseShopItems(string userId, integer amount, table itemIds, table characterIds)
+		-- 서버에서 검증한 상품 목록과 차감액을 하나의 영속 거래로 기록
+		local tOperation = DiamondWalletOperationData()
+		tOperation.operationId = _UtilLogic:NewGuid()
+		tOperation.kind = _DiamondWalletStorage.KIND_GAME
+		tOperation.reason = _DiamondWalletStorage.REASON_SHOP_PURCHASE
+		tOperation.debit = amount
+		tOperation.shopItemIds = itemIds
+		tOperation.characterIds = characterIds
+		return self:ExecuteOperation(userId, tOperation)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void BlockPendingShopWrites(string userId)
+		-- 입장 로드 순서와 무관하게 이전 캐시의 지급 표식 덮어쓰기 차단
+		self.shopRecoveryBlockedByUserId[userId] = true
+		if _ShopItemManager.currentUserId == userId then
+			_ShopItemStorage.canSaveShopItems = false
+			_ShopItemManager.isShopItemOwnershipLoaded = false
+		end
+		if _CharacterManager.currentUserId == userId then
+			_CharacterStorage.canSaveCharacters = false
+			_CharacterManager.isCharacterArchiveLoaded = false
+		end
+	end
+	@ExecSpace("ServerOnly")
+	method boolean WaitForShopRecovery(string userId)
+		-- 입장 시 지급 복구와 아카이브 초기 로드·저장의 실행 순서 보장
+		local deadline = _UtilLogic.ServerElapsedSeconds + _ProgressStorage.CONFIRMED_SAVE_WAIT_SECONDS
+		while self.busyByUserId[userId] == true do
+			if _UtilLogic.ServerElapsedSeconds >= deadline then return false end
+			wait(0.1)
+		end
+		return self.shopRecoveryBlockedByUserId[userId] ~= true and _ShopItemStorage:IsShopInitializationReady(userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void FlushDeferredShopCharacterSave(string userId)
+		-- 지급 복구 뒤 최신 캐릭터 캐시의 지연 저장 재개
+		if _ShopItemManager.isPurchaseInProgress or self.shopRecoveryBlockedByUserId[userId] then return end
+		if _CharacterManager.currentUserId == userId and _CharacterManager:IsCharactersLoaded()
+			and _CharacterStorage.isShopSaveDeferred and _CharacterStorage.canSaveCharacters then
+			_CharacterStorage.isShopSaveDeferred = false
+			_CharacterManager:SaveCharactersToStorage()
+		end
+	end
+
+end

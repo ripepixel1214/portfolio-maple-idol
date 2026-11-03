@@ -86,7 +86,7 @@ script NpcEventTriggerComponent extends Component
 	@HideFromInspector
 	property boolean isPlayerInRange = false
 
-	-- 현재 전구(EventIndicator)가 표시 중인지 여부 (E 안내와 상호배타 판정용)
+	-- 현재 전구 표시 여부
 	@HideFromInspector
 	property boolean isEventIconShown = false
 
@@ -111,6 +111,10 @@ script NpcEventTriggerComponent extends Component
 	-- 이벤트가 없을 때 재생할 평상시 대화 dialogId (StaticActorDialogTable에서 actorId로 조회)
 	@HideFromInspector
 	property string regularDialogId = ""
+
+	-- 재화 부족 대화를 포함해 실제 열린 평상시 대화 식별자
+	@HideFromInspector
+	property string activeRegularDialogId = ""
 
 	-- 현재 평상시 대화가 열려 있는지 여부
 	@HideFromInspector
@@ -147,7 +151,7 @@ script NpcEventTriggerComponent extends Component
 
 	method void InitializeIndicatorEntities()
 		-- 에디터 참조 검증과 모바일 상호작용 스프라이트 적용
-		if self.eventIconEntity == nil or isvalid(self.eventIconEntity) == false then
+		if self.IsEventAvailable == true and (self.eventIconEntity == nil or isvalid(self.eventIconEntity) == false) then
 			log_warning("[DowntownNpcEventTrigger] event icon entity 참조가 유효하지 않습니다(npcEntity=" .. tostring(self.Entity.Name) .. ")")
 		end
 
@@ -313,6 +317,9 @@ script NpcEventTriggerComponent extends Component
 
 	method void TryStartInteraction()
 		-- 행동력과 이벤트 상태에 따른 공통 상호작용 시작
+		if _MiniGameManager ~= nil and _MiniGameManager:IsNightMarketMiniGameUiBusy() == true then
+			return
+		end
 		if self.IsExecutingEvent == true or self.isRegularDialogActive == true then
 			return
 		end
@@ -345,27 +352,27 @@ script NpcEventTriggerComponent extends Component
 		end
 
 		-- 상호작용이 시작되어 진행 상태가 바뀌었으니 E 안내 아이콘을 다시 평가(진행 중엔 숨김)
-		self:RefreshInteractIndicator()
+		self:RefreshIndicators()
 	end
 
 	method void OnInteractionEnter(InteractionEnterEvent event)
-		-- 로컬 플레이어가 상호작용 범위에 진입하면 E 안내 아이콘 표시 조건을 갱신
+		-- 로컬 플레이어 범위 진입에 따른 두 indicator 갱신
 		if self:IsLocalPlayerEntity(event) == false then
 			return
 		end
 
 		self.isPlayerInRange = true
-		self:RefreshInteractIndicator()
+		self:RefreshIndicators()
 	end
 
 	method void OnInteractionLeave(InteractionLeaveEvent event)
-		-- 로컬 플레이어가 상호작용 범위에서 벗어나면 E 안내 아이콘을 숨김
+		-- 로컬 플레이어 범위 이탈에 따른 두 indicator 갱신
 		if self:IsLocalPlayerEntity(event) == false then
 			return
 		end
 
 		self.isPlayerInRange = false
-		self:RefreshInteractIndicator()
+		self:RefreshIndicators()
 	end
 
 	method boolean IsLocalPlayerEntity(any event)
@@ -382,8 +389,15 @@ script NpcEventTriggerComponent extends Component
 	end
 
 	method boolean HasStartableEvent()
-		-- 서버 컨텍스트 기준으로 지금 시작할 수 있는 이벤트가 있는지 반환
-		return self.IsEventAvailable == true
+		-- 서버 컨텍스트와 현재 스테이지 외출 상태가 모두 유효한 이벤트만 허용
+		return self.IsEventAvailable == true and self:CanUseStageNpcEvents()
+	end
+
+	method boolean CanUseStageNpcEvents()
+		-- 늦게 도착한 컨텍스트와 맵 재진입에도 단순 외출의 이벤트 시작 및 전구 표시 차단
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		return progress ~= nil and progress.eCurrentStep == _EProgressStep.Outdoor
+			and progress.eCurrentStage ~= nil and progress.eCurrentStage ~= ""
 	end
 
 	method integer GetCurrentActionPoint()
@@ -410,7 +424,7 @@ script NpcEventTriggerComponent extends Component
 	end
 
 	method void StartRegularDialog()
-		-- 이벤트가 없을 때 고정 NPC의 평상시 대화를 연다. 행동력을 소모하지 않는다.
+		-- 행동력 소모와 입장 재화 조건 없이 기본 대화 표시
 		if self.regularDialogId == "" or _DialogUILogic == nil then
 			log_warning("[DowntownNpcEventTrigger] cannot start regular dialog npcId=" .. tostring(self.npcId)
 				.. " dialogId=" .. tostring(self.regularDialogId))
@@ -419,12 +433,42 @@ script NpcEventTriggerComponent extends Component
 		end
 
 		self.isRegularDialogActive = true
-		log("[DowntownNpcEventTrigger] start regular dialog npcId=" .. tostring(self.npcId)
-			.. " dialogId=" .. tostring(self.regularDialogId))
-		-- 일반 NPC 대화도 기본값을 가진 옵션으로 엽니다.
 		local options = DialogOpenOptions()
 		options.dialogId = self.regularDialogId
+		self.activeRegularDialogId = options.dialogId
+		log("[DowntownNpcEventTrigger] start regular dialog npcId=" .. tostring(self.npcId)
+			.. " dialogId=" .. tostring(self.activeRegularDialogId))
 		_DialogUILogic:Open(options)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean TryStartMiniGameDialog()
+		-- 기본 대화 종료 후 입장 재화에 맞는 미니게임 안내 연결
+		local miniGameDialogId = _StaticActorDialogMaster:GetMiniGameDialogId(self.npcId)
+		if miniGameDialogId == "" or miniGameDialogId == self.regularDialogId then return false end
+		local player = _UserService.LocalPlayer
+		if not isvalid(player) or player.CurrentMap ~= self.Entity.CurrentMap then return false end
+		local options = DialogOpenOptions()
+		options.dialogId = miniGameDialogId
+		local miniGameEventId = _StaticActorDialogMaster:GetMiniGameEventId(self.npcId)
+		if miniGameEventId ~= "" then
+			local tEvent = _EventMaster:GetEvent(miniGameEventId)
+			if tEvent ~= nil and tEvent.eventType == _EEventType.MiniGame then
+				local progress = _ProgressManager:ClientGetProgress()
+				options.allowLineEvents = _MiniGameManager:CanAffordNightMarketLobby(
+					tEvent.miniGameId, progress ~= nil and progress.meso or 0,
+					progress ~= nil and progress.nightMarketCoin or 0)
+				if not options.allowLineEvents then
+					local insufficientDialogId = _StaticActorDialogMaster:GetInsufficientDialogId(self.npcId)
+					if insufficientDialogId ~= "" then options.dialogId = insufficientDialogId end
+				end
+			end
+		end
+		self.activeRegularDialogId = options.dialogId
+		log("[VRF] 기본 대화 후 미니게임 안내 npcId=" .. tostring(self.npcId)
+			.. " dialogId=" .. tostring(self.activeRegularDialogId))
+		_DialogUILogic:Open(options)
+		return true
 	end
 
 	method void ExecuteNextPreparedEvent()
@@ -444,17 +488,24 @@ script NpcEventTriggerComponent extends Component
 	end
 
 	method void OnNpcEventDialogClosed(DialogClosedEvent event)
-		-- 대화창이 닫혔을 때, 평상시 대화면 잠금만 해제하고, 이벤트 대화면 다음 준비 이벤트로 넘어간다.
+		-- 일반 대화 잠금 해제와 서버 이벤트 단계 진행
 		if event == nil then
 			return
 		end
 
 		-- 평상시 대화가 닫힌 경우: 점유했던 잠금만 해제한다(행동력/이벤트 진행과 무관).
 		if self.isRegularDialogActive == true then
+			if event.dialogId ~= self.activeRegularDialogId then
+				return
+			end
+			if event.dialogId == self.regularDialogId and self:TryStartMiniGameDialog() then
+				return
+			end
 			self.isRegularDialogActive = false
+			self.activeRegularDialogId = ""
 			self:ReleaseInteractionLock()
 			-- 대화가 닫혔으니, 플레이어가 아직 근처면 E 안내 아이콘을 다시 표시
-			self:RefreshInteractIndicator()
+			self:RefreshIndicators()
 			return
 		end
 
@@ -569,6 +620,7 @@ script NpcEventTriggerComponent extends Component
 		self.activeStepToken = ""
 		self.ResolvedCharacterId = ""
 		self.isRegularDialogActive = false
+		self.activeRegularDialogId = ""
 		-- 상호작용 도중 NPC가 재구성/제거되는 경우에도 잠금이 남지 않도록 해제한다.
 		self:ReleaseInteractionLock()
 	end
@@ -599,14 +651,11 @@ script NpcEventTriggerComponent extends Component
 	end
 
 	method void ApplyEventState(boolean isEventAvailable)
+		-- 이벤트 표시 가능 상태 저장 후 두 indicator 갱신
+		self._T.isEventIndicatorAvailable = isEventAvailable == true
 		self:ApplyActionName()
-		-- 전구(EventIndicator)는 이벤트가 있고 행동력이 남아 있을 때만 표시한다.
-		local shouldShowIcon = isEventAvailable == true and self:GetCurrentActionPoint() > 0
-		self.isEventIconShown = shouldShowIcon
-		self:ApplyEventIcon(shouldShowIcon)
 		self:ApplyNpcSpeechAndBalloonState()
-		-- 전구 상태가 바뀌면 상호배타 관계인 E 안내 아이콘도 다시 평가한다.
-		self:RefreshInteractIndicator()
+		self:RefreshIndicators()
 	end
 
 	method void ApplyActionName()
@@ -645,13 +694,28 @@ script NpcEventTriggerComponent extends Component
 		self.eventIconEntity:SetEnable(shouldShow)
 	end
 
-	method void RefreshInteractIndicator()
-		-- 상호작용 아이콘은 플레이어가 근처이고, 전구가 떠 있지 않으며, 상호작용/대화 진행 중이 아닐 때만 표시(전구와 중복 금지)
-		local shouldShow = self.isPlayerInRange == true
-			and self.isEventIconShown == false
-			and self.IsExecutingEvent == false
+	method void RefreshIndicators()
+		-- 범위 안에서는 상호작용 표시 우선, 대화와 이벤트 진행 중에는 두 표시 숨김
+		local canShow = self.IsExecutingEvent == false
 			and self.isRegularDialogActive == false
-		self:ApplyInteractIcon(shouldShow)
+		local shouldShowInteract = canShow and self.isPlayerInRange == true
+		local shouldShowEvent = canShow and self.isPlayerInRange == false
+			and self._T.isEventIndicatorAvailable == true
+			and self:CanUseStageNpcEvents()
+			and self:GetCurrentActionPoint() > 0
+
+		if self.isEventIconShown ~= shouldShowEvent
+			or self._T.isInteractIndicatorShown ~= shouldShowInteract then
+			log("[DowntownNpcEventTrigger] indicators npcId=" .. tostring(self.npcId)
+				.. " inRange=" .. tostring(self.isPlayerInRange)
+				.. " event=" .. tostring(shouldShowEvent)
+				.. " interact=" .. tostring(shouldShowInteract))
+		end
+
+		self.isEventIconShown = shouldShowEvent
+		self._T.isInteractIndicatorShown = shouldShowInteract
+		self:ApplyEventIcon(shouldShowEvent)
+		self:ApplyInteractIcon(shouldShowInteract)
 	end
 
 	method void ApplyInteractIcon(boolean shouldShow)

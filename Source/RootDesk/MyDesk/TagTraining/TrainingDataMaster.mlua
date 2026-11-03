@@ -1,0 +1,396 @@
+-- 태그 육성 전용 테이블을 한 번 로드하고 카드, 태그, 효과, 추가 태그 풀의 조회 인덱스를 제공합니다.
+@Logic
+script TrainingDataMaster extends Logic
+
+	property boolean IsLoaded = false
+
+	-- TrainingCardRow[]
+	property any tTrainingCards = {}
+
+	-- { [cardId:string] = TrainingCardRow }
+	property any tTrainingCardById = {}
+
+	-- { [cardType:string] = TrainingCardRow[] }
+	property any tTrainingCardsByType = {}
+
+	-- TrainingCardRow[]
+	property any tDefaultUnlockedTrainingCards = {}
+
+	-- TagRow[]
+	property any tTags = {}
+
+	-- { [tagId:string] = TagRow }
+	property any tTagById = {}
+
+	-- { [tagType:string] = TagRow[] }
+	property any tTagsByType = {}
+
+	-- TagEffectRow[]
+	property any tTagEffects = {}
+
+	-- { [effectId:string] = TagEffectRow }
+	property any tTagEffectById = {}
+
+	-- { [tagId:string] = TagEffectRow[] }
+	property any tTagEffectsByTagId = {}
+
+	-- AdditionalTagPoolEntryRow[]
+	property any tAdditionalTagPoolEntries = {}
+
+	-- { [entryId:string] = AdditionalTagPoolEntryRow }
+	property any tAdditionalTagPoolEntryById = {}
+
+	-- { [poolId:string] = AdditionalTagPoolEntryRow[] }
+	property any tAdditionalTagPoolEntriesByPoolId = {}
+
+	-- Public API
+
+	method void OnBeginPlay()
+		-- 로직 시작 시 태그 육성 정적 데이터를 로드합니다.
+		self:LoadData()
+	end
+
+	method any GetTrainingCard(string cardId)
+		-- cardId에 해당하는 TrainingCardRow를 반환합니다.
+		self:EnsureLoaded()
+		return self.tTrainingCardById[cardId]
+	end
+
+	method table GetAllTrainingCards()
+		-- 전체 TrainingCardRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tTrainingCards
+	end
+
+	method table GetTrainingCardsByType(string cardType)
+		-- cardType에 해당하는 TrainingCardRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tTrainingCardsByType[cardType] or {}
+	end
+
+	method table GetDefaultUnlockedTrainingCards()
+		-- 시작부터 사용할 수 있는 TrainingCardRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tDefaultUnlockedTrainingCards
+	end
+
+	method any GetTag(string tagId)
+		-- tagId에 해당하는 TagRow를 반환합니다.
+		self:EnsureLoaded()
+		return self.tTagById[tagId]
+	end
+
+	method table GetAllTags()
+		-- 전체 TagRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tTags
+	end
+
+	method table GetTagsByType(string tagType)
+		-- tagType에 해당하는 TagRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tTagsByType[tagType] or {}
+	end
+
+	method any GetTagEffect(string effectId)
+		-- effectId에 해당하는 TagEffectRow를 반환합니다.
+		self:EnsureLoaded()
+		return self.tTagEffectById[effectId]
+	end
+
+	method table GetTagEffects(string tagId)
+		-- tagId가 소유한 TagEffectRow 목록을 테이블 순서대로 반환합니다.
+		self:EnsureLoaded()
+		return self.tTagEffectsByTagId[tagId] or {}
+	end
+
+	method table GetAllTagEffects()
+		-- 전체 TagEffectRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tTagEffects
+	end
+
+	method any GetAdditionalTagPoolEntry(string entryId)
+		-- entryId에 해당하는 AdditionalTagPoolEntryRow를 반환합니다.
+		self:EnsureLoaded()
+		return self.tAdditionalTagPoolEntryById[entryId]
+	end
+
+	method table GetAllAdditionalTagPoolEntries()
+		-- 전체 AdditionalTagPoolEntryRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tAdditionalTagPoolEntries
+	end
+
+	method table GetAdditionalTagPoolEntries(string poolId)
+		-- poolId에 연결된 AdditionalTagPoolEntryRow 목록을 테이블 순서대로 반환합니다.
+		self:EnsureLoaded()
+		return self.tAdditionalTagPoolEntriesByPoolId[poolId] or {}
+	end
+
+	method table GetAdditionalTagIds(string poolId)
+		-- poolId에 연결된 추가 태그 ID 목록을 테이블 순서대로 반환합니다.
+		local tagIds = {}
+		for _, poolEntry in ipairs(self:GetAdditionalTagPoolEntries(poolId)) do
+			table.insert(tagIds, poolEntry.tagId)
+		end
+
+		return tagIds
+	end
+
+	method table GetAdditionalTagIdsForCard(string cardId)
+		-- 카드에 지정된 additionalTagPoolId를 해석해 추가 태그 ID 목록을 반환합니다.
+		local trainingCard = self:GetTrainingCard(cardId)
+		if trainingCard == nil then
+			return {}
+		end
+
+		return self:GetAdditionalTagIds(trainingCard.additionalTagPoolId)
+	end
+
+	-- Private Methods
+
+	method void EnsureLoaded()
+		-- 아직 로드되지 않았다면 네 태그 육성 테이블을 다시 읽습니다.
+		if self.IsLoaded == false then
+			self:LoadData()
+		end
+	end
+
+	method void LoadData()
+		-- 네 태그 육성 테이블을 읽고 조회 인덱스와 테이블 간 참조를 구성합니다.
+		self:ClearIndexes()
+
+		local trainingCardDataSet = _DataService:GetTable("TrainingCardTable")
+		local tagDataSet = _DataService:GetTable("TagTable")
+		local tagEffectDataSet = _DataService:GetTable("TagEffectTable")
+		local additionalTagPoolDataSet = _DataService:GetTable("AdditionalTagPoolTable")
+
+		if trainingCardDataSet == nil or tagDataSet == nil or tagEffectDataSet == nil or additionalTagPoolDataSet == nil then
+			log_warning("[TrainingDataMaster] required tag training table is missing")
+			return
+		end
+
+		self:LoadTrainingCards(trainingCardDataSet)
+		self:LoadTags(tagDataSet)
+		self:LoadTagEffects(tagEffectDataSet)
+		self:LoadAdditionalTagPools(additionalTagPoolDataSet)
+		self:ValidateReferences()
+		self.IsLoaded = true
+	end
+
+	method void ClearIndexes()
+		-- 이전 로드 결과를 제거해 모든 인덱스를 같은 데이터 버전으로 맞춥니다.
+		self.IsLoaded = false
+		self.tTrainingCards = {}
+		self.tTrainingCardById = {}
+		self.tTrainingCardsByType = {}
+		self.tDefaultUnlockedTrainingCards = {}
+		self.tTags = {}
+		self.tTagById = {}
+		self.tTagsByType = {}
+		self.tTagEffects = {}
+		self.tTagEffectById = {}
+		self.tTagEffectsByTagId = {}
+		self.tAdditionalTagPoolEntries = {}
+		self.tAdditionalTagPoolEntryById = {}
+		self.tAdditionalTagPoolEntriesByPoolId = {}
+	end
+
+	method void LoadTrainingCards(any dataSet)
+		-- TrainingCardTable을 읽고 ID, 카드 유형, 기본 해금 기준으로 색인합니다.
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local cardId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "cardId", "")
+			if cardId ~= "" then
+				if self.tTrainingCardById[cardId] ~= nil then
+					log_warning("[TrainingDataMaster] duplicate cardId=" .. cardId)
+				else
+					local trainingCard = self:CreateTrainingCard(dataSet, rowIndex, cardId)
+					self.tTrainingCardById[cardId] = trainingCard
+					table.insert(self.tTrainingCards, trainingCard)
+					self:AppendGroupedValue(self.tTrainingCardsByType, trainingCard.cardType, trainingCard)
+					if trainingCard.defaultUnlocked == true then
+						table.insert(self.tDefaultUnlockedTrainingCards, trainingCard)
+					end
+				end
+			end
+		end
+	end
+
+	method any CreateTrainingCard(any dataSet, integer rowIndex, string cardId)
+		-- TrainingCardTable의 한 행을 TrainingCardRow로 변환합니다.
+		local trainingCard = TrainingCardRow()
+		trainingCard.cardId = cardId
+		trainingCard.cardType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "cardType", "")
+		trainingCard.nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+		trainingCard.iconResource = _DataTableUtil:SafeGetString(dataSet, rowIndex, "iconResource", "")
+		trainingCard.vocal = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "vocal", 0)
+		trainingCard.dance = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "dance", 0)
+		trainingCard.visual = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "visual", 0)
+		trainingCard.fatigue = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "fatigue", 0)
+		trainingCard.baseTagId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "baseTagId", "")
+		trainingCard.additionalTagPoolId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "additionalTagPoolId", "")
+		trainingCard.defaultUnlocked = _DataTableUtil:SafeGetBoolean(dataSet, rowIndex, "defaultUnlocked", false)
+		return trainingCard
+	end
+
+	method void LoadTags(any dataSet)
+		-- TagTable을 읽고 ID와 태그 유형 기준으로 색인합니다.
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local tagId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "tagId", "")
+			if tagId ~= "" then
+				if self.tTagById[tagId] ~= nil then
+					log_warning("[TrainingDataMaster] duplicate tagId=" .. tagId)
+				else
+					local tag = self:CreateTag(dataSet, rowIndex, tagId)
+					self.tTagById[tagId] = tag
+					table.insert(self.tTags, tag)
+					self:AppendGroupedValue(self.tTagsByType, tag.tagType, tag)
+				end
+			end
+		end
+	end
+
+	method any CreateTag(any dataSet, integer rowIndex, string tagId)
+		-- TagTable의 한 행을 TagRow로 변환합니다.
+		local tag = TagRow()
+		tag.tagId = tagId
+		tag.nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+		tag.descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
+		tag.colorHex = _DataTableUtil:SafeGetString(dataSet, rowIndex, "colorHex", "")
+		tag.tagType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "tagType", "")
+		return tag
+	end
+
+	method void LoadTagEffects(any dataSet)
+		-- TagEffectTable을 읽고 효과 ID와 소유 태그 기준으로 색인합니다.
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local effectId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "effectId", "")
+			if effectId ~= "" then
+				if self.tTagEffectById[effectId] ~= nil then
+					log_warning("[TrainingDataMaster] duplicate effectId=" .. effectId)
+				else
+					local tagEffect = self:CreateTagEffect(dataSet, rowIndex, effectId)
+					self.tTagEffectById[effectId] = tagEffect
+					table.insert(self.tTagEffects, tagEffect)
+					self:AppendGroupedValue(self.tTagEffectsByTagId, tagEffect.tagId, tagEffect)
+				end
+			end
+		end
+	end
+
+	method any CreateTagEffect(any dataSet, integer rowIndex, string effectId)
+		-- TagEffectTable의 한 행을 TagEffectRow로 변환합니다.
+		local tagEffect = TagEffectRow()
+		tagEffect.effectId = effectId
+		tagEffect.tagId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "tagId", "")
+		tagEffect.trigger = _DataTableUtil:SafeGetString(dataSet, rowIndex, "trigger", "")
+		tagEffect.cause = _DataTableUtil:SafeGetString(dataSet, rowIndex, "cause", "")
+		tagEffect.condition = _DataTableUtil:SafeGetString(dataSet, rowIndex, "condition", "")
+		tagEffect.conditionValue = _DataTableUtil:SafeGetOptionalNumber(dataSet, rowIndex, "conditionValue")
+		tagEffect.target = _DataTableUtil:SafeGetString(dataSet, rowIndex, "target", "")
+		tagEffect.operation = _DataTableUtil:SafeGetString(dataSet, rowIndex, "operation", "")
+		tagEffect.effectValue = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "effectValue", 0)
+		return tagEffect
+	end
+
+	method void LoadAdditionalTagPools(any dataSet)
+		-- AdditionalTagPoolTable을 읽고 풀 ID별 태그 ID 목록을 구성합니다.
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local entryId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "entryId", "")
+			if entryId ~= "" then
+				if self.tAdditionalTagPoolEntryById[entryId] ~= nil then
+					log_warning("[TrainingDataMaster] duplicate entryId=" .. entryId)
+				else
+					local poolEntry = self:CreateAdditionalTagPoolEntry(dataSet, rowIndex, entryId)
+					self.tAdditionalTagPoolEntryById[entryId] = poolEntry
+					table.insert(self.tAdditionalTagPoolEntries, poolEntry)
+					self:AppendGroupedValue(self.tAdditionalTagPoolEntriesByPoolId, poolEntry.poolId, poolEntry)
+				end
+			end
+		end
+	end
+
+	method any CreateAdditionalTagPoolEntry(any dataSet, integer rowIndex, string entryId)
+		-- AdditionalTagPoolTable의 한 행을 AdditionalTagPoolEntryRow로 변환합니다.
+		local poolEntry = AdditionalTagPoolEntryRow()
+		poolEntry.entryId = entryId
+		poolEntry.poolId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "poolId", "")
+		poolEntry.tagId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "tagId", "")
+		return poolEntry
+	end
+
+	method void AppendGroupedValue(table groupedValues, string groupId, any value)
+		-- 그룹 키에 해당하는 배열을 만들고 값을 원본 테이블 순서대로 추가합니다.
+		if groupedValues[groupId] == nil then
+			groupedValues[groupId] = {}
+		end
+
+		table.insert(groupedValues[groupId], value)
+	end
+
+	method void ValidateReferences()
+		-- 카드, 효과, 추가 태그 풀의 외래 키가 실제 태그 데이터와 연결되는지 검사합니다.
+		for _, trainingCard in ipairs(self.tTrainingCards) do
+			if self.tTagById[trainingCard.baseTagId] == nil then
+				log_warning("[TrainingDataMaster] unknown baseTagId=" .. tostring(trainingCard.baseTagId)
+					.. " cardId=" .. tostring(trainingCard.cardId))
+			end
+
+			if self.tAdditionalTagPoolEntriesByPoolId[trainingCard.additionalTagPoolId] == nil then
+				log_warning("[TrainingDataMaster] unknown additionalTagPoolId=" .. tostring(trainingCard.additionalTagPoolId)
+					.. " cardId=" .. tostring(trainingCard.cardId))
+			end
+		end
+
+		for _, tagEffect in ipairs(self.tTagEffects) do
+			if self.tTagById[tagEffect.tagId] == nil then
+				log_warning("[TrainingDataMaster] unknown effect tagId=" .. tostring(tagEffect.tagId)
+					.. " effectId=" .. tostring(tagEffect.effectId))
+			end
+			self:ValidateTagEffect(tagEffect)
+		end
+
+		for _, poolEntry in ipairs(self.tAdditionalTagPoolEntries) do
+			if self.tTagById[poolEntry.tagId] == nil then
+				log_warning("[TrainingDataMaster] unknown pool tagId=" .. tostring(poolEntry.tagId)
+					.. " entryId=" .. tostring(poolEntry.entryId))
+			end
+		end
+	end
+
+	method void ValidateTagEffect(any effect)
+		-- 기획 테이블의 조건·대상·연산 조합이 런타임에서 지원되는 형태인지 검사합니다.
+		local triggers = {CalculateResult = true, BuildChoices = true}
+		local causes = {Fatigue = true, Vocal = true, Dance = true, Visual = true, StackCount = true}
+		local conditions = {['=='] = true, ['!='] = true, ['>'] = true, ['>='] = true, ['<'] = true, ['<='] = true}
+		local resultTargets = {Fatigue = true, Vocal = true, Dance = true, Visual = true, All = true}
+		local resultOperations = {AddValue = true, AddPercent = true}
+
+		if triggers[effect.trigger] ~= true then
+			log_warning("[TrainingDataMaster] unsupported effect trigger=" .. tostring(effect.trigger)
+				.. " effectId=" .. tostring(effect.effectId))
+		end
+
+		local hasCause = effect.cause ~= ""
+		if hasCause then
+			if causes[effect.cause] ~= true or conditions[effect.condition] ~= true or effect.conditionValue == nil then
+				log_warning("[TrainingDataMaster] invalid effect condition effectId=" .. tostring(effect.effectId))
+			end
+		elseif effect.condition ~= "" or effect.conditionValue ~= nil then
+			log_warning("[TrainingDataMaster] condition requires cause effectId=" .. tostring(effect.effectId))
+		end
+
+		if effect.trigger == "CalculateResult" then
+			if resultTargets[effect.target] ~= true or resultOperations[effect.operation] ~= true then
+				log_warning("[TrainingDataMaster] invalid result effect action effectId=" .. tostring(effect.effectId))
+			end
+		elseif effect.trigger == "BuildChoices" then
+			if effect.target ~= "OtherChoice" or effect.operation ~= "Seal"
+				or effect.effectValue < 1 or effect.effectValue ~= math.floor(effect.effectValue) then
+				log_warning("[TrainingDataMaster] invalid choice effect action effectId=" .. tostring(effect.effectId))
+			end
+		end
+	end
+
+end

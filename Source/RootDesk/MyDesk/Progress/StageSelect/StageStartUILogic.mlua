@@ -1,0 +1,133 @@
+@Logic
+script StageStartUILogic extends Logic
+
+	property Entity root = "93eceff2-684d-45ec-8b9f-9f125456224e"
+
+	property TextGUIRendererComponent titleText = "df70e80f-be6d-4a99-9ceb-ce6caace56b9"
+
+	property TextGUIRendererComponent stageNameText = "345bfabd-bedf-43c1-b0f7-effba04f74c2"
+
+	property number fadeInDuration = 0.35
+
+	property number holdDuration = 1.4
+
+	property number fadeOutDuration = 0.45
+
+	property string UI_STAGE_START_TITLE_KEY = "ui.stage_start.title"
+
+	property string UI_STAGE_END_TITLE_KEY = "ui.stage_end.title"
+
+	property boolean isPlaying = false
+
+	property number elapsed = 0
+
+	property string activeStageId = ""
+
+	property any progressChangedHandler = nil
+
+	property any progressStepChangedHandler = nil
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(ProgressChangedEvent event)
+		-- 진행 데이터가 동기화될 때 현재 스테이지를 기억해 종료 전환에서도 이름을 유지합니다.
+		local stageId = _ProgressManager:ClientGetCurrentStage()
+		if stageId ~= "" then
+			self.activeStageId = stageId
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressStepChanged(ProgressStepChangedEvent event)
+		-- 스테이지 진입과 종료 전환에서 같은 안내 연출을 재생합니다.
+		if event.previousStep == _EProgressStep.StageSelect and event.currentStep == _EProgressStep.BeforeTraining then
+			self.activeStageId = _ProgressManager:ClientGetCurrentStage()
+			self:Play(self.activeStageId, self.UI_STAGE_START_TITLE_KEY)
+			return
+		end
+
+		if event.currentStep == _EProgressStep.StageSelect and self.activeStageId ~= "" then
+			self:Play(self.activeStageId, self.UI_STAGE_END_TITLE_KEY)
+			self.activeStageId = ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 안내 화면을 숨기고 진행 데이터와 스텝 변경 이벤트를 구독합니다.
+		self.root.Enable = false
+		self.root.CanvasGroupComponent.GroupAlpha = 0
+		self.activeStageId = _ProgressManager:ClientGetCurrentStage()
+		self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		self.progressStepChangedHandler = _ProgressManager:ConnectEvent(ProgressStepChangedEvent, self.OnProgressStepChanged)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 암전과 안내 문구를 함께 서서히 표시하고 유지한 뒤 다시 숨깁니다.
+		if self.isPlaying == false then
+			return
+		end
+
+		self.elapsed = self.elapsed + delta
+		local holdEnd = self.fadeInDuration + self.holdDuration
+		local totalDuration = holdEnd + self.fadeOutDuration
+		local alpha = 1
+		if self.elapsed < self.fadeInDuration then
+			alpha = self.elapsed / self.fadeInDuration
+		elseif self.elapsed >= totalDuration then
+			self:Finish()
+			return
+		elseif self.elapsed > holdEnd then
+			alpha = 1 - (self.elapsed - holdEnd) / self.fadeOutDuration
+		end
+
+		self.root.CanvasGroupComponent.GroupAlpha = alpha
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 진행 이벤트 구독과 재생 중인 안내 연출을 정리합니다.
+		_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+		_ProgressManager:DisconnectEvent(ProgressStepChangedEvent, self.progressStepChangedHandler)
+		self.progressChangedHandler = nil
+		self.progressStepChangedHandler = nil
+		self:Finish()
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void Play(string stageId, string titleKey)
+		-- 스테이지 이름과 시작·종료 제목을 적용하고 공통 안내 연출을 시작합니다.
+		local stage = _StageMaster:GetStage(stageId)
+		if stage == nil then
+			return
+		end
+
+		self.titleText.Text = titleKey
+		self.stageNameText.Text = stage.name
+		self.elapsed = 0
+		self.root.CanvasGroupComponent.GroupAlpha = 0
+		self.root.Enable = true
+		self.isPlaying = true
+		_UIVisibilityNotifierLogic:SendFrom(self, "stageStart", true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Finish()
+		-- 안내 화면을 숨기고 연출 중 막아 둔 게임 입력을 복구합니다.
+		self.root.Enable = false
+		self.root.CanvasGroupComponent.GroupAlpha = 0
+		if self.isPlaying == true then
+			self.isPlaying = false
+			_UIVisibilityNotifierLogic:SendFrom(self, "stageStart", false)
+		end
+	end
+
+end

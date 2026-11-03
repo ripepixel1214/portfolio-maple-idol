@@ -16,6 +16,10 @@ script ActivityManager extends Logic
 
 	property any userEnterHandler = nil
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	@ExecSpace("ServerOnly")
 	method void OnBeginPlay()
 		-- 유저 입장 시점에 서버 권위 활동 해금 목록을 로드하고 클라이언트에 동기화합니다.
@@ -30,6 +34,34 @@ script ActivityManager extends Logic
 			self.userEnterHandler = nil
 		end
 	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Event Handlers
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 유저가 서버에 입장하면 활동 해금 데이터를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][ActivityManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadActivities()
+
+		if self:IsActivitiesLoaded() then
+			self:PushActivitiesToClient(event.UserId)
+		end
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ClientOnly")
 	method boolean ClientHasActivityUnlocked(string activityId)
@@ -78,26 +110,6 @@ script ActivityManager extends Logic
 		end
 
 		return self:UnlockActivityWithCommit(activityId, senderUserId)
-	end
-
-	@ExecSpace("ServerOnly")
-	method void OnUserEnter(UserEnterEvent event)
-		-- 유저가 서버에 입장하면 활동 해금 데이터를 로드하고 해당 클라이언트에 전송합니다.
-		if event == nil or event.UserId == nil or event.UserId == "" then
-			return
-		end
-		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
-			log_warning("[ERROR][ActivityManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
-				.. " enteredUserId=" .. tostring(event.UserId))
-			return
-		end
-
-		self.currentUserId = event.UserId
-		self:LoadActivities()
-
-		if self:IsActivitiesLoaded() then
-			self:PushActivitiesToClient(event.UserId)
-		end
 	end
 
 	@ExecSpace("ServerOnly")
@@ -243,6 +255,26 @@ script ActivityManager extends Logic
 	end
 
 	@ExecSpace("ServerOnly")
+	method void PushActivitiesToClient(string forUserId)
+		-- 서버 권위 활동 해금 목록을 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		self:SyncActivities(self:CopyStringList(self.unlockedActivityIds), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncActivities(table activityIds)
+		-- 서버에서 받은 활동 해금 목록을 클라이언트 로컬 캐시에 반영합니다.
+		self:RegisterUnlockedActivitiesClientOnly(activityIds)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
 	method void RegisterUnlockedActivities(any activityIds)
 		-- 로드한 추가 해금 활동과 마스터의 기본 해금 활동을 서버 권위 캐시에 등록합니다.
 		self.unlockedActivityIds = {}
@@ -285,7 +317,10 @@ script ActivityManager extends Logic
 		end
 
 		if _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) == nil then
-			log_warning("[ActivityManager] ignored unknown activityId=" .. tostring(activityId))
+			-- 태그 육성 카드 해금은 TrainingCardStorage가 기존 활동 저장에서 이관합니다.
+			if _TrainingDataMaster:GetTrainingCard(activityId) == nil then
+				log_warning("[ActivityManager] ignored unknown activityId=" .. tostring(activityId))
+			end
 			return
 		end
 
@@ -330,22 +365,6 @@ script ActivityManager extends Logic
 
 		local activity = _ActivityMaster:GetActivity(activityId)
 		return activity ~= nil and activity.defaultUnlocked == true
-	end
-
-	@ExecSpace("ServerOnly")
-	method void PushActivitiesToClient(string forUserId)
-		-- 서버 권위 활동 해금 목록을 지정한 클라이언트의 로컬 캐시로 전송합니다.
-		if forUserId == nil or forUserId == "" then
-			return
-		end
-
-		self:SyncActivities(self:CopyStringList(self.unlockedActivityIds), forUserId)
-	end
-
-	@ExecSpace("Client")
-	method void SyncActivities(table activityIds)
-		-- 서버에서 받은 활동 해금 목록을 클라이언트 로컬 캐시에 반영합니다.
-		self:RegisterUnlockedActivitiesClientOnly(activityIds)
 	end
 
 	@ExecSpace("ClientOnly")

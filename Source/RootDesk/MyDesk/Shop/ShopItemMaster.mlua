@@ -1,8 +1,16 @@
--- ShopItemTable을 로드하고 상점 아이템 정적 데이터를 제공합니다.
+-- 상점 상품 데이터 조회와 원본 행 검증
 @Logic
 script ShopItemMaster extends Logic
 
 	property boolean IsLoaded = false
+
+	property string TABLE_SHOP_ITEMS = "ShopItemTable"
+	-- 숫자 변환 후 정밀도를 보장하는 최대 정수
+	property integer MAX_EXACT_PRICE = 9007199254740991
+	property string COIN_TYPE_MESO = "meso"
+	property string COIN_TYPE_DIAMOND = "diamond"
+	property string COIN_TYPE_NIGHT_MARKET = "nightMarketCoin"
+	property string COIN_TYPE_LEGACY_WORLD_COIN = "worldCoin"
 
 	-- ShopItemRow 목록입니다(테이블 행 순서 유지).
 	property any tShopItems = {}
@@ -19,48 +27,106 @@ script ShopItemMaster extends Logic
 	end
 
 	method void LoadShopItems()
-		-- ShopItemTable의 전체 행을 읽어 id/카테고리 기준 조회 맵을 구성합니다.
+		-- 중복 ID와 잘못된 행을 제외한 상품 목록 구성
 		self.tShopItems = {}
 		self.tShopItemById = {}
 		self.tShopItemsByCategory = {}
 		self.IsLoaded = false
 
-		local dataSet = _DataService:GetTable("ShopItemTable")
+		local dataSet = _DataService:GetTable(self.TABLE_SHOP_ITEMS)
 		if dataSet == nil then
 			log_warning("[ShopItemMaster] ShopItemTable not found")
 			return
 		end
 
-		for rowIndex = 1, dataSet:GetRowCount() do
+		local rowCount = dataSet:GetRowCount()
+		local tIdCounts = {}
+		for rowIndex = 1, rowCount do
 			local shopItemId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "shopItemId", "")
-			if shopItemId ~= "" then
-				local tShopItem = ShopItemRow()
-				tShopItem.shopItemId = shopItemId
-				local nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
-				tShopItem.name = ""
-				if _LocalizationLogic ~= nil then
-					tShopItem.name = _LocalizationLogic:GetText(nameKey, "")
-				end
-				tShopItem.category = _DataTableUtil:SafeGetString(dataSet, rowIndex, "category", "")
-				tShopItem.coinType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "coinType", "")
-				tShopItem.price = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "price", 0)
-				tShopItem.ruid = _DataTableUtil:SafeGetString(dataSet, rowIndex, "ruid", "")
-				tShopItem.width = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "width", 0)
-				tShopItem.height = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "height", 0)
+			tIdCounts[shopItemId] = (tIdCounts[shopItemId] or 0) + 1
+		end
 
+		local rejectedCount = 0
+		local legacyCount = 0
+		for rowIndex = 1, rowCount do
+			local shopItemId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "shopItemId", "")
+			local tShopItem = nil
+			if shopItemId == "" or tIdCounts[shopItemId] ~= 1 then
+				log_warning("[ShopItemMaster] invalid or duplicate shopItemId row=" .. tostring(rowIndex) .. " id=" .. shopItemId)
+			else
+				tShopItem = self:ReadShopItem(dataSet, rowIndex)
+			end
+			if tShopItem == nil then
+				rejectedCount = rejectedCount + 1
+			else
 				table.insert(self.tShopItems, tShopItem)
 				self.tShopItemById[shopItemId] = tShopItem
-
-				if tShopItem.category ~= "" then
-					if self.tShopItemsByCategory[tShopItem.category] == nil then
-						self.tShopItemsByCategory[tShopItem.category] = {}
-					end
-					table.insert(self.tShopItemsByCategory[tShopItem.category], tShopItem)
+				if self.tShopItemsByCategory[tShopItem.category] == nil then
+					self.tShopItemsByCategory[tShopItem.category] = {}
 				end
+				table.insert(self.tShopItemsByCategory[tShopItem.category], tShopItem)
+				if tShopItem.coinType == self.COIN_TYPE_LEGACY_WORLD_COIN then legacyCount = legacyCount + 1 end
 			end
 		end
 
 		self.IsLoaded = true
+		log("[VRF][ShopItemMaster] loaded=" .. tostring(#self.tShopItems) .. " rejected=" .. tostring(rejectedCount) .. " legacyWorldCoin=" .. tostring(legacyCount))
+	end
+
+	method any ReadShopItem(any dataSet, integer rowIndex)
+		-- 결제 금액을 임의 보정하지 않고 필수 값과 참조 검사
+		local tShopItem = ShopItemRow()
+		tShopItem.shopItemId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "shopItemId", "")
+		tShopItem.nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+		tShopItem.category = _DataTableUtil:SafeGetString(dataSet, rowIndex, "category", "")
+		tShopItem.characterId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "characterId", "")
+		tShopItem.coinType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "coinType", "")
+		tShopItem.ruid = _DataTableUtil:SafeGetString(dataSet, rowIndex, "ruid", "")
+		local priceValue = tonumber(_DataTableUtil:SafeGetString(dataSet, rowIndex, "price", ""))
+		local widthValue = tonumber(_DataTableUtil:SafeGetString(dataSet, rowIndex, "width", "0"))
+		local heightValue = tonumber(_DataTableUtil:SafeGetString(dataSet, rowIndex, "height", "0"))
+		local invalidReason = ""
+		if tShopItem.shopItemId == "" or tShopItem.nameKey == "" or tShopItem.category == "" then
+			invalidReason = "missing required ID/nameKey/category"
+		elseif self:IsSupportedCoinType(tShopItem.coinType) == false then
+			invalidReason = "unknown coinType=" .. tShopItem.coinType
+		elseif self:IsNonNegativeFiniteNumber(priceValue) == false then
+			invalidReason = "invalid price"
+		elseif priceValue > self.MAX_EXACT_PRICE then
+			invalidReason = "price exceeds exact integer range"
+		elseif priceValue ~= math.floor(priceValue) then
+			invalidReason = "fractional price"
+		elseif self:IsNonNegativeFiniteNumber(widthValue) == false or self:IsNonNegativeFiniteNumber(heightValue) == false then
+			invalidReason = "invalid display size"
+		elseif tShopItem.characterId ~= "" then
+			if _CharacterBaseStatMaster == nil or _CharacterBaseStatMaster:GetCharacterBaseStat(tShopItem.characterId) == nil
+				or _ActorMaster == nil or _ActorMaster:GetActor(tShopItem.characterId) == nil then
+				invalidReason = "unknown characterId=" .. tShopItem.characterId
+			end
+		elseif tShopItem.ruid == "" then
+			invalidReason = "missing costume ruid"
+		end
+		if invalidReason ~= "" then
+			log_warning("[ShopItemMaster] rejected row=" .. tostring(rowIndex) .. " id=" .. tShopItem.shopItemId .. " reason=" .. invalidReason)
+			return nil
+		end
+
+		tShopItem.price = math.floor(priceValue)
+		tShopItem.width = widthValue
+		tShopItem.height = heightValue
+		if self:IsClient() then tShopItem.name = _LocaleTextUtil:GetText(tShopItem.nameKey) end
+		return tShopItem
+	end
+
+	method boolean IsSupportedCoinType(string coinType)
+		-- 기존 임시 월드 코인은 데이터 이전 전까지 호환 유지
+		return coinType == self.COIN_TYPE_MESO or coinType == self.COIN_TYPE_DIAMOND
+			or coinType == self.COIN_TYPE_NIGHT_MARKET or coinType == self.COIN_TYPE_LEGACY_WORLD_COIN
+	end
+
+	method boolean IsNonNegativeFiniteNumber(any value)
+		-- 누락 값과 음수, NaN, 무한대 거부
+		return type(value) == "number" and value == value and value >= 0 and value < math.huge
 	end
 
 	method any GetShopItems()

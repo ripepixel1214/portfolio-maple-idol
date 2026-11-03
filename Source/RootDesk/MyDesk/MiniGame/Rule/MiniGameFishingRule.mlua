@@ -1,0 +1,291 @@
+---@description "잡아라! 날치왕 이동, 작살 연속 충돌, 점수 및 시간 규칙"
+@Logic
+script MiniGameFishingRule extends Logic
+	property string MINI_GAME_ID = "night_market_fishing"
+	property string STAGE_READY = "ready"
+	property string STAGE_STARTING = "starting"
+	property string STAGE_PLAYING = "playing"
+	property string STAGE_PAUSED = "paused"
+	property string STAGE_SETTLING = "settling"
+	property string STAGE_RESULT = "result"
+	property string PHASE_IDLE = "idle"
+	property string PHASE_UP = "up"
+	property string PHASE_RETURN = "return"
+	property string KIND_NORMAL = "normal"
+	property string KIND_GOLD = "gold"
+	property string KIND_BOMB = "bomb"
+	property string ACTION_START = "start"
+	property string ACTION_MOVE = "move"
+	property string ACTION_FIRE = "fire"
+	property string ACTION_RETRY = "retry"
+	property string BADGE_ID = "fishing_king_badge"
+	property string COOKIE_ID = "night_market_cookie"
+	property string ITEM_TYPE_FAN_PRESENT = "fanPresent"
+	property string ITEM_TYPE_COOKIE = "consumable"
+	property string BADGE_RUID = "ec8946ee5ff74764889cfec11bbb9a1b"
+	property string COOKIE_RUID = "0239c5275bca4c8d9dde7cfed20daba6"
+	property string FISH_RUID = "0411bbc603f948e493b1aae8c35f1260"
+	property string BOMB_RUID = "8bec652f098149c880fabf79580a9a9c"
+	property integer ENTRY_MESO = 1000
+	property number START_SECONDS = 40
+	property number UP_SECONDS = 0.38
+	property number RETURN_SECONDS = 0.34
+	property number COOLDOWN_SECONDS = 0.5
+	property number STUN_SECONDS = 1.5
+	property number TIME_BONUS = 5
+	property integer ALL_GOLD_POINTS = 7777
+	property number ALL_GOLD_TIME_BONUS = 7
+	property number BOMB_PENALTY = 5
+	property number WIDTH = 1100
+	property number HEIGHT = 650
+	property number IDLE_TIP_Y = 515
+	property number TOP_TIP_Y = 65
+	property number PLAYER_MARGIN = 42
+	property number FISH_HALF_WIDTH = 72
+	property number FISH_HIT_RADIUS = 57
+	property number BOMB_HIT_RADIUS = 34.5
+	property number SPACING = 190
+	property integer SPAWN_BUFFER_COUNT = 2
+	property number MAX_STEP = 0.016666666667
+	property number TIME_EPSILON = 0.000001
+	property number POSITION_EPSILON = 0.001
+	property integer MAX_HIT_EFFECTS = 16
+	property any LANE_Y = {135, 240, 345, 450}
+
+	method integer RankForScore(integer score)
+		if score >= 50000 then return 1 end
+		if score >= 30000 then return 2 end
+		if score >= 15000 then return 3 end
+		if score >= 10000 then return 4 end
+		return 5
+	end
+
+	method integer CookiesForRank(integer rank)
+		local amounts = {20, 15, 10, 5, 1}
+		return amounts[rank] or 0
+	end
+
+	method number LaneDirection(integer lane)
+		return lane % 2 == 1 and 1 or -1
+	end
+
+	method number LaneDistance(integer lane, number startTime, number endTime)
+		-- 사인 속도 적분으로 프레임 수와 무관한 행별 이동량 산출
+		local i = lane - 1
+		local base = 48 + 12 * i
+		local omega = 2 * math.pi / (6 + i)
+		local phase = i * math.pi / 2
+		return base * (4 * (endTime - startTime)
+			+ (math.cos(omega * startTime + phase) - math.cos(omega * endTime + phase)) / omega)
+	end
+
+	method string DrawKind()
+		local value = _UtilLogic:RandomIntegerRange(1, 100)
+		if value <= 80 then return self.KIND_NORMAL end
+		if value <= 90 then return self.KIND_GOLD end
+		return self.KIND_BOMB
+	end
+
+	method void AddFish(any tState, integer lane, number x)
+		tState.nextFishId = tState.nextFishId + 1
+		table.insert(tState.fish, {id = tState.nextFishId, lane = lane, x = x, kind = self:DrawKind()})
+	end
+
+	method void Populate(any tState)
+		-- 화면 안과 진입 전 대기 구간에 행별 동일 간격 배치
+		tState.fish = {}
+		for lane = 1, 4 do
+			for i = -self.SPAWN_BUFFER_COUNT, 6 do
+				local x = -self.FISH_HALF_WIDTH + self.SPACING * i
+				if self:LaneDirection(lane) < 0 then x = self.WIDTH - x end
+				self:AddFish(tState, lane, x)
+			end
+		end
+	end
+
+	method void Refill(any tState)
+		-- 잡힌 빈칸을 채우지 않고 행의 마지막 개체 뒤에만 생성
+		for lane = 1, 4 do
+			local direction = self:LaneDirection(lane)
+			local margin = self.FISH_HALF_WIDTH + self.SPACING * self.SPAWN_BUFFER_COUNT
+			local edge = direction > 0 and -margin or self.WIDTH + margin
+			local trailing = nil
+			for _, row in ipairs(tState.fish) do
+				if row.lane == lane and (trailing == nil or direction * row.x < direction * trailing) then trailing = row.x end
+			end
+			if trailing == nil then
+				self:AddFish(tState, lane, edge)
+			elseif direction * (trailing - edge) >= self.SPACING then
+				self:AddFish(tState, lane, trailing - direction * self.SPACING)
+			end
+		end
+	end
+
+	method boolean Fire(any tState, number x)
+		if tState.stage ~= self.STAGE_PLAYING or tState.stun > self.TIME_EPSILON or tState.cooldown > self.TIME_EPSILON
+			or tState.shotPhase ~= self.PHASE_IDLE or tState.remaining <= 0 then return false end
+		tState.playerX = math.max(self.PLAYER_MARGIN, math.min(self.WIDTH - self.PLAYER_MARGIN, x))
+		tState.shotX = tState.playerX
+		tState.shotPhase = self.PHASE_UP
+		tState.phaseElapsed = 0
+		tState.tipY = self.IDLE_TIP_Y
+		tState.caught = 0
+		tState.goldCaught = 0
+		tState.hasGold = false
+		tState.caughtLanes = {}
+		return true
+	end
+
+	method void CancelShot(any tState)
+		tState.shotPhase = self.PHASE_IDLE
+		tState.tipY = self.IDLE_TIP_Y
+		tState.phaseElapsed = 0
+		tState.caught = 0
+		tState.goldCaught = 0
+		tState.hasGold = false
+		tState.caughtLanes = {}
+	end
+
+	method void EndClock(any tState)
+		tState.remaining = 0
+		tState.stage = self.STAGE_SETTLING
+		self:CancelShot(tState)
+		tState.rank = self:RankForScore(tState.score)
+	end
+
+	method boolean Collide(any tState, number oldTip, number newTip, any oldX)
+		-- 실제 통과 순서대로 판정, 행 중복은 물고기에만 적용
+		if oldTip == newTip then return false end
+		local up = newTip < oldTip
+		for order = 1, 4 do
+			local lane = up and 5 - order or order
+			local y = self.LANE_Y[lane]
+			local crossed = (up and oldTip > y and newTip <= y) or (not up and oldTip < y and newTip >= y)
+			if crossed then
+				local fraction = (y - oldTip) / (newTip - oldTip)
+				for index = #tState.fish, 1, -1 do
+					local row = tState.fish[index]
+					if row.lane == lane then
+						local previousX = oldX[row.id] or row.x
+						local x = previousX + (row.x - previousX) * fraction
+						local radius = row.kind == self.KIND_BOMB and self.BOMB_HIT_RADIUS or self.FISH_HIT_RADIUS
+						if math.abs(x - tState.shotX) <= radius then
+							if row.kind == self.KIND_BOMB then
+								self:RecordHitEffect(tState, row.kind, x, y, 0, row.id)
+								table.remove(tState.fish, index)
+								tState.remaining = math.max(0, tState.remaining - self.BOMB_PENALTY)
+								tState.stun = self.STUN_SECONDS
+								tState.cooldown = self.COOLDOWN_SECONDS
+								-- 발사 도중 조준 이동과 무관하게 발사 열에서 스턴 고정
+								tState.playerX = tState.shotX
+								self:CancelShot(tState)
+								if tState.remaining <= 0 then self:EndClock(tState) end
+								return true
+							elseif up and not tState.caughtLanes[lane] then
+								local previousPoints = self:CalculateShotPoints(tState)
+								tState.caughtLanes[lane] = true
+								tState.caught = tState.caught + 1
+								tState.hasGold = tState.hasGold or row.kind == self.KIND_GOLD
+								if row.kind == self.KIND_GOLD then tState.goldCaught = tState.goldCaught + 1 end
+								self:RecordHitEffect(tState, row.kind, x, y, self:CalculateShotPoints(tState) - previousPoints, row.id)
+								table.remove(tState.fish, index)
+							end
+						end
+					end
+				end
+			end
+		end
+		return false
+	end
+
+	method integer CalculateShotPoints(any tState)
+		-- 적중 증가분과 회수 완료 합산에 동일한 콤보 점수 적용
+		if tState.caught == 4 and tState.goldCaught == 4 then return self.ALL_GOLD_POINTS end
+		local points = 100 * tState.caught * tState.caught
+		if tState.hasGold then points = points * 1.5 end
+		return math.floor(points)
+	end
+
+	method void RecordHitEffect(any tState, string kind, number x, number y, integer points, integer fishId)
+		-- 서버 적중 순번으로 스냅샷 중복 재생 방지, 보관 개수 제한
+		tState.hitSequence = tState.hitSequence + 1
+		table.insert(tState.hitEffects, {id = tState.hitSequence, fishId = fishId, kind = kind, x = x, y = y, time = tState.elapsed, points = points})
+		if #tState.hitEffects > self.MAX_HIT_EFFECTS then table.remove(tState.hitEffects, 1) end
+	end
+
+	method void Advance(any tState, number delta)
+		-- 시간 만료와 회수 완료를 분할 처리, 동시 발생 시 시간 만료 우선
+		if tState.stage ~= self.STAGE_PLAYING or delta <= 0 then return end
+		local left = delta
+		local iterations = 0
+		local oldX = tState.shotPhase ~= self.PHASE_IDLE and {} or nil
+		local laneDistances = {}
+		while left > self.TIME_EPSILON and tState.stage == self.STAGE_PLAYING do
+			iterations = iterations + 1
+			if iterations > 10000 then
+				log_error("[Fishing] 진행 정지 phase=" .. tostring(tState.shotPhase) .. " phaseElapsed=" .. tostring(tState.phaseElapsed)
+					.. " tip=" .. tostring(tState.tipY) .. " left=" .. tostring(left))
+				break
+			end
+			local phaseSeconds = tState.shotPhase == self.PHASE_UP and self.UP_SECONDS or self.RETURN_SECONDS
+			local step = math.min(left, self.MAX_STEP, tState.remaining)
+			if tState.shotPhase ~= self.PHASE_IDLE then step = math.min(step, math.max(0, phaseSeconds - tState.phaseElapsed)) end
+			if tState.shotPhase ~= self.PHASE_IDLE then
+				local up = tState.shotPhase == self.PHASE_UP
+				local speed = (self.IDLE_TIP_Y - self.TOP_TIP_Y) / phaseSeconds
+				for _, y in ipairs(self.LANE_Y) do
+					local distance = up and tState.tipY - y or y - tState.tipY
+					if distance > self.POSITION_EPSILON then step = math.min(step, distance / speed) end
+				end
+			end
+			local oldTip = tState.tipY
+			-- 같은 행의 이동량은 한 번만 계산하고 충돌용 좌표는 발사 중에만 보관
+			for lane = 1, #self.LANE_Y do
+				laneDistances[lane] = self:LaneDirection(lane) * self:LaneDistance(lane, tState.elapsed, tState.elapsed + step)
+			end
+			for _, row in ipairs(tState.fish) do
+				if oldX ~= nil then oldX[row.id] = row.x end
+				row.x = row.x + laneDistances[row.lane]
+			end
+			tState.elapsed = tState.elapsed + step
+			tState.remaining = math.max(0, tState.remaining - step)
+			tState.cooldown = math.max(0, tState.cooldown - step)
+			tState.stun = math.max(0, tState.stun - step)
+			left = left - step
+			if tState.remaining <= self.TIME_EPSILON then self:EndClock(tState) break end
+			if tState.shotPhase ~= self.PHASE_IDLE then
+				tState.phaseElapsed = tState.phaseElapsed + step
+				local fraction = math.min(1, tState.phaseElapsed / phaseSeconds)
+				if tState.shotPhase == self.PHASE_UP then
+					tState.tipY = self.IDLE_TIP_Y + (self.TOP_TIP_Y - self.IDLE_TIP_Y) * fraction
+				else
+					tState.tipY = self.TOP_TIP_Y + (self.IDLE_TIP_Y - self.TOP_TIP_Y) * fraction
+				end
+				local bomb = self:Collide(tState, oldTip, tState.tipY, oldX)
+				if not bomb and tState.phaseElapsed >= phaseSeconds - self.TIME_EPSILON then
+					if tState.shotPhase == self.PHASE_UP then
+						tState.shotPhase = self.PHASE_RETURN
+						tState.phaseElapsed = 0
+					else
+						local points = self:CalculateShotPoints(tState)
+						local timeBonus = tState.caught == 4 and self.TIME_BONUS or 0
+						if tState.caught == 4 and tState.goldCaught == 4 then
+							timeBonus = self.ALL_GOLD_TIME_BONUS
+							log("[VRF] 황금 물고기 4마리 points=" .. tostring(points) .. " bonus=" .. tostring(timeBonus))
+						end
+						tState.score = tState.score + math.floor(points)
+						tState.remaining = tState.remaining + timeBonus
+						self:CancelShot(tState)
+						tState.cooldown = self.COOLDOWN_SECONDS
+					end
+				end
+			end
+			for index = #tState.fish, 1, -1 do
+				local row = tState.fish[index]
+				if (self:LaneDirection(row.lane) > 0 and row.x > self.WIDTH + self.FISH_HALF_WIDTH)
+					or (self:LaneDirection(row.lane) < 0 and row.x < -self.FISH_HALF_WIDTH) then table.remove(tState.fish, index) end
+			end
+			self:Refill(tState)
+		end
+	end
+end

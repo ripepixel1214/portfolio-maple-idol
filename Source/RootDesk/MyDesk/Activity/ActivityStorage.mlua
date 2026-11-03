@@ -1,0 +1,262 @@
+-- ActivityManager가 사용하는 서버 권위 활동 해금 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script ActivityStorage extends Logic
+
+	property string activityStorageKey = "activityUnlockData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedActivitiesString = ""
+
+	property boolean canSaveActivities = false
+
+	property boolean isActivitiesSaveInProgress = false
+
+	property string pendingActivitiesUserId = ""
+
+	property string pendingActivitiesString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadActivities(string userId)
+		-- UserDataStorage에서 추가 해금 활동 id 목록을 읽고, 없으면 빈 목록을 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[ActivityStorage] userId is required")
+			self.loadedActivitiesString = ""
+			self.canSaveActivities = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedActivitiesString = userStorage:GetAndWait(self.activityStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedActivitiesString = ""
+			self.canSaveActivities = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedActivitiesString = ""
+			self.canSaveActivities = false
+			return nil
+		end
+
+		if storedActivitiesString == nil or storedActivitiesString == "" then
+			self.loadedActivitiesString = ""
+			self.canSaveActivities = true
+			return {}
+		end
+
+		local loadedActivityIds = self:CreateActivityIdsFromString(storedActivitiesString)
+		if loadedActivityIds == nil then
+			log_warning("[ActivityStorage] activity load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedActivitiesString = storedActivitiesString
+			self.canSaveActivities = false
+			return nil
+		end
+
+		self.loadedActivitiesString = storedActivitiesString
+		self.canSaveActivities = true
+		return loadedActivityIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveActivitiesAsync(string userId, any activityIds)
+		-- 추가 해금 활동 id 목록을 v1 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveActivities == false then
+			log_warning("[ActivityStorage] activity save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[ActivityStorage] userId is required")
+			return
+		end
+
+		local activitiesString = self:CreateActivitiesStringFromActivityIds(activityIds)
+		if activitiesString == "" then
+			log_warning("[ActivityStorage] activityIds are invalid")
+			return
+		end
+
+		if activitiesString == self.loadedActivitiesString then
+			return
+		end
+
+		if self.isActivitiesSaveInProgress then
+			self.pendingActivitiesUserId = userId
+			self.pendingActivitiesString = activitiesString
+			return
+		end
+
+		self:SaveActivitiesStringAsync(userId, activitiesString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveActivitiesStringAsync(string userId, string activitiesString)
+		-- 직렬화된 활동 해금 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isActivitiesSaveInProgress = true
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.activityStorageKey, activitiesString, function(errorCode, key)
+			self:OnActivitiesSaveCompleted(userId, activitiesString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnActivitiesSaveCompleted(string userId, string activitiesString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청이 있으면 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.loadedActivitiesString = activitiesString
+		end
+
+		self.isActivitiesSaveInProgress = false
+		self:CheckPendingActivitiesSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingActivitiesSave()
+		-- 대기 중인 최신 활동 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.pendingActivitiesString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingActivitiesUserId
+		local pendingActivitiesString = self.pendingActivitiesString
+		self.pendingActivitiesUserId = ""
+		self.pendingActivitiesString = ""
+
+		if pendingActivitiesString == self.loadedActivitiesString then
+			return
+		end
+
+		self:SaveActivitiesStringAsync(pendingUserId, pendingActivitiesString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateActivityIdsFromString(string activitiesString)
+		-- 저장 문자열을 추가 해금 활동 id 목록으로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(activitiesString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[ActivityStorage] activity save string parse failed")
+			return nil
+		end
+
+		return self:CreateActivityIdsFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateActivitiesStringFromActivityIds(any activityIds)
+		-- 추가 해금 활동 id 목록을 DataStorage에 넣을 v1 저장 문자열로 만듭니다.
+		if activityIds == nil or type(activityIds) ~= "table" then
+			return ""
+		end
+
+		local normalizedActivityIds = self:CreateNormalizedActivityIds(activityIds)
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.activityCount = #normalizedActivityIds
+
+		for index, activityId in ipairs(normalizedActivityIds) do
+			local suffix = tostring(index)
+			tFlatPlainTable["activityId" .. suffix] = activityId
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateActivityIdsFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 복원한 flat plain table의 버전을 확인하고 추가 해금 활동 id 목록으로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion == 0 or saveVersion == 1 then
+			return self:CreateActivityIdsFromFlatPlainTableV1(tFlatPlainTable)
+		end
+
+		log_warning("[ActivityStorage] unsupported activity saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateActivityIdsFromFlatPlainTableV1(any tFlatPlainTable)
+		-- v1 flat plain table을 추가 해금 활동 id 목록으로 정규화합니다.
+		local activityCount = self:NormalizeInteger(tFlatPlainTable.activityCount, 0, 0)
+		local activityIds = {}
+
+		for index = 1, activityCount do
+			local activityId = self:NormalizeString(tFlatPlainTable["activityId" .. tostring(index)], "")
+			self:AddActivityIdIfValid(activityIds, activityId)
+		end
+
+		return activityIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateNormalizedActivityIds(any activityIds)
+		-- 활동 id 목록에서 빈 값과 중복을 제거한 목록을 만듭니다.
+		if activityIds == nil or type(activityIds) ~= "table" then
+			return nil
+		end
+
+		local normalizedActivityIds = {}
+
+		for _, activityId in ipairs(activityIds) do
+			self:AddActivityIdIfValid(normalizedActivityIds, activityId)
+		end
+
+		return normalizedActivityIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddActivityIdIfValid(any activityIds, string activityId)
+		-- 저장 목록에 빈 값과 중복을 제외한 activityId만 추가합니다.
+		if activityIds == nil or type(activityIds) ~= "table" then
+			return
+		end
+
+		local normalizedActivityId = self:NormalizeString(activityId, "")
+		if normalizedActivityId == "" then
+			return
+		end
+
+		for _, unlockedActivityId in ipairs(activityIds) do
+			if unlockedActivityId == normalizedActivityId then
+				return
+			end
+		end
+
+		table.insert(activityIds, normalizedActivityId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

@@ -29,7 +29,9 @@ script UIDebugLogic extends Logic
 
 	property string debugIntimacyCharacterId = "character_lucid"
 
-	property number debugIntimacyDelta = 10
+	property integer debugIntimacyDelta = 50
+
+	property integer debugMesoDelta = 1000
 
 	property string debugUnlockCharacterId = "character_orca"
 
@@ -39,13 +41,90 @@ script UIDebugLogic extends Logic
 
 	property integer debugInitialActionPointTimerId = 0
 
-	method void OnBeginPlay()
-		-- 테스트용 키 입력 이벤트를 연결합니다.
-		if self:IsClient() == true then
-			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Event
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- 기존 미니게임 키와 겹치지 않게 메이커 디버그 입력을 Ctrl+숫자로 처리합니다.
+		if Environment:IsMakerPlay() == false or event == nil then return end
+		if _InputService:IsKeyPressed(KeyboardKey.LeftControl) == false and _InputService:IsKeyPressed(KeyboardKey.RightControl) == false then return end
+
+		if event.key == KeyboardKey.Alpha1 then
+			self:RequestGrantDebugMeso()
+		elseif event.key == KeyboardKey.Alpha2 then
+			self:RequestDebugIntimacy()
+		elseif event.key == KeyboardKey.Alpha3 then
+			self:SelectDebugCharacter(-1)
+		elseif event.key == KeyboardKey.Alpha4 then
+			self:SelectDebugCharacter(1)
+		elseif event.key == KeyboardKey.Alpha5 then
+			self:RequestToggleDebugUnlockAllCharacters()
+		elseif event.key == KeyboardKey.Alpha8 then
+			self:ShowCurrentDebugCharacter()
 		end
 	end
 
+	@ExecSpace("Client")
+	method void ShowDebugMessage(string message, string characterId)
+		-- 디버그 키의 적용 결과와 현재 대상을 로그 대신 화면에 표시합니다.
+		if Environment:IsMakerPlay() == false then return end
+		if characterId ~= "" then message = _RuntimeActorManager:ClientGetLocalizedActorName(characterId) .. " · " .. message end
+		_UIToast:ShowMessage(message)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Debug
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("Server")
+	method void RequestGrantDebugMeso()
+		-- 메이커 테스트 유저에게 고정 메소를 지급하고 기존 진행도 저장·동기화를 사용합니다.
+		if Environment:IsMakerPlay() == false or _ProgressManager:CanUseProgress(senderUserId) == false then return end
+		local delta = ProgressStatDelta()
+		delta.meso = self.debugMesoDelta
+		if _ProgressManager:ApplyProgressStat(delta:ToPlainTable()) == false then return end
+		_ProgressManager:SaveProgressToStorage()
+		_ProgressManager:PushProgressToClient(senderUserId)
+		self:ShowDebugMessage("메소 +" .. tostring(self.debugMesoDelta), "", senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestGrantDebugIntimacy(string characterId)
+		-- 메이커에서 선택한 캐릭터의 친밀도를 올리고 실제 에피소드 해금·저장 경로를 실행합니다.
+		if Environment:IsMakerPlay() == false or _CharacterManager:CanUseCharacters(senderUserId) == false then return end
+		local delta = CharacterStatDelta()
+		delta.characterId = characterId
+		delta.intimacy = self.debugIntimacyDelta
+		if _CharacterManager:ApplyCharacterStatWithCommit(delta:ToPlainTable(), senderUserId) == false then return end
+		local character = _CharacterManager:ServerGetCharacterById(characterId)
+		self:ShowDebugMessage("친밀도 +" .. tostring(self.debugIntimacyDelta) .. " (현재 " .. string.format("%.0f", character.intimacy) .. ")", characterId, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestToggleDebugUnlockAllCharacters()
+		-- 실제 보유 데이터는 건드리지 않고 메이커 전체 임시 해금 표시·편성 허용을 전환합니다.
+		if Environment:IsMakerPlay() == false or _CharacterManager:CanUseCharacters(senderUserId) == false then return end
+		_CharacterManager.debugUnlockAllCharacters = not _CharacterManager.debugUnlockAllCharacters
+		_CharacterManager:PushCharactersToClient(senderUserId)
+		self:ShowDebugMessage("전체 임시 해금 " .. (_CharacterManager.debugUnlockAllCharacters and "ON" or "OFF (실제 보유 상태)"), "", senderUserId)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 메이커 플레이에서만 테스트용 키 입력 이벤트를 연결합니다.
+		if Environment:IsMakerPlay() == false then return end
+		self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+	end
+
+	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
 		-- 테스트용 키 입력 이벤트 연결을 해제합니다.
 		self:ClearDebugInitialActionPointTimer()
@@ -57,52 +136,36 @@ script UIDebugLogic extends Logic
 		self.keyDownHandler = nil
 	end
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	@ExecSpace("ClientOnly")
-	method void OnKeyDown(KeyDownEvent event)
-		-- 테스트용 키 입력을 처리합니다.
-		if true then
+	method void SelectDebugCharacter(integer direction)
+		-- 전체 아카이브의 ID 순서로 친밀도 지급 대상을 순환합니다. 실제 스테이지 편성은 바꾸지 않습니다.
+		local characters = _CharacterManager:ClientGetCharacters()
+		if #characters == 0 then
+			_UIToast:ShowMessage("캐릭터 데이터를 기다려주세요.")
 			return
 		end
+		table.sort(characters, function(left, right) return left.id < right.id end)
+		local currentIndex = direction > 0 and 0 or 1
+		for index, character in ipairs(characters) do if character.id == self.debugIntimacyCharacterId then currentIndex = index; break end end
+		local nextIndex = (currentIndex - 1 + direction) % #characters + 1
+		self.debugIntimacyCharacterId = characters[nextIndex].id
+		self:ShowCurrentDebugCharacter()
+	end
 
-		if event.key == KeyboardKey.R then
-			self:OpenDebugDialog()
+	@ExecSpace("ClientOnly")
+	method void ShowCurrentDebugCharacter()
+		-- 현재 친밀도 테스트 대상과 친밀도·레벨을 표시합니다.
+		local character = _CharacterManager:ClientGetCharacterById(self.debugIntimacyCharacterId)
+		if character == nil then
+			_UIToast:ShowMessage("캐릭터 데이터를 기다려주세요.")
+			return
 		end
-
-		if event.key == KeyboardKey.Alpha5 then
-			self:SelectDebugDailyDialog(-1)
-		end
-
-		if event.key == KeyboardKey.Alpha6 then
-			self:SelectDebugDailyDialog(1)
-		end
-
-		if event.key == KeyboardKey.O then
-			self:StartDebugWeeklyPresentation(1)
-		end
-
-		if event.key == KeyboardKey.P then
-			self:StartDebugWeeklyPresentation(2)
-		end
-
-		if event.key == KeyboardKey.Alpha1 then
-			_ItemManager:RequestUnlockItem("photoCard_lucid_lv3")
-		end
-
-		if event.key == KeyboardKey.Alpha7 then
-			self:RequestDebugUnlockCharacter()
-		end
-
-		if event.key == KeyboardKey.Alpha8 then
-			self:RequestDebugIntimacy()
-		end
-
-		if event.key == KeyboardKey.Alpha9 then
-			self:RequestDebugActionPointDelta(-self.debugActionPointDelta)
-		end
-
-		if event.key == KeyboardKey.Alpha0 then
-			self:RequestDebugActionPointDelta(self.debugActionPointDelta)
-		end
+		local level = _IntimacyLevelMaster:GetCurrentLevel(character.intimacy)
+		self:ShowDebugMessage("테스트 대상 · 친밀도 " .. string.format("%.0f", character.intimacy) .. " · Lv." .. tostring(level), character.id)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -140,21 +203,25 @@ script UIDebugLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method integer GetDebugDailyDialogCount()
+		-- 기존 일상 대화 테스트 목록의 항목 수를 반환합니다.
 		return 12
 	end
 
 	@ExecSpace("ClientOnly")
 	method string GetSelectedDebugDailyDialogKey()
+		-- 선택한 일상 대화의 키를 반환합니다.
 		return self:GetDebugDailyDialogKey(self.debugDailyDialogIndex)
 	end
 
 	@ExecSpace("ClientOnly")
 	method string GetSelectedDebugDailyDialogId()
+		-- 선택한 일상 대화의 ID를 반환합니다.
 		return self:GetDebugDailyDialogId(self.debugDailyDialogIndex)
 	end
 
 	@ExecSpace("ClientOnly")
 	method string GetDebugDailyDialogKey(integer index)
+		-- 기존 일상 대화 테스트 인덱스에 대응하는 키를 반환합니다.
 		if index == 1 then
 			return "episode_lucid_dessert"
 		elseif index == 2 then
@@ -186,6 +253,7 @@ script UIDebugLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method string GetDebugDailyDialogId(integer index)
+		-- 기존 일상 대화 테스트 인덱스에 대응하는 ID를 반환합니다.
 		if index == 1 then
 			return "episode_lucid_dessert"
 		elseif index == 2 then
@@ -251,22 +319,8 @@ script UIDebugLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RequestDebugIntimacy()
-		-- 디버그 키 8 입력으로 루시드의 친밀도 경험치를 증가시키도록 서버에 요청합니다.
-		if _CharacterManager == nil then
-			log_warning("[UIDebugLogic] CharacterManager is nil")
-			return
-		end
-
-		local tDelta = {}
-		tDelta.characterId = self.debugIntimacyCharacterId
-		tDelta.vocal = 0
-		tDelta.dance = 0
-		tDelta.visual = 0
-		tDelta.fatigue = 0
-		tDelta.intimacy = self.debugIntimacyDelta
-
-		_CharacterManager:RequestApplyCharacterStat(tDelta)
-		log("[UIDebugLogic] request intimacy +" .. tostring(self.debugIntimacyDelta) .. " characterId=" .. tostring(self.debugIntimacyCharacterId))
+		-- 현재 테스트 대상의 친밀도 증가를 메이커 전용 서버 요청으로 전달합니다.
+		self:RequestGrantDebugIntimacy(self.debugIntimacyCharacterId)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -301,10 +355,10 @@ script UIDebugLogic extends Logic
 		-- 리린/루시드/시그너스 테스트 편성 데이터를 만듭니다.
 		local weeklyPlan = {}
 
-		weeklyPlan[1] = self:CreateDebugWeeklyPlanSlot("character_lilin", "training_basic_dance")
-		weeklyPlan[2] = self:CreateDebugWeeklyPlanSlot("character_lucid", "training_basic_vocal")
-		weeklyPlan[3] = self:CreateDebugWeeklyPlanSlot("character_cygnus", "training_basic_visual")
-		weeklyPlan[4] = self:CreateDebugWeeklyPlanSlot("character_lilin", "training_middle_dance")
+		weeklyPlan[1] = self:CreateDebugWeeklyPlanSlot("character_lilin", "performance_busking")
+		weeklyPlan[2] = self:CreateDebugWeeklyPlanSlot("character_lucid", "performance_mlive")
+		weeklyPlan[3] = self:CreateDebugWeeklyPlanSlot("character_cygnus", "performance_concert")
+		weeklyPlan[4] = self:CreateDebugWeeklyPlanSlot("character_lilin", "performance_mlive")
 		weeklyPlan[5] = self:CreateDebugWeeklyPlanSlot("character_lucid", "performance_mlive")
 
 		return weeklyPlan
@@ -317,9 +371,9 @@ script UIDebugLogic extends Logic
 
 		weeklyPlan[1] = self:CreateDebugWeeklyPlanSlot("character_lilin", "performance_busking")
 		weeklyPlan[2] = self:CreateDebugWeeklyPlanSlot("character_lucid", "performance_concert")
-		weeklyPlan[3] = self:CreateDebugWeeklyPlanSlot("character_cygnus", "rest_dessert")
-		weeklyPlan[4] = self:CreateDebugWeeklyPlanSlot("character_lilin", "rest_nap")
-		weeklyPlan[5] = self:CreateDebugWeeklyPlanSlot("character_lucid", "rest_parkWalk")
+		weeklyPlan[3] = self:CreateDebugWeeklyPlanSlot("character_cygnus", "performance_busking")
+		weeklyPlan[4] = self:CreateDebugWeeklyPlanSlot("character_lilin", "performance_mlive")
+		weeklyPlan[5] = self:CreateDebugWeeklyPlanSlot("character_lucid", "performance_concert")
 
 		return weeklyPlan
 	end

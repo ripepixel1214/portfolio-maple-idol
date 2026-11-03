@@ -1,4 +1,4 @@
----@description "미니게임 규칙 상태를 공통 결과 계약으로 변환하는 로직"
+---@description "미니게임 규칙 상태를 공통 결과 계약으로 변환 로직"
 @Logic
 script MiniGameResultResolver extends Logic
 

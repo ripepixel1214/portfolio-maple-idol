@@ -1,0 +1,89 @@
+---@description "낚시 표시 개체의 참조 캐시와 풀 초기화 상태"
+@Struct
+script MiniGameFishingVisual
+	property Entity entity = nil
+	property UITransformComponent transform = nil
+	property SpriteGUIRendererComponent renderer = nil
+	property Entity marker = nil
+	property UITransformComponent markerTransform = nil
+	property TextGUIRendererComponent markerText = nil
+	property TextGUIRendererComponent labelText = nil
+	property CanvasGroupComponent canvas = nil
+	property Vector2 baseSize = Vector2(100, 100)
+	property Vector3 baseScale = Vector3(1, 1, 1)
+	property Vector3 baseRotation = Vector3(0, 0, 0)
+	property Color baseColor = Color(1, 1, 1, 1)
+	property boolean baseFlipX = false
+	property boolean baseFlipY = false
+	property Vector2 baseMarkerPosition = Vector2(0, 0)
+	property number baseAlpha = 1
+	property string kind = ""
+	property integer fishId = 0
+	-- 서버 스냅샷과 무관한 누적 이동의 기준 좌표
+	property number pathOffset = 0
+	property integer lane = 0
+	property number layoutWidth = -1
+	property number layoutHeight = -1
+	property number y = 0
+	property boolean active = false
+	-- 실제 UI 사각형의 배치 반영을 기다리는 표시 대기 상태
+	property boolean pendingReveal = false
+	property boolean isHit = false
+	property boolean isBomb = false
+	property boolean inPool = false
+	-- 풀 반환 전에 취소할 적중 표시 트윈 핸들
+	property integer tweenId = 0
+
+	method void Initialize(Entity entity, Entity marker, TextGUIRendererComponent label)
+		-- 복제 시점의 에디터 설정과 반복 접근하는 컴포넌트 보존
+		self.entity = entity
+		self.transform = entity.UITransformComponent
+		self.renderer = entity.SpriteGUIRendererComponent
+		self.canvas = entity.CanvasGroupComponent
+		self.baseSize = self.transform.RectSize
+		self.baseScale = self.transform.UIScale
+		self.baseRotation = self.transform.UIRotation
+		self.baseColor = self.renderer.Color
+		self.baseFlipX = self.renderer.FlipX
+		self.baseFlipY = self.renderer.FlipY
+		if self.canvas ~= nil then self.baseAlpha = self.canvas.GroupAlpha end
+		self.marker = marker
+		if isvalid(self.marker) then
+			self.markerTransform = self.marker.UITransformComponent
+			self.markerText = self.marker.TextGUIRendererComponent
+			self.baseMarkerPosition = self.markerTransform.anchoredPosition
+		end
+		self.labelText = label
+	end
+
+	method void Reset(Vector2 poolPosition)
+		-- 비활성 상태에서 화면 밖 대기 좌표와 템플릿 표시 상태로 복원
+		if self.canvas ~= nil then self.canvas.GroupAlpha = 0 end
+		self.renderer.Enable = false
+		if self.markerText ~= nil then self.markerText.Enable = false end
+		if self.labelText ~= nil then self.labelText.Enable = false end
+		self.entity.Enable = false
+		self.transform.anchoredPosition = poolPosition
+		self.transform.RectSize = self.baseSize
+		self.transform.UIScale = self.baseScale
+		self.transform.UIRotation = self.baseRotation
+		self.renderer.Color = self.baseColor
+		self.renderer.FlipX = self.baseFlipX
+		self.renderer.FlipY = self.baseFlipY
+		if isvalid(self.marker) then
+			self.marker.Enable = false
+			self.markerTransform.anchoredPosition = self.baseMarkerPosition
+			self.markerText.Text = ""
+		end
+		if self.labelText ~= nil then self.labelText.Text = "" end
+		if self.canvas ~= nil then self.canvas.GroupAlpha = 0 end
+		self.active = false
+		self.pendingReveal = false
+		self.kind = ""
+		self.fishId = 0
+		self.pathOffset = 0
+		self.lane = 0
+		self.layoutWidth = -1
+		self.layoutHeight = -1
+	end
+end

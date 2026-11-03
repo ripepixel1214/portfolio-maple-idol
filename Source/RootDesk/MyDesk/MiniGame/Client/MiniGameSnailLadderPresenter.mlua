@@ -1,0 +1,130 @@
+---@description "달팽이 사다리 입력과 서버 상태의 화면 연결"
+@Logic
+script MiniGameSnailLadderPresenter extends Logic
+	property any tModel = nil
+	property any view = nil
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- 진행 데이터의 야시장 코인으로 실제 로비 표시
+		local progress = _ProgressManager:ClientGetProgress()
+		local balance = progress ~= nil and math.floor(progress.nightMarketCoin or 0) or 0
+		self:OpenLobbyWithBalance(balance, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenDebugLobby(integer testBalance)
+		-- Maker 디버그 진입을 가상 코인 로비로 제한
+		if not Environment:IsMakerPlay() then return end
+		self:OpenLobbyWithBalance(testBalance, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobbyWithBalance(integer balance, boolean debugMode)
+		-- 프리셋과 View 계약 검증 후 100코인 로비 표시
+		if _MiniGamePlayLogic.isPlaying or _MiniGameManager:IsNightMarketMiniGameUiBusy() then return end
+		local rule = _MiniGameSnailLadderRule
+		local preset = _MiniGameTable:FindMiniGame(rule.MINI_GAME_ID)
+		if preset == nil then return end
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then return end
+		_MiniGamePlayLogic:RetainPresentationBehavior(_MiniGameClientHandlerRegistry:Resolve(preset.gameKind))
+		if not _MiniGameUIRouter:SetPresentation(presentationId) then return end
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_SNAIL_LADDER)
+		self.tModel = MiniGameSnailLadderModel()
+		self.tModel:OpenLobby(balance, debugMode)
+		self.view:OpenLobby()
+		self:Render()
+		log("[VRF][SnailLadder] 코인 로비 표시 debug=" .. tostring(debugMode) .. " balance=" .. tostring(balance))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginSession(any tContext)
+		-- 서버 세션의 잔액과 ID를 전용 표시 모델로 반영
+		if tContext == nil or tContext.sessionId == "" then return end
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_SNAIL_LADDER)
+		self.tModel = MiniGameSnailLadderModel()
+		self.tModel:OpenLobby(tContext.balance or 0, false)
+		self.tModel.sessionId = tContext.sessionId
+		self.tModel.tState.bet = tContext.betAmount or _MiniGameSnailLadderRule.ENTRY_COIN
+		self.tModel.tState.stage = _MiniGameSnailLadderRule.STAGE_READY
+		self.tModel.requestPending = true
+		self:Render()
+		log("[VRF][SnailLadder] 서버 세션 표시 session=" .. tContext.sessionId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Choose(integer lane)
+		-- 첫 선택은 세션을 만들고 재시도는 활성 서버 세션에 전달
+		if self.tModel == nil then return end
+		if not self.tModel:TryChoose(lane) then
+			self:Render()
+			return
+		end
+		self:Render()
+		if self.tModel.sessionId == "" then
+			_MiniGameManager:RequestStartSnailLadder(lane, self.tModel.tState.isDebug)
+		else
+			_MiniGameManager:RequestSnailLadderChoice(self.tModel.sessionId, lane)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyState(string sessionId, any tState)
+		-- 서버 경로와 정산 결과만 표시하고 완료된 세션 잠금 해제
+		if self.tModel == nil or not self.tModel:ApplyState(sessionId, tState) then return end
+		self:Render()
+		if tState.stage == _MiniGameSnailLadderRule.STAGE_RESULT then
+			_MiniGamePlayLogic:FinishSelectionSessionFromServer(sessionId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleRejected(string miniGameId, string reason)
+		-- 시작 거절 시 대기 상태 해제 후 로비 유지
+		if miniGameId ~= _MiniGameSnailLadderRule.MINI_GAME_ID or self.tModel == nil then return end
+		self.tModel.requestPending = false
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render()
+		-- 모델을 복사한 표시 Struct만 View에 전달
+		if self.tModel == nil or self.view == nil then return end
+		local tState = MiniGameSnailLadderState():FromPlainTable(self.tModel.tState:ToPlainTable())
+		self.view:RenderState(tState, self.tModel.requestPending)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 로비 또는 결과에서만 취소하고 View 참조 정리
+		if self.tModel == nil or not self.tModel:CanClose() then return end
+		if _MiniGamePlayLogic.isPlaying then
+			_MiniGameManager:RequestCancelMiniGame(self.tModel.sessionId)
+			_MiniGamePlayLogic:StopSession(_MiniGamePlayLogic.RESULT_REASON_CANCEL)
+		end
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndSession()
+		-- 결과 화면은 사용자 확인 전까지 유지
+		if self.tModel ~= nil and self.tModel.tState.stage ~= _MiniGameSnailLadderRule.STAGE_RESULT then
+			self:ClearState()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearState()
+		-- 화면과 모델 참조 해제
+		if self.view ~= nil then self.view:Close() end
+		self.tModel = nil
+		self.view = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 남은 표시 상태 해제
+		self:ClearState()
+	end
+end

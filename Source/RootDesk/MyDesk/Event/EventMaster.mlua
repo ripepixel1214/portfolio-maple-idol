@@ -10,6 +10,8 @@ script EventMaster extends Logic
 	-- EventTable row plain table[]
 	property any tEvents = {}
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 이벤트 정적 데이터는 클라이언트와 서버 양쪽에서 조회하므로 시작 시 캐시를 준비합니다.
 		self:EnsureEventTableLoaded()
@@ -60,9 +62,9 @@ script EventMaster extends Logic
 		tEvent.descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
 		tEvent.name = ""
 		tEvent.description = ""
-		if _LocalizationLogic ~= nil then
-			tEvent.name = _LocalizationLogic:GetText(tEvent.nameKey, "")
-			tEvent.description = _LocalizationLogic:GetText(tEvent.descriptionKey, "")
+		if _LocaleTextUtil ~= nil then
+			tEvent.name = _LocaleTextUtil:GetText(tEvent.nameKey)
+			tEvent.description = _LocaleTextUtil:GetText(tEvent.descriptionKey)
 		end
 		tEvent.eventType = _EEventType:FromKey(_DataTableUtil:SafeGetString(dataSet, rowIndex, "eventType", ""))
 		tEvent.dialogId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "dialogId", "")

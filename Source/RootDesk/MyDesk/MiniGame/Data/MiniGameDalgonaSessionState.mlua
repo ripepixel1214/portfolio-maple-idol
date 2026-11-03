@@ -1,0 +1,9 @@
+@Struct
+script MiniGameDalgonaSessionState
+
+	-- 서버 입력 규칙이 검증한 배치 table
+	property any selection = nil
+	property boolean drawInProgress = false
+	property any tDrawResult = nil
+
+end

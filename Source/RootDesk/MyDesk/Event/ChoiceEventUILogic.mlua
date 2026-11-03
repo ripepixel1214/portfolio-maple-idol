@@ -44,6 +44,8 @@ script ChoiceEventUILogic extends Logic
 
 	property any tChoiceBasePositions = {}
 
+	-- Public API
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- choice 이벤트 UI를 초기화하고 버튼 클릭 이벤트를 연결합니다.
@@ -193,6 +195,8 @@ script ChoiceEventUILogic extends Logic
 		_EventExecutor:RequestExecuteEvent(eventId, self.choiceCharacterId)
 		self:Close()
 	end
+
+	-- Private Methods
 
 	@ExecSpace("ClientOnly")
 	method ButtonComponent GetChoiceButtonComponent(integer index)
@@ -391,4 +395,5 @@ script ChoiceEventUILogic extends Logic
 
 		canvasGroup.GroupAlpha = math.max(0, math.min(alpha, 1))
 	end
+
 end

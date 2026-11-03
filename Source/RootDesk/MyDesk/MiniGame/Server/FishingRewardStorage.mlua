@@ -1,0 +1,188 @@
+---@description "낚시 보상과 쿠키 소비를 원자적으로 저장하고 거래별 중복 방지"
+@Logic
+script FishingRewardStorage extends Logic
+	property string STORAGE_KEY = "fishingRewards"
+	property string RECEIPT_PREFIX = "fishingTxn_"
+	property string RECEIPT_TAG = "fishing_transaction"
+	property string INITIALIZATION_MEMORY = "FishingRewardInitialization"
+	property string INITIALIZATION_PREFIX = "Init_"
+	property string KIND_REWARD = "reward"
+	property string KIND_COOKIE = "cookie"
+	property integer CONFLICT_CODE = 2000000
+	property integer MAX_ATTEMPTS = 6
+	property any initializationMemory = nil
+
+	@ExecSpace("ServerOnly")
+	method any Read(any storage)
+		local code, raw = storage:GetAndWait(self.STORAGE_KEY)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and raw == nil) then return {missing = true} end
+		if code ~= 0 then return nil end
+		local ok, plain = pcall(function() return _HttpService:JSONDecode(raw) end)
+		local tData = FishingRewardData()
+		if not ok or not tData:FromPlainTable(plain) then
+			log_error("[FishingReward] 손상 데이터 보존 user=" .. storage.UserId)
+			return nil
+		end
+		return {tData = tData, raw = raw}
+	end
+
+	@ExecSpace("ServerOnly")
+	method any LoadOrCreate(any storage)
+		-- 최초 생성만 인스턴스 간 잠금, 이후 거래는 CAS 사용
+		local read = self:Read(storage)
+		if read == nil or read.missing ~= true then return read end
+		if self.initializationMemory == nil then
+			local code, memory = _WorldInstanceService:GetSharedMemory(self.INITIALIZATION_MEMORY)
+			if code ~= SharedMemoryResultCode.OK then return nil end
+			self.initializationMemory = memory
+		end
+		local variable = self.INITIALIZATION_PREFIX .. storage.UserId
+		if string.len(variable) > 100 or string.match(variable, "^[%w_%-]+$") == nil then return nil end
+		local claim = self.initializationMemory:CreateVariableAndWait(variable, _UtilLogic:NewGuid())
+		if claim.Code ~= SharedMemoryResultCode.OK then
+			local latest = self:Read(storage)
+			return latest ~= nil and latest.missing ~= true and latest or nil
+		end
+		local ok, result = pcall(function()
+			local latest = self:Read(storage)
+			if latest == nil or latest.missing ~= true then return latest end
+			local tData = FishingRewardData()
+			storage:SetAndWait(self.STORAGE_KEY, _HttpService:JSONEncode(tData:ToPlainTable()))
+			return self:Read(storage)
+		end)
+		self.initializationMemory:ReleaseVariableAndWait(variable)
+		if not ok or result == nil or result.missing == true then return nil end
+		return result
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ReadReceipt(any storage, string id)
+		local code, raw = storage:GetAndWait(self.RECEIPT_PREFIX .. id)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and raw == nil) then return false end
+		if code ~= 0 then return nil end
+		local ok, row = pcall(function() return _HttpService:JSONDecode(raw) end)
+		if not ok or type(row) ~= "table" or row.id ~= id or type(row.revision) ~= "number" then return nil end
+		return row
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean Finalize(any storage, any read)
+		-- 수량과 함께 저장된 복구 표식은 영수증 확인 후에만 제거
+		local pending = read.tData.pending
+		if pending == nil then return true end
+		local receipt = self:ReadReceipt(storage, pending.id)
+		if receipt == nil then return false end
+		if receipt == false then
+			local keyInfo = DataStorageKeyInfo()
+			keyInfo.Key = self.RECEIPT_PREFIX .. pending.id
+			keyInfo.Tag = self.RECEIPT_TAG
+			storage:SetByInfoAndWait(keyInfo, _HttpService:JSONEncode(pending))
+			receipt = self:ReadReceipt(storage, pending.id)
+		end
+		if receipt == nil or receipt == false or receipt.revision ~= pending.revision
+			or receipt.kind ~= pending.kind or receipt.target ~= pending.target or receipt.score ~= pending.score
+			or receipt.itemId ~= pending.itemId or receipt.count ~= pending.count then return false end
+		local tNext = FishingRewardData()
+		if not tNext:FromPlainTable(read.tData:ToPlainTable()) then return false end
+		tNext.pending = nil
+		local code, storedRaw = storage:UpdateAndWait(self.STORAGE_KEY, read.raw, _HttpService:JSONEncode(tNext:ToPlainTable()))
+		return code == 0 or code == self.CONFLICT_CODE
+	end
+
+	@ExecSpace("ServerOnly")
+	method any Apply(string userId, string id, string kind, integer score, string target)
+		return self:ApplyWithStorage(_DataStorageService:GetUserDataStorage(userId), id, kind, score, target)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyWithStorage(any storage, string id, string kind, integer score, string target)
+		-- 지급량, 초회 여부, 쿠키 차감과 친밀도 가산을 하나의 CAS로 확정
+		if storage == nil or string.len(id) > 70 or string.match(id, "^[%w_%-]+$") == nil
+			or (kind ~= self.KIND_REWARD and kind ~= self.KIND_COOKIE) then return nil end
+		for attempt = 1, self.MAX_ATTEMPTS do
+			local read = self:LoadOrCreate(storage)
+			if read == nil then return nil end
+			local tData = read.tData
+			local receipt = tData.pending ~= nil and tData.pending.id == id and tData.pending or self:ReadReceipt(storage, id)
+			if receipt == nil then return nil end
+			if receipt ~= false then
+				if receipt.kind ~= kind or receipt.score ~= score or receipt.target ~= target then return nil end
+				if receipt.revision > tData.revision then continue end
+				self:Finalize(storage, read)
+				return {tData = tData, receipt = receipt}
+			end
+			if tData.pending ~= nil then
+				if not self:Finalize(storage, read) then return nil end
+				continue
+			end
+			local tNext = FishingRewardData()
+			if not tNext:FromPlainTable(tData:ToPlainTable()) then return nil end
+			local row = {id = id, kind = kind, target = target, score = score,
+				revision = tData.revision + 1, itemId = "", count = 0}
+			if kind == self.KIND_REWARD then
+				if score < 0 then return nil end
+				if tNext.pendingResult ~= nil and (tNext.pendingResult.id ~= id or tNext.pendingResult.score ~= score) then return nil end
+				tNext.pendingResult = nil
+				local rank = _MiniGameFishingRule:RankForScore(score)
+				if rank == 1 and not tNext.badgeGranted then
+					tNext.badgeGranted = true
+					row.itemId = _MiniGameFishingRule.BADGE_ID
+					row.count = 1
+				else
+					row.itemId = _MiniGameFishingRule.COOKIE_ID
+					row.count = _MiniGameFishingRule:CookiesForRank(rank)
+					tNext.cookies = tNext.cookies + row.count
+				end
+			else
+				if target == "" or tNext.cookies < 1 then return nil end
+				tNext.cookies = tNext.cookies - 1
+				tNext.intimacyByCharacter[target] = (tNext.intimacyByCharacter[target] or 0) + 5
+				row.itemId = _MiniGameFishingRule.COOKIE_ID
+				row.count = -1
+			end
+			tNext.revision = row.revision
+			tNext.pending = row
+			local raw = _HttpService:JSONEncode(tNext:ToPlainTable())
+			if string.len(raw) > 4000 then return nil end
+			local code, storedRaw = storage:UpdateAndWait(self.STORAGE_KEY, read.raw, raw)
+			if code == 0 then
+				self:Finalize(storage, {tData = tNext, raw = raw})
+				log("[FishingReward] 저장 완료 kind=" .. kind .. " id=" .. id .. " count=" .. tostring(row.count))
+				return {tData = tNext, receipt = row}
+			end
+			if code ~= self.CONFLICT_CODE and code ~= _DataStorageErrorUtil.TimedOut then return nil end
+		end
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean QueueResult(string userId, string id, integer score)
+		-- 종료 점수를 지급 전에 영속 보관하여 재접속 시 미완료 정산 복구
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		for attempt = 1, self.MAX_ATTEMPTS do
+			local read = self:LoadOrCreate(storage)
+			if read == nil then return false end
+			local receipt = read.tData.pending ~= nil and read.tData.pending.id == id
+				and read.tData.pending or self:ReadReceipt(storage, id)
+			if receipt == nil then return false end
+			if receipt ~= false then return receipt.kind == self.KIND_REWARD and receipt.score == score end
+			local row = read.tData.pendingResult
+			if row ~= nil then return row.id == id and row.score == score end
+			read.tData.pendingResult = {id = id, score = score}
+			local raw = _HttpService:JSONEncode(read.tData:ToPlainTable())
+			if string.len(raw) > 4000 then return false end
+			local code, storedRaw = storage:UpdateAndWait(self.STORAGE_KEY, read.raw, raw)
+			if code == 0 then return true end
+			if code ~= self.CONFLICT_CODE and code ~= _DataStorageErrorUtil.TimedOut then return false end
+		end
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		if self.initializationMemory ~= nil then
+			_WorldInstanceService:ReleaseSharedMemoryAndWait(self.INITIALIZATION_MEMORY)
+			self.initializationMemory = nil
+		end
+	end
+end

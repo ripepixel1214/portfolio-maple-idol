@@ -1,0 +1,120 @@
+---@description "미니게임 View 등록 및 조회 로직"
+@Logic
+script MiniGameViewRegistry extends Logic
+
+	property string CAP_STAGE = "stage"
+	property string CAP_HUD = "hud"
+	property string CAP_RESULT = "result"
+	property string CAP_MOBILE_INPUT = "mobile_input"
+	property string CAP_MASH = "mash"
+	property string CAP_GAUGE = "gauge"
+	property string CAP_TIMING = "timing"
+	property string CAP_COMMAND = "command"
+	property string CAP_SHAPE = "shape"
+	property string CAP_SELECTION = "selection"
+	property string CAP_DICE = "dice"
+	property string CAP_FISHING = "fishing"
+	property string CAP_SNAIL_LADDER = "snail_ladder"
+	property string PRESENTATION_FISHING = "night_market_fishing"
+	property string PRESENTATION_SNAIL_LADDER = "snail_ladder"
+	property string PRESENTATION_LUCKY_CUBE = "lucky_cube"
+	property string PRESENTATION_DEFAULT_TRAINING = "default_training"
+	property string PRESENTATION_DALGONA_CHALLENGE = "dalgona_challenge"
+	property Entity playGroup = "bf41fc6e-9b0d-47c7-8cfc-e6a14911a76c"
+	-- StageView 컴포넌트와 추가 View 구현 등록
+	property any registeredViews = {}
+
+	property MiniGameTrainingStageView trainingView = "438d6b18-b31a-44e0-bad0-873b42bf80fb"
+	property MiniGameDalgonaStageView dalgonaView = "b9b7d2bd-e637-43a1-9af9-44868857285a"
+	property MiniGameLuckyCubeStageView luckyCubeView = "a4d6c6ad-9165-4417-be97-6d1992c6dda5"
+	property MiniGameFishingStageView fishingView = "6d454080-feeb-44ff-aef1-026f0659b709"
+	property MiniGameSnailLadderStageView snailLadderView = "faedcefe-2e4a-472e-b647-03c8f981f990"
+
+	@ExecSpace("ClientOnly")
+	method table GetViews()
+		-- 기본 View와 추가 등록 View를 중복 없이 반환
+		local views = {}
+		local seen = {}
+		local append = function(view)
+			if view == nil or seen[view] then return end
+			seen[view] = true
+			table.insert(views, view)
+		end
+		append(self.trainingView)
+		append(self.dalgonaView)
+		append(self.luckyCubeView)
+		append(self.fishingView)
+		append(self.snailLadderView)
+		for _, view in pairs(self.registeredViews) do append(view) end
+		return views
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetPreloadRuids()
+		-- 공통 미니게임 UI 이미지와 View별 동적 이미지 목록 통합
+		local ruids = {}
+		if isvalid(self.playGroup) then
+			local rootRenderer = self.playGroup.SpriteGUIRendererComponent
+			if rootRenderer ~= nil then table.insert(ruids, rootRenderer.ImageRUID.DataId) end
+			for _, renderer in ipairs(self.playGroup:GetChildComponentsByTypeName("MOD.Core.SpriteGUIRendererComponent", true)) do
+				table.insert(ruids, renderer.ImageRUID.DataId)
+			end
+		else
+			log_warning("[MiniGameViewRegistry] 프리로드 UI 연결 누락")
+		end
+		for _, view in ipairs(self:GetViews()) do
+			if type(view.GetDynamicPreloadRuids) == "function" then
+				for _, ruid in ipairs(view:GetDynamicPreloadRuids()) do table.insert(ruids, ruid) end
+			end
+		end
+		return ruids
+	end
+
+	@ExecSpace("ClientOnly")
+	method any Resolve(string presentationId)
+		-- 추가 View 우선 조회 후 기본 제공 구현 반환
+		local view = self.registeredViews[presentationId]
+		if view ~= nil then return view end
+		if presentationId == self.PRESENTATION_DEFAULT_TRAINING then
+			return self.trainingView
+		elseif presentationId == self.PRESENTATION_DALGONA_CHALLENGE then
+			return self.dalgonaView
+		elseif presentationId == self.PRESENTATION_LUCKY_CUBE then
+			return self.luckyCubeView
+		elseif presentationId == self.PRESENTATION_FISHING then
+			return self.fishingView
+		elseif presentationId == self.PRESENTATION_SNAIL_LADDER then
+			return self.snailLadderView
+		end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Register(string presentationId, any view)
+		-- 공통 View 계약 구현 등록, nil 전달 시 추가 등록 해제
+		if presentationId == nil or presentationId == "" then return end
+		self.registeredViews[presentationId] = view
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 비활성 스테이지에서 수동 연결한 구독까지 해제
+		for _, view in ipairs(self:GetViews()) do
+			if type(view.ReleaseView) == "function" then view:ReleaseView() end
+		end
+		self.registeredViews = {}
+	end
+
+
+	@ExecSpace("ClientOnly")
+	method boolean ValidateBindings(string viewName, any bindings)
+		-- 누락된 참조를 입력 연결 전에 차단
+		for _, binding in ipairs(bindings) do
+			if binding[2] == nil or not isvalid(binding[2]) then
+				log_warning("[MiniGameViewRegistry] " .. viewName .. " UI 참조 누락: " .. binding[1])
+				return false
+			end
+		end
+		return true
+	end
+end

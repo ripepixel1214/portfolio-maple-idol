@@ -218,6 +218,9 @@ script LoadingUILogic extends Logic
 		self:AddUiSpritePreloadRuids(ruidList, excludedRuids, seenRuids)
 		self:AddDowntownMapResourcePreloadRuids(ruidList, excludedRuids, seenRuids)
 		self:AddExplicitDynamicUiPreloadRuids(ruidList, excludedRuids, seenRuids)
+		for _, ruid in ipairs(_MiniGameViewRegistry:GetPreloadRuids()) do
+			self:AddStartupPreloadRuid(ruidList, excludedRuids, seenRuids, ruid)
+		end
 		self:AddExplicitWorldSpritePreloadRuids(ruidList, excludedRuids, seenRuids)
 		self:AddExplicitAnimationClipPreloadRuids(ruidList, excludedRuids, seenRuids)
 		self:AddExplicitSoundPreloadRuids(ruidList, excludedRuids, seenRuids)
@@ -226,8 +229,16 @@ script LoadingUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method table BuildStartupPreloadExcludedRuids()
-		-- PreloadAsync에서 CannotLoad가 확인된 미지원/누락 리소스 집합을 반환합니다.
+		-- PreloadAsync에서 CannotLoad가 확인된 리소스 제외, UI 표시 설정은 유지
 		return {
+			-- 야시장 미니게임에서 프리로드 실패가 확인된 UI 이미지
+			["21691103c9b6f174d8f0a84a5904153f"] = true,
+			["9e9c7144f1e55ce4c8b398d4b7afc8e1"] = true,
+			["8738db49d13cefd47b786c6005dbb4c7"] = true,
+			["b9ab8455d5737bf4cb21433f00fdc19d"] = true,
+			["d091cf28ab72bcc499a0506ad7bacf98"] = true,
+			["223396dfd4c1c73478dc9666e670d0b6"] = true,
+			["8122dd6f67f3d9b4db8a3152172f9063"] = true,
 			["71da3967ae01471cacf6800a1edfe67b"] = true,
 			["55dd6a9cd4a06a240920a17e34568148"] = true,
 			["4fea64a3307cda641809ad8be0d4890b"] = true,

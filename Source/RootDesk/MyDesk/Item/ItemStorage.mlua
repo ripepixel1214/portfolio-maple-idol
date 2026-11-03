@@ -1,0 +1,262 @@
+-- ItemManager가 사용하는 서버 권위 아이템 소유 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script ItemStorage extends Logic
+
+	property string itemStorageKey = "itemOwnershipData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedItemsString = ""
+
+	property boolean canSaveItems = false
+
+	property boolean isItemsSaveInProgress = false
+
+	property string pendingItemsUserId = ""
+
+	property string pendingItemsString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadItems(string userId)
+		-- UserDataStorage에서 아이템 소유 저장 문자열을 읽고, 없으면 빈 아이템 목록을 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[ItemStorage] userId is required")
+			self.loadedItemsString = ""
+			self.canSaveItems = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedItemsString = userStorage:GetAndWait(self.itemStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedItemsString = ""
+			self.canSaveItems = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedItemsString = ""
+			self.canSaveItems = false
+			return nil
+		end
+
+		if storedItemsString == nil or storedItemsString == "" then
+			self.loadedItemsString = ""
+			self.canSaveItems = true
+			return {}
+		end
+
+		local loadedItemIds = self:CreateItemIdsFromString(storedItemsString)
+		if loadedItemIds == nil then
+			log_warning("[ItemStorage] item load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedItemsString = storedItemsString
+			self.canSaveItems = false
+			return nil
+		end
+
+		self.loadedItemsString = storedItemsString
+		self.canSaveItems = true
+		return loadedItemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveItemsAsync(string userId, any itemIds)
+		-- 보유 아이템 id 목록을 v1 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveItems == false then
+			log_warning("[ItemStorage] item save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[ItemStorage] userId is required")
+			return
+		end
+
+		local itemsString = self:CreateItemsStringFromItemIds(itemIds)
+		if itemsString == "" then
+			log_warning("[ItemStorage] itemIds are invalid")
+			return
+		end
+
+		if itemsString == self.loadedItemsString then
+			return
+		end
+
+		if self.isItemsSaveInProgress then
+			self.pendingItemsUserId = userId
+			self.pendingItemsString = itemsString
+			return
+		end
+
+		self:SaveItemsStringAsync(userId, itemsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveItemsStringAsync(string userId, string itemsString)
+		-- 직렬화된 아이템 소유 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isItemsSaveInProgress = true
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.itemStorageKey, itemsString, function(errorCode, key)
+			self:OnItemsSaveCompleted(userId, itemsString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnItemsSaveCompleted(string userId, string itemsString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청이 있으면 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.loadedItemsString = itemsString
+		end
+
+		self.isItemsSaveInProgress = false
+		self:CheckPendingItemsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingItemsSave()
+		-- 대기 중인 최신 아이템 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.pendingItemsString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingItemsUserId
+		local pendingItemsString = self.pendingItemsString
+		self.pendingItemsUserId = ""
+		self.pendingItemsString = ""
+
+		if pendingItemsString == self.loadedItemsString then
+			return
+		end
+
+		self:SaveItemsStringAsync(pendingUserId, pendingItemsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateItemIdsFromString(string itemsString)
+		-- 저장 문자열을 보유 아이템 id 목록으로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(itemsString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[ItemStorage] item save string parse failed")
+			return nil
+		end
+
+		return self:CreateItemIdsFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateItemsStringFromItemIds(any itemIds)
+		-- 보유 아이템 id 목록을 DataStorage에 넣을 v1 저장 문자열로 만듭니다.
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return ""
+		end
+
+		local normalizedItemIds = self:CreateNormalizedItemIds(itemIds)
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.itemCount = #normalizedItemIds
+
+		for index, itemId in ipairs(normalizedItemIds) do
+			local suffix = tostring(index)
+			tFlatPlainTable["itemId" .. suffix] = itemId
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateItemIdsFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 복원한 flat plain table의 버전을 확인하고 보유 아이템 id 목록으로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion == 0 or saveVersion == 1 then
+			return self:CreateItemIdsFromFlatPlainTableV1(tFlatPlainTable)
+		end
+
+		log_warning("[ItemStorage] unsupported item saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateItemIdsFromFlatPlainTableV1(any tFlatPlainTable)
+		-- v1 flat plain table을 보유 아이템 id 목록으로 정규화합니다.
+		local itemCount = self:NormalizeInteger(tFlatPlainTable.itemCount, 0, 0)
+		local itemIds = {}
+
+		for index = 1, itemCount do
+			local itemId = self:NormalizeString(tFlatPlainTable["itemId" .. tostring(index)], "")
+			self:AddItemIdIfValid(itemIds, itemId)
+		end
+
+		return itemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateNormalizedItemIds(any itemIds)
+		-- 서버 권위 보유 아이템 id 목록에서 빈 값과 중복을 제거한 목록을 만듭니다.
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return nil
+		end
+
+		local normalizedItemIds = {}
+
+		for _, itemId in ipairs(itemIds) do
+			self:AddItemIdIfValid(normalizedItemIds, itemId)
+		end
+
+		return normalizedItemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddItemIdIfValid(any itemIds, string itemId)
+		-- 저장 목록에 빈 값과 중복을 제외한 itemId만 추가합니다.
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return
+		end
+
+		local normalizedItemId = self:NormalizeString(itemId, "")
+		if normalizedItemId == "" then
+			return
+		end
+
+		for _, ownedItemId in ipairs(itemIds) do
+			if ownedItemId == normalizedItemId then
+				return
+			end
+		end
+
+		table.insert(itemIds, normalizedItemId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

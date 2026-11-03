@@ -1,0 +1,165 @@
+---@description "낚시 입력 및 서버 상태와 선택된 View 연결"
+@Logic
+script MiniGameFishingPresenter extends Logic
+	property any tModel = nil
+	property any view = nil
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- 실제 낚시 로비 진입 의도 처리
+		self:OpenLobbyWithMode(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenDebugLobby()
+		-- Maker 전용 공통 디버그 로비 진입 의도 처리
+		if not Environment:IsMakerPlay() or not _MiniGameDebugLogic.isDebugMode then return end
+		self:OpenLobbyWithMode(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobbyWithMode(boolean debugMode)
+		-- 프리셋과 capability로 View 선택 후 로비 Model 구성
+		if _MiniGamePlayLogic.isPlaying then return end
+		local preset = _MiniGameTable:FindMiniGame(_MiniGameFishingRule.MINI_GAME_ID)
+		if preset == nil then return end
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then return end
+		_MiniGamePlayLogic:RetainPresentationBehavior(_MiniGameClientHandlerRegistry:Resolve(preset.gameKind))
+		if not _MiniGameUIRouter:SetPresentation(presentationId) then return end
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_FISHING)
+		self.tModel = MiniGameFishingModel()
+		self.tModel:OpenLobby(debugMode)
+		self.view:OpenLobby()
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginSession(any tContext)
+		-- 공통 세션 시작 후 서버 낚시 시작 요청
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_FISHING)
+		self.view:Close()
+		self.tModel = MiniGameFishingModel()
+		self.tModel:BeginSession(tContext)
+		self.view:ShowActiveSession()
+		self:Send(_MiniGameFishingRule.ACTION_START)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Start()
+		-- Model의 시작 승인 후 최초 세션 또는 기존 세션 시작 요청
+		if self.tModel == nil or not self.tModel:TryStart() then return end
+		self:Render()
+		if self.tModel.sessionId == "" then
+			_MiniGameManager:RequestStartFishing(self.tModel.tState.isDebug)
+		else
+			self:Send(_MiniGameFishingRule.ACTION_START)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Move(number x)
+		-- View가 변환한 포인터 좌표를 Model에 반영
+		if self.tModel ~= nil then self.tModel:Move(x) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Fire(number x)
+		-- 허용된 조준 상태에서만 서버 발사 요청
+		if self.tModel == nil or not self.tModel:Move(x) then return end
+		self:Send(_MiniGameFishingRule.ACTION_FIRE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RetrySettlement()
+		-- 서버 정산 대기 상태에서만 같은 세션 재시도 요청
+		if self.tModel == nil or self.tModel.tState.stage ~= _MiniGameFishingRule.STAGE_SETTLING then return end
+		self:Send(_MiniGameFishingRule.ACTION_RETRY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Send(string action)
+		-- 입력 Struct를 RPC 경계에서 plain table로 변환
+		if self.tModel == nil or not _MiniGamePlayLogic.isPlaying then return end
+		local tInput = self.tModel:BuildInput(action)
+		if tInput == nil then return end
+		_MiniGameManager:RequestFishingInput(self.tModel.sessionId, tInput:ToPlainTable())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyState(string sessionId, any tState)
+		-- 서버 상태 반영 후 확정 결과는 표시한 채 공통 세션만 종료
+		if self.tModel == nil or not self.tModel:ApplyState(sessionId, tState) then return end
+		self:Render()
+		if self.tModel:IsResultConfirmed() then
+			_MiniGamePlayLogic:FinishSelectionSessionFromServer(sessionId)
+			if self.tModel ~= nil then self.tModel:CompleteSession() end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleRejected(string miniGameId)
+		-- 현재 낚시 로비의 시작 거절만 반영
+		if miniGameId ~= _MiniGameFishingRule.MINI_GAME_ID or self.tModel == nil then return end
+		self.tModel:RejectStart()
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render()
+		-- 선택된 View에 표시용 복사만 전달
+		if self.tModel == nil or self.view == nil then return end
+		self.view:RenderState(self.tModel:GetViewState())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- Model 입력 주기와 View의 화면 보간 분리
+		if self.tModel == nil or self.view == nil or not self.view:IsVisible() then return end
+		if self.tModel:CanMove() then
+			local x = self.view:GetPointerX(_InputService:GetCursorPosition())
+			if x ~= nil then self.tModel:Move(x) end
+		end
+		if self.tModel:Update(delta) then self:Send(_MiniGameFishingRule.ACTION_MOVE) end
+		self.view:UpdatePresentation(delta, self.tModel.snapshotAge, self.tModel.localPlayerX)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 중도 종료 의도를 공통 세션 정리로 전달
+		if self.tModel == nil or not self.tModel:CanClose() then return end
+		if _MiniGamePlayLogic.isPlaying then
+			_MiniGameManager:RequestCancelMiniGame(self.tModel.sessionId)
+			_MiniGamePlayLogic:StopSession(_MiniGamePlayLogic.RESULT_REASON_CANCEL)
+		end
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndSession()
+		-- 영속 정산이 확인된 결과 화면만 확인 버튼까지 유지
+		if self.tModel == nil or not self.tModel:IsResultConfirmed() then self:ClearState() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConfirmResult()
+		-- 보상 확인 후 표시와 보관된 공통 처리기 해제
+		if self.tModel == nil or not self.tModel:IsResultConfirmed() then return end
+		self:ClearState()
+		_MiniGamePlayLogic:RetainPresentationBehavior(nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearState()
+		-- 선택된 View의 연출 정리 후 Model과 View 참조 해제
+		if self.view ~= nil then self.view:Close() end
+		self.tModel = nil
+		self.view = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 클라이언트 낚시 상태 정리
+		self:ClearState()
+	end
+end

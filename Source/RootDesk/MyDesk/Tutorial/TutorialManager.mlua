@@ -2,6 +2,9 @@
 @Logic
 script TutorialManager extends Logic
 
+	-- 튜토리얼을 임시로 꺼둡니다. 다시 켤 때 true로 변경하며 완료 기록은 유지합니다.
+	property boolean tutorialEnabled = false
+
 	-- 트리거 정의 목록(순서대로 평가). 각 항목: { id, triggerType, mapName?, step?, month?, week?, actionType, scenarioId?, dialogId?, requires? }
 	property any tRegistry = {}
 
@@ -80,6 +83,10 @@ script TutorialManager extends Logic
 	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
 		-- 로컬 플레이어의 현재 맵 변화를 감지해 맵 진입 트리거를 평가한다(@Logic은 OnMapEnter 미수신).
+		if self.tutorialEnabled == false then
+			return
+		end
+
 		local player = _UserService ~= nil and _UserService.LocalPlayer or nil
 		if isvalid(player) == false then
 			return
@@ -102,38 +109,42 @@ script TutorialManager extends Logic
 	@ExecSpace("ClientOnly")
 	method void BuildRegistry()
 		-- 튜토리얼 트리거 정의를 순서대로 구성한다. 위에서부터 먼저 평가되므로 프롤로그 → 스튜디오 순서를 유지한다.
-		local trainingCompletedStep = 2
+		local beforeTrainingStep = 2
+		local afterTrainingStep = 3
 		if _EProgressStep ~= nil then
-			trainingCompletedStep = _EProgressStep.Step_TrainingCompleted
+			beforeTrainingStep = _EProgressStep.BeforeTraining
+			afterTrainingStep = _EProgressStep.AfterTraining
 		end
 
 		self.tRegistry = {
-			-- 스튜디오 최초 진입: 프롤로그 대화 → 종료 시 재평가로 studio_intro 튜토리얼로 자연 연결
+			-- 첫 스테이지의 훈련 전 스텝: 프롤로그 대화 → 종료 시 재평가로 studio_intro 튜토리얼로 자연 연결
 			{
 				id = "prologue",
-				triggerType = "mapEnter",
+				triggerType = "progressStep",
 				mapName = "Map_Studio",
+				step = beforeTrainingStep,
 				actionType = "dialog",
 				dialogId = "prologue",
 				requires = "",
 				-- 검정 화면 유지 + 대화창 암전(dim 불투명 검정)으로 재생, 종료 후 페이드인
 				blackout = true,
 			},
-			-- 스튜디오 최초 진입: 연습실 튜토리얼(프롤로그 완료 후 재평가에서 선택됨)
+			-- 첫 스테이지의 훈련 전 스텝: 연습실 튜토리얼(프롤로그 완료 후 재평가에서 선택됨)
 			{
 				id = "studio_intro",
-				triggerType = "mapEnter",
+				triggerType = "progressStep",
 				mapName = "Map_Studio",
+				step = beforeTrainingStep,
 				actionType = "scenario",
 				scenarioId = "studio_intro",
 				requires = "",
 			},
-			-- 1주차 평일 활동 완료(훈련 완료 단계) 시 스튜디오에서 외출 안내 시작. 반드시 스튜디오에서만(타이틀 등에서 오발동 방지).
+			-- 1주차 훈련 후 스텝에서 외출 안내를 시작합니다. 반드시 스튜디오에서만 발동합니다.
 			{
 				id = "weekend_intro",
 				triggerType = "progressStep",
 				mapName = "Map_Studio",
-				step = trainingCompletedStep,
+				step = afterTrainingStep,
 				month = 1,
 				week = 1,
 				actionType = "scenario",
@@ -172,7 +183,7 @@ script TutorialManager extends Logic
 	@ExecSpace("ClientOnly")
 	method void EvaluateTriggers()
 		-- 현재 상태(맵/진행)에서 발동 가능한 첫 트리거를 찾아 시작한다. 동시에 하나만 진행한다.
-		if self.currentTutorialId ~= "" then
+		if self.tutorialEnabled == false or self.currentTutorialId ~= "" then
 			return
 		end
 
@@ -372,17 +383,16 @@ script TutorialManager extends Logic
 
 	@ExecSpace("ClientOnly")
 	method boolean IsProloguePending()
-		-- 첫 진입 프롤로그가 아직 진행되지 않았는지 반환한다. 주말(도시) 진입 시엔 프롤로그가 발동하지 않으므로 false
-		if self:IsCompleted("prologue") == true then
+		-- 훈련 전 스텝에서 첫 진입 프롤로그가 아직 진행되지 않았는지 반환합니다.
+		if self.tutorialEnabled == false or self:IsCompleted("prologue") == true then
 			return false
 		end
-		if _ProgressManager ~= nil and _EProgressStep ~= nil then
-			local progress = _ProgressManager:ClientGetProgress()
-			if progress ~= nil and progress.eCurrentStep == _EProgressStep.Step_Weekend then
-				return false
-			end
+		if _ProgressManager == nil or _EProgressStep == nil then
+			return false
 		end
-		return true
+
+		local progress = _ProgressManager:ClientGetProgress()
+		return progress ~= nil and progress.eCurrentStep == _EProgressStep.BeforeTraining
 	end
 
 	@ExecSpace("ClientOnly")
@@ -406,7 +416,7 @@ script TutorialManager extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnProgressChanged(any progressChangedEvent)
-		-- 진행 데이터가 갱신되면 진행 단계 트리거(예: 훈련 완료)를 평가한다.
+		-- 진행 데이터가 갱신되면 스테이지 트리거(예: 훈련 후)를 평가합니다.
 		self:EvaluateTriggers()
 	end
 

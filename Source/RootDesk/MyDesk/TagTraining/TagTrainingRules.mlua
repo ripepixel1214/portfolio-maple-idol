@@ -1,0 +1,261 @@
+@Logic
+script TagTrainingRules extends Logic
+
+	@Description("모든 카드의 첫 번째 태그 등장 확률입니다(%).")
+	property number firstTagChance = 15
+
+	@Description("모든 카드의 두 번째 태그 등장 확률입니다(%).")
+	property number secondTagChance = 15
+
+	@Description("모든 카드의 세 번째 태그 등장 확률입니다(%).")
+	property number thirdTagChance = 15
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	method table GetTags(string tagsCsv)
+		-- 서버/클라이언트 공용: TagTable에 등록된 태그만 중복과 획득 순서를 유지해 반환합니다.
+		local tags = {}
+		for tagId in string.gmatch(tagsCsv or "", "([^,]+)") do
+			if _TrainingDataMaster:GetTag(tagId) ~= nil then table.insert(tags, tagId) end
+		end
+		return tags
+	end
+
+	method number GetFailureChance(number fatigue)
+		-- 서버/클라이언트 공용: 태그 육성의 피로도 구간별 실패 확률을 반환합니다.
+		if fatigue <= 50 then return 0 end
+		if fatigue <= 80 then return 20 end
+		return 40
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RollFailure(number failureChance)
+		-- 서버에서 실패 확률을 한 번 추첨해 태그 육성 성공 여부를 결정합니다.
+		if failureChance <= 0 then return false end
+		if failureChance >= 100 then return true end
+		return math.random(1, 100) <= failureChance
+	end
+
+	method table Calculate(table character, any trainingCard, boolean failed)
+		-- 서버/클라이언트 공용: TagEffectTable의 효과로 미리보기와 실제 결과를 같은 방식으로 계산합니다.
+		local tags = self:GetTags(character.tags or "")
+		local counts = {}
+		for _, tagId in ipairs(tags) do counts[tagId] = (counts[tagId] or 0) + 1 end
+		local effectContext = self:BuildEffectContext(character, trainingCard, failed, counts)
+		local result = {activeTags = {}, remainingTags = {}}
+		for _, stat in ipairs({"vocal", "dance", "visual"}) do
+			local base = trainingCard[stat] or 0
+			local gain = math.min(base, 0)
+			if failed == false then
+				gain = (base + effectContext.statAdd[stat]) * (1 + effectContext.statRate[stat])
+			end
+			-- 정수 경계의 부동소수점 오차(100 * 2.3 = 229.999...)만 보정한 뒤 내림합니다.
+			result[stat] = math.max(0, character[stat] + math.floor(gain + 0.0000001)) - character[stat]
+		end
+		-- 태그 효과의 피로도 보정은 기본 피로도 증가량에만 적용합니다.
+		local fatigue = trainingCard.fatigue or 0
+		if fatigue > 0 then
+			fatigue = math.max(0, fatigue + effectContext.fatigueAdd)
+			fatigue = math.max(0, fatigue * (1 + effectContext.fatigueRate))
+		end
+		result.fatigue = math.max(0, character.fatigue + math.floor(fatigue + 0.0000001)) - character.fatigue
+		self:ApplyTagActivation(tags, effectContext.activeTagIdSet, result)
+		return result
+	end
+
+	method table GetReadyTags(table character)
+		-- 서버/클라이언트 공용: TagEffectTable 조건이 준비된 태그를 기본 화면에서 표시합니다.
+		local tags = self:GetTags(character.tags or "")
+		local counts = {}
+		local active = {}
+		for _, tagId in ipairs(tags) do counts[tagId] = (counts[tagId] or 0) + 1 end
+		local readyTagIdSet = {}
+		for tagId, count in pairs(counts) do
+			for _, effect in ipairs(_TrainingDataMaster:GetTagEffects(tagId)) do
+				if self:IsEffectReady(effect, count, character) then readyTagIdSet[tagId] = true; break end
+			end
+		end
+		local shownConsumableTagIdSet = {}
+		for index, tagId in ipairs(tags) do
+			local tag = _TrainingDataMaster:GetTag(tagId)
+			local isConsumable = tag ~= nil and tag.tagType == "Consumable"
+			active[index] = readyTagIdSet[tagId] == true and (isConsumable == false or shownConsumableTagIdSet[tagId] ~= true)
+			if active[index] and isConsumable then shownConsumableTagIdSet[tagId] = true end
+		end
+		return active
+	end
+
+	method number GetEffectValue(string tagsCsv, string trigger, string target, string operation)
+		-- 선택지 태그에서 지정한 실행 시점·대상·연산의 효과값 합계를 반환합니다.
+		local effectValue = 0
+		for _, tagId in ipairs(self:GetTags(tagsCsv)) do
+			for _, effect in ipairs(_TrainingDataMaster:GetTagEffects(tagId)) do
+				if effect.trigger == trigger and effect.target == target and effect.operation == operation then
+					effectValue = effectValue + effect.effectValue
+				end
+			end
+		end
+		return effectValue
+	end
+
+	method table GetGrantedTags(string tagsCsv)
+		-- 선택지 전용 효과 태그를 제외하고 캐릭터가 실제로 획득할 태그만 반환합니다.
+		local grantedTags = {}
+		for _, tagId in ipairs(self:GetTags(tagsCsv)) do
+			local choiceOnly = false
+			for _, effect in ipairs(_TrainingDataMaster:GetTagEffects(tagId)) do
+				if effect.trigger == "BuildChoices" and effect.target == "OtherChoice" and effect.operation == "Seal" then
+					choiceOnly = true
+					break
+				end
+			end
+			if choiceOnly == false then table.insert(grantedTags, tagId) end
+		end
+		return grantedTags
+	end
+
+	@ExecSpace("ServerOnly")
+	method table RollTags(any trainingCard)
+		-- 카드의 기본 태그와 추가 태그 풀을 읽어 추첨하되 Stack 이외의 태그는 카드당 한 번만 부여합니다.
+		local tags = {}
+		if trainingCard == nil or math.random(1, 100) > self.firstTagChance then return tags end
+		local baseTag = _TrainingDataMaster:GetTag(trainingCard.baseTagId)
+		if baseTag == nil then return tags end
+		table.insert(tags, baseTag.tagId)
+		local selectedTags = {[baseTag.tagId] = true}
+		local additionalTagIds = _TrainingDataMaster:GetAdditionalTagIds(trainingCard.additionalTagPoolId)
+		local additionalTagChances = {self.secondTagChance, self.thirdTagChance}
+		for index = 2, 3 do
+			local availablePool = {}
+			for _, tagId in ipairs(additionalTagIds) do
+				local tag = _TrainingDataMaster:GetTag(tagId)
+				if tag ~= nil and (tag.tagType == "Stack" or selectedTags[tagId] ~= true) then
+					table.insert(availablePool, tagId)
+				end
+			end
+			if #availablePool == 0 or math.random(1, 100) > additionalTagChances[index - 1] then break end
+			local tagId = availablePool[math.random(1, #availablePool)]
+			table.insert(tags, tagId)
+			selectedTags[tagId] = true
+		end
+		return tags
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	method table BuildEffectContext(table character, any trainingCard, boolean failed, table counts)
+		-- 조건을 만족한 CalculateResult 효과를 고정값과 비율 보정으로 합산합니다.
+		local context = {
+			statAdd = {vocal = 0, dance = 0, visual = 0},
+			statRate = {vocal = 0, dance = 0, visual = 0},
+			fatigueAdd = 0,
+			fatigueRate = 0,
+			activeTagIdSet = {}
+		}
+		for tagId, count in pairs(counts) do
+			local stackEffectByAction = {}
+			local effects = {}
+			for _, effect in ipairs(_TrainingDataMaster:GetTagEffects(tagId)) do
+				if effect.trigger == "CalculateResult" and self:IsEffectConditionMet(effect, count, character) then
+					if effect.cause == "StackCount" then
+						local actionKey = effect.target .. ":" .. effect.operation
+						local previousEffect = stackEffectByAction[actionKey]
+						if previousEffect == nil or effect.conditionValue > previousEffect.conditionValue then
+							stackEffectByAction[actionKey] = effect
+						end
+					else
+						table.insert(effects, effect)
+					end
+				end
+			end
+			for _, effect in pairs(stackEffectByAction) do table.insert(effects, effect) end
+			for _, effect in ipairs(effects) do
+				if self:ApplyResultEffect(context, effect, trainingCard, failed) then context.activeTagIdSet[tagId] = true end
+			end
+		end
+		return context
+	end
+
+	method boolean ApplyResultEffect(table context, any effect, any trainingCard, boolean failed)
+		-- 단일 효과 행을 결과 보정값에 반영하고 실제 적용 여부를 반환합니다.
+		if effect.target == "Fatigue" then
+			if (trainingCard.fatigue or 0) <= 0 then return false end
+			self:AddAdjustment(context, "fatigue", effect.operation, effect.effectValue)
+			return effect.effectValue ~= 0
+		end
+
+		local growsAbility = (trainingCard.vocal or 0) > 0 or (trainingCard.dance or 0) > 0 or (trainingCard.visual or 0) > 0
+		if failed or (effect.target == "All" and growsAbility == false) then return false end
+		if effect.target == "All" then
+			for _, stat in ipairs({"vocal", "dance", "visual"}) do
+				self:AddAdjustment(context, stat, effect.operation, effect.effectValue)
+			end
+			if (trainingCard.fatigue or 0) > 0 then self:AddAdjustment(context, "fatigue", effect.operation, effect.effectValue) end
+			return effect.effectValue ~= 0
+		end
+
+		local stat = string.lower(effect.target or "")
+		if context.statAdd[stat] == nil then return false end
+		if effect.operation == "AddPercent" and (trainingCard[stat] or 0) == 0 then return false end
+		self:AddAdjustment(context, stat, effect.operation, effect.effectValue)
+		return effect.effectValue ~= 0
+	end
+
+	method void AddAdjustment(table context, string target, string operation, number effectValue)
+		-- 고정값은 먼저, 비율값은 이후 계산할 수 있도록 대상별로 분리해 누적합니다.
+		if target == "fatigue" then
+			if operation == "AddValue" then context.fatigueAdd = context.fatigueAdd + effectValue end
+			if operation == "AddPercent" then context.fatigueRate = context.fatigueRate + effectValue / 100 end
+			return
+		end
+		if operation == "AddValue" then context.statAdd[target] = context.statAdd[target] + effectValue end
+		if operation == "AddPercent" then context.statRate[target] = context.statRate[target] + effectValue / 100 end
+	end
+
+	method boolean IsEffectConditionMet(any effect, integer tagCount, table character)
+		-- 효과 행의 단일 수치 조건을 현재 캐릭터와 태그 스택으로 평가합니다.
+		if effect.cause == "" then return true end
+		local value = 0
+		if effect.cause == "Fatigue" then value = character.fatigue or 0
+		elseif effect.cause == "Vocal" then value = character.vocal or 0
+		elseif effect.cause == "Dance" then value = character.dance or 0
+		elseif effect.cause == "Visual" then value = character.visual or 0
+		elseif effect.cause == "StackCount" then value = tagCount
+		else return false end
+
+		local conditionValue = effect.conditionValue or 0
+		if effect.condition == "==" then return value == conditionValue end
+		if effect.condition == "!=" then return value ~= conditionValue end
+		if effect.condition == ">" then return value > conditionValue end
+		if effect.condition == ">=" then return value >= conditionValue end
+		if effect.condition == "<" then return value < conditionValue end
+		if effect.condition == "<=" then return value <= conditionValue end
+		return false
+	end
+
+	method void ApplyTagActivation(table tags, table activeTagIdSet, table result)
+		-- 발동 태그를 표시하고 Consumable 타입은 같은 ID의 첫 태그 하나만 소모합니다.
+		local consumedTagIdSet = {}
+		for index, tagId in ipairs(tags) do
+			local tag = _TrainingDataMaster:GetTag(tagId)
+			local isConsumable = tag ~= nil and tag.tagType == "Consumable"
+			local isConsumed = activeTagIdSet[tagId] == true and isConsumable and consumedTagIdSet[tagId] ~= true
+			result.activeTags[index] = activeTagIdSet[tagId] == true and (isConsumable == false or isConsumed)
+			if isConsumed then
+				consumedTagIdSet[tagId] = true
+			else
+				table.insert(result.remainingTags, tagId)
+			end
+		end
+	end
+
+	method boolean IsEffectReady(any effect, integer tagCount, table character)
+		-- 카드 선택 전에도 판단할 수 있는 태그 효과의 준비 상태를 반환합니다.
+		return effect.trigger == "CalculateResult" and self:IsEffectConditionMet(effect, tagCount, character)
+	end
+
+end

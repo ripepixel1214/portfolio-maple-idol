@@ -1,0 +1,167 @@
+-- CharacterBaseCostumeTable을 읽어 캐릭터별 기본 코스튬 데이터를 제공합니다.
+@Logic
+script CharacterBaseCostumeMaster extends Logic
+
+	property boolean isCached = false
+
+	-- { [characterId:string] = CharacterBaseCostumeRow }
+	property any tBaseCostumeByCharacterId = {}
+
+	method void OnBeginPlay()
+		-- 월드 시작 시 캐릭터별 기본 코스튬 테이블을 캐싱합니다.
+		self.isCached = false
+		self:CacheAll()
+	end
+
+	method void CacheAll()
+		-- CharacterBaseCostumeTable을 characterId 기준 조회 맵으로 다시 구성합니다.
+		if self.isCached == true then
+			return
+		end
+
+		self.tBaseCostumeByCharacterId = {}
+
+		local dataSet = _DataService:GetTable("CharacterBaseCostumeTable")
+		if dataSet == nil then
+			log_warning("[CharacterBaseCostumeMaster] CharacterBaseCostumeTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local characterId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "characterId", "")
+			if characterId ~= "" then
+				-- tBaseCostumeRow: CharacterBaseCostumeRow
+				local tBaseCostumeRow = self:CreateBaseCostumeRow(dataSet, rowIndex, characterId)
+				self.tBaseCostumeByCharacterId[characterId] = tBaseCostumeRow
+			end
+		end
+
+		self.isCached = true
+	end
+
+	method any CreateBaseCostumeRow(any dataSet, integer rowIndex, string characterId)
+		-- 테이블 한 행을 CharacterBaseCostumeRow 구조로 변환합니다.
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = self:CreateCostumeData(dataSet, rowIndex)
+
+		-- tBaseCostumeRow: CharacterBaseCostumeRow
+		local tBaseCostumeRow = CharacterBaseCostumeRow()
+		tBaseCostumeRow.characterId = characterId
+		tBaseCostumeRow:SetCostumeData(tCostumeData)
+
+		return tBaseCostumeRow
+	end
+
+	method any CreateCostumeData(any dataSet, integer rowIndex)
+		-- CSV의 flat 슬롯 컬럼을 CharacterCostumeData 구조로 변환합니다.
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = CharacterCostumeData()
+		tCostumeData.body = self:ReadCostumeCell(dataSet, rowIndex, "Body")
+		tCostumeData.hair = self:ReadCostumeCell(dataSet, rowIndex, "Hair")
+		tCostumeData.face = self:ReadCostumeCell(dataSet, rowIndex, "Face")
+		tCostumeData.cap = self:ReadCostumeCell(dataSet, rowIndex, "Cap")
+		tCostumeData.cape = self:ReadCostumeCell(dataSet, rowIndex, "Cape")
+		tCostumeData.coat = self:ReadCostumeCell(dataSet, rowIndex, "Coat")
+		tCostumeData.longcoat = self:ReadCostumeCell(dataSet, rowIndex, "Longcoat")
+		tCostumeData.pants = self:ReadCostumeCell(dataSet, rowIndex, "Pants")
+		tCostumeData.glove = self:ReadCostumeCell(dataSet, rowIndex, "Glove")
+		tCostumeData.shoes = self:ReadCostumeCell(dataSet, rowIndex, "Shoes")
+		tCostumeData.oneHandedWeapon = self:ReadCostumeCell(dataSet, rowIndex, "OneHandedWeapon")
+		tCostumeData.twoHandedWeapon = self:ReadCostumeCell(dataSet, rowIndex, "TwoHandedWeapon")
+		tCostumeData.subWeapon = self:ReadCostumeCell(dataSet, rowIndex, "SubWeapon")
+		tCostumeData.faceAccessory = self:ReadCostumeCell(dataSet, rowIndex, "FaceAccessory")
+		tCostumeData.eyeAccessory = self:ReadCostumeCell(dataSet, rowIndex, "EyeAccessory")
+		tCostumeData.earAccessory = self:ReadCostumeCell(dataSet, rowIndex, "EarAccessory")
+		tCostumeData.ear = self:ReadCostumeCell(dataSet, rowIndex, "Ear")
+
+		return tCostumeData
+	end
+
+	method string ReadCostumeCell(any dataSet, integer rowIndex, string columnName)
+		-- 코스튬 RUID를 읽습니다. 없는 컬럼/범위는 SafeGetString이 기본값("")으로 안전 처리합니다.
+		return _DataTableUtil:SafeGetString(dataSet, rowIndex, columnName, "")
+	end
+
+	method any GetBaseCostumeRow(string characterId)
+		-- 캐릭터 ID에 해당하는 CharacterBaseCostumeRow를 반환합니다.
+		self:CacheAll()
+		if characterId == "" then
+			return nil
+		end
+
+		return self.tBaseCostumeByCharacterId[characterId]
+	end
+
+	method any GetBaseCostume(string characterId)
+		-- 캐릭터 ID에 해당하는 CharacterCostumeData를 반환합니다.
+		-- return: CharacterCostumeData
+		local tBaseCostumeRow = self:GetBaseCostumeRow(characterId)
+		if tBaseCostumeRow == nil then
+			return nil
+		end
+
+		return tBaseCostumeRow:GetCostumeData()
+	end
+
+	method any GetCharacterBaseCostume(string characterId)
+		-- 기존 호출부 호환을 위해 기본 코스튬 CharacterCostumeData를 반환합니다.
+		return self:GetBaseCostume(characterId)
+	end
+
+	method any GetCustomEquipTable(string characterId)
+		-- CostumeManagerComponent의 Custom*Equip 프로퍼티 이름으로 사용할 수 있는 plain table을 반환합니다.
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = self:GetBaseCostume(characterId)
+		if tCostumeData == nil then
+			return {}
+		end
+
+		return tCostumeData:ToCustomEquipTable()
+	end
+
+	method string GetRuid(string characterId, any category)
+		-- 엔진 아바타 아이템 카테고리에 해당하는 기본 코스튬 RUID를 반환합니다.
+		-- tCostumeData: CharacterCostumeData
+		local tCostumeData = self:GetBaseCostume(characterId)
+		if tCostumeData == nil then
+			return ""
+		end
+
+		return self:GetRuidFromCostumeData(tCostumeData, category)
+	end
+
+	method string GetRuidFromRow(any tBaseCostumeRow, any category)
+		-- tBaseCostumeRow: CharacterBaseCostumeRow
+		if tBaseCostumeRow == nil then
+			return ""
+		end
+
+		return self:GetRuidFromCostumeData(tBaseCostumeRow:GetCostumeData(), category)
+	end
+
+	method string GetRuidFromCostumeData(any tCostumeData, any category)
+		-- tCostumeData: CharacterCostumeData
+		if tCostumeData == nil then return "" end
+		if category == MapleAvatarItemCategory.Body then return tCostumeData.body end
+		if category == MapleAvatarItemCategory.Hair then return tCostumeData.hair end
+		if category == MapleAvatarItemCategory.Face then return tCostumeData.face end
+		if category == MapleAvatarItemCategory.Cap then return tCostumeData.cap end
+		if category == MapleAvatarItemCategory.Cape then return tCostumeData.cape end
+		if category == MapleAvatarItemCategory.Coat then return tCostumeData.coat end
+		if category == MapleAvatarItemCategory.Longcoat then return tCostumeData.longcoat end
+		if category == MapleAvatarItemCategory.Pants then return tCostumeData.pants end
+		if category == MapleAvatarItemCategory.Glove then return tCostumeData.glove end
+		if category == MapleAvatarItemCategory.Shoes then return tCostumeData.shoes end
+		if category == MapleAvatarItemCategory.OneHandedWeapon then return tCostumeData.oneHandedWeapon end
+		if category == MapleAvatarItemCategory.TwoHandedWeapon then return tCostumeData.twoHandedWeapon end
+		if category == MapleAvatarItemCategory.SubWeapon then return tCostumeData.subWeapon end
+		if category == MapleAvatarItemCategory.Shield then return tCostumeData.subWeapon end
+		if category == MapleAvatarItemCategory.FaceAccessory then return tCostumeData.faceAccessory end
+		if category == MapleAvatarItemCategory.EyeAccessory then return tCostumeData.eyeAccessory end
+		if category == MapleAvatarItemCategory.EarAccessory then return tCostumeData.earAccessory end
+		if category == MapleAvatarItemCategory.Ear then return tCostumeData.ear end
+
+		return ""
+	end
+
+end

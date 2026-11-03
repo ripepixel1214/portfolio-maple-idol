@@ -1,0 +1,12 @@
+@Struct
+script MiniGameCommandSessionState
+
+	-- 서버 생성 커맨드와 입력 순번 판정 상태
+	property any commandSequence = {}
+	property integer commandIndex = 0
+	property integer lastInputSequence = 0
+	property integer missCount = 0
+	property boolean resetOnError = false
+	property boolean serverInputStarted = false
+
+end

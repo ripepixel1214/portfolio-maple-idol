@@ -6,7 +6,6 @@ script TutorialStepMaster extends Logic
 
 	property string UI_TUTORIAL_STEP_PREFIX = "system.tutorial.step."
 
-	property any languageChangedHandler = nil
 
 	property Vector2 defaultCharacterPos = Vector2(-200, -480)
 
@@ -21,20 +20,30 @@ script TutorialStepMaster extends Logic
 	-- 자주 사용되는 엔티티 id
 	property string entity_MoveButton = "e6037948-8764-4515-abaa-63bc264589a5"
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	method void OnBeginPlay()
 		self:LoadScenarios()
-		if self:IsClient() and _LocalizationLogic ~= nil then
-			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
-		end
 	end
 
-	method void OnEndPlay()
-		-- 언어 변경 구독 해제
-		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
-			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
-			self.languageChangedHandler = nil
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	method any GetSteps(string tutorialId)
+		-- 지정 시나리오의 스텝 목록을 반환. 아직 로드 전이면 지연 로드.
+		if self.IsStepsLoaded == false then
+			self:LoadScenarios()
 		end
+		self:RefreshScenarioTexts()
+		return self.tScenarios[tutorialId]
 	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	method void LoadScenarios()
 		-- 시나리오별 튜토리얼 스텝 목록을 구성. 새 시나리오는 BeginScenario("id") 뒤에 Add* 호출로 추가.
@@ -72,7 +81,6 @@ script TutorialStepMaster extends Logic
 
 		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "08", Vector2(0, 10), false, "", {
 			{ targetId = "c70c9a04-e933-448b-a040-7d74b3e5817b", clickable = false },
-			{ activityId = "training_basic_vocal", clickable = true },
 		})
 
 		self:AddGuideStep(self.tutorialCharacterPortrait, self.UI_TUTORIAL_STEP_PREFIX .. "09", Vector2(640, -225), true, "", {
@@ -197,11 +205,8 @@ script TutorialStepMaster extends Logic
 		if localizationKey == nil or localizationKey == "" then
 			return ""
 		end
-		if _LocalizationLogic ~= nil and _LocalizationLogic.IsLoaded == true then
-			local localizedText = _LocalizationLogic:GetText(localizationKey, "")
-			if localizedText ~= "" then
-				return localizedText
-			end
+		if self:IsClient() then
+			return _LocalizationService:GetText(localizationKey)
 		end
 
 		return localizationKey
@@ -218,24 +223,6 @@ script TutorialStepMaster extends Logic
 		end
 	end
 
-	method void OnLanguageChanged(LanguageChangedEvent event)
-		-- 언어 변경 후 튜토리얼 스텝 문구 갱신
-		if event == nil then
-			return
-		end
-		self:RefreshScenarioTexts()
-	end
 
-	method any GetSteps(string tutorialId)
-		-- 지정 시나리오의 스텝 목록을 반환. 아직 로드 전이면 지연 로드.
-		if self:IsClient() and self.languageChangedHandler == nil and _LocalizationLogic ~= nil then
-			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
-		end
-		if self.IsStepsLoaded == false then
-			self:LoadScenarios()
-		end
-		self:RefreshScenarioTexts()
-		return self.tScenarios[tutorialId]
-	end
 
 end

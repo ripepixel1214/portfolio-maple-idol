@@ -1,0 +1,312 @@
+-- RuntimeActorManager가 사용하는 서버 권위 런타임 액터 표시 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script RuntimeActorStorage extends Logic
+
+	property string runtimeActorsStorageKey = "runtimeActorData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedRuntimeActorsString = ""
+
+	property boolean canSaveRuntimeActors = false
+
+	property boolean isRuntimeActorsSaveInProgress = false
+
+	property string pendingRuntimeActorsUserId = ""
+
+	property string pendingRuntimeActorsString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadRuntimeActors(string userId)
+		-- UserDataStorage에서 런타임 액터 저장 문자열을 읽고, 없으면 빈 런타임 액터 목록을 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[RuntimeActorStorage] userId is required")
+			self.loadedRuntimeActorsString = ""
+			self.canSaveRuntimeActors = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedRuntimeActorsString = userStorage:GetAndWait(self.runtimeActorsStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedRuntimeActorsString = ""
+			self.canSaveRuntimeActors = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedRuntimeActorsString = ""
+			self.canSaveRuntimeActors = false
+			return nil
+		end
+
+		if storedRuntimeActorsString == nil or storedRuntimeActorsString == "" then
+			log("[RuntimeActorStorage] runtime actor save is empty userId=" .. tostring(userId))
+			self.loadedRuntimeActorsString = ""
+			self.canSaveRuntimeActors = true
+			return {}
+		end
+
+		local tRuntimeActorsPlainTable = self:CreateRuntimeActorsPlainTableFromString(storedRuntimeActorsString)
+		if tRuntimeActorsPlainTable == nil then
+			log_warning("[RuntimeActorStorage] runtime actor load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedRuntimeActorsString = storedRuntimeActorsString
+			self.canSaveRuntimeActors = false
+			return nil
+		end
+
+		self.loadedRuntimeActorsString = storedRuntimeActorsString
+		self.canSaveRuntimeActors = true
+		return tRuntimeActorsPlainTable.runtimeActors
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveRuntimeActorsAsync(string userId, any tRuntimeActors)
+		-- 런타임 액터 표시 데이터 목록을 v1 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveRuntimeActors == false then
+			log_warning("[RuntimeActorStorage] runtime actor save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[RuntimeActorStorage] userId is required")
+			return
+		end
+
+		local tRuntimeActorsPlainTable = self:CreateRuntimeActorsPlainTable(tRuntimeActors)
+		if tRuntimeActorsPlainTable == nil then
+			log_warning("[RuntimeActorStorage] runtimeActorsPlainTable is invalid")
+			return
+		end
+
+		local runtimeActorsString = self:CreateRuntimeActorsStringFromPlainTable(tRuntimeActorsPlainTable)
+		-- 저장 중 원래 값으로 되돌린 요청도 최신 스냅샷으로 보존
+		self.pendingRuntimeActorsUserId = userId
+		self.pendingRuntimeActorsString = runtimeActorsString
+		if self.isRuntimeActorsSaveInProgress then return end
+		self:CheckPendingRuntimeActorsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveRuntimeActorsStringAsync(string userId, string runtimeActorsString)
+		-- 직렬화된 런타임 액터 저장 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isRuntimeActorsSaveInProgress = true
+
+		local ok, errorMessage = pcall(function()
+			local userStorage = _DataStorageService:GetUserDataStorage(userId)
+			userStorage:SetAsync(self.runtimeActorsStorageKey, runtimeActorsString, function(errorCode, key)
+				self:OnRuntimeActorsSaveCompleted(userId, runtimeActorsString, errorCode)
+			end)
+		end)
+		if not ok then
+			log_error("[RuntimeActorStorage] save exception userId=" .. tostring(userId) .. " error=" .. tostring(errorMessage))
+			self:OnRuntimeActorsSaveCompleted(userId, runtimeActorsString, -1)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnRuntimeActorsSaveCompleted(string userId, string runtimeActorsString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청을 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.isRuntimeActorsSaveInProgress = false
+			-- 자동 반복 재시도 없이 최신 실패 데이터를 다음 저장 요청까지 유지
+			if self.pendingRuntimeActorsString == "" then
+				self.pendingRuntimeActorsUserId = userId
+				self.pendingRuntimeActorsString = runtimeActorsString
+			end
+			return
+		else
+			self.loadedRuntimeActorsString = runtimeActorsString
+		end
+
+		self.isRuntimeActorsSaveInProgress = false
+		self:CheckPendingRuntimeActorsSave()
+
+		if isSaved then
+			local tRuntimeActorsPlainTable = self:CreateRuntimeActorsPlainTableFromString(runtimeActorsString)
+			if tRuntimeActorsPlainTable ~= nil then
+				log("[RuntimeActorStorage] runtime actors save complete count=" .. tostring(#tRuntimeActorsPlainTable.runtimeActors))
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingRuntimeActorsSave()
+		-- 대기 중인 최신 런타임 액터 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if not self.canSaveRuntimeActors or self.isRuntimeActorsSaveInProgress or self.pendingRuntimeActorsString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingRuntimeActorsUserId
+		local pendingRuntimeActorsString = self.pendingRuntimeActorsString
+		self.pendingRuntimeActorsUserId = ""
+		self.pendingRuntimeActorsString = ""
+
+		if pendingRuntimeActorsString == self.loadedRuntimeActorsString then
+			return
+		end
+
+		self:SaveRuntimeActorsStringAsync(pendingUserId, pendingRuntimeActorsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorsPlainTableFromString(string runtimeActorsString)
+		-- 저장 문자열을 런타임 액터 plain table로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(runtimeActorsString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[RuntimeActorStorage] runtime actor save string parse failed")
+			return nil
+		end
+
+		return self:CreateRuntimeActorsPlainTableFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateRuntimeActorsStringFromPlainTable(any tRuntimeActorsPlainTable)
+		-- 런타임 액터 plain table을 DataStorage에 넣을 v1 저장 문자열로 만듭니다.
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.runtimeActorCount = #tRuntimeActorsPlainTable.runtimeActors
+
+		for index, tRuntimeActorRow in ipairs(tRuntimeActorsPlainTable.runtimeActors) do
+			local suffix = tostring(index)
+			tFlatPlainTable["actorId" .. suffix] = tRuntimeActorRow.actorId
+			tFlatPlainTable["name" .. suffix] = tRuntimeActorRow.name
+			tFlatPlainTable["portrait" .. suffix] = tRuntimeActorRow.portrait
+			tFlatPlainTable["portraitHorizontal" .. suffix] = tRuntimeActorRow.portraitHorizontal
+			tFlatPlainTable["portraitFullBody" .. suffix] = tRuntimeActorRow.portraitFullBody
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorsPlainTableFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 복원한 flat plain table의 버전을 확인하고 런타임 액터 plain table로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion == 0 or saveVersion == 1 then
+			return self:CreateRuntimeActorsPlainTableFromFlatPlainTableV1(tFlatPlainTable)
+		end
+
+		log_warning("[RuntimeActorStorage] unsupported runtime actor saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorsPlainTableFromFlatPlainTableV1(any tFlatPlainTable)
+		-- v1 flat plain table을 런타임 액터 plain table로 정규화합니다.
+		local runtimeActorCount = self:NormalizeInteger(tFlatPlainTable.runtimeActorCount, 0, 0)
+		local tRuntimeActorsPlainTable = {}
+		tRuntimeActorsPlainTable.runtimeActors = {}
+
+		for index = 1, runtimeActorCount do
+			local suffix = tostring(index)
+			local tRuntimeActorRow = {}
+			tRuntimeActorRow.actorId = tFlatPlainTable["actorId" .. suffix]
+			tRuntimeActorRow.name = tFlatPlainTable["name" .. suffix]
+			tRuntimeActorRow.portrait = tFlatPlainTable["portrait" .. suffix]
+			tRuntimeActorRow.portraitHorizontal = tFlatPlainTable["portraitHorizontal" .. suffix]
+			tRuntimeActorRow.portraitFullBody = tFlatPlainTable["portraitFullBody" .. suffix]
+
+			local tNormalizedRow = self:CreateRuntimeActorRowFromPlainTable(tRuntimeActorRow)
+			if tNormalizedRow == nil then
+				return nil
+			end
+
+			table.insert(tRuntimeActorsPlainTable.runtimeActors, tNormalizedRow)
+		end
+
+		return tRuntimeActorsPlainTable
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorsPlainTable(any tRuntimeActors)
+		-- 서버 권위 런타임 액터 목록을 저장용 plain table로 만듭니다.
+		if tRuntimeActors == nil or type(tRuntimeActors) ~= "table" then
+			return nil
+		end
+
+		local tRuntimeActorsPlainTable = {}
+		tRuntimeActorsPlainTable.runtimeActors = {}
+
+		for _, tRuntimeActor in ipairs(tRuntimeActors) do
+			local tRuntimeActorRow = self:CreateRuntimeActorRow(tRuntimeActor)
+			if tRuntimeActorRow ~= nil then
+				table.insert(tRuntimeActorsPlainTable.runtimeActors, tRuntimeActorRow)
+			end
+		end
+
+		return tRuntimeActorsPlainTable
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorRow(any tRuntimeActor)
+		-- RuntimeActorData 한 건을 v1 저장용 row로 만듭니다.
+		if tRuntimeActor == nil then
+			return nil
+		end
+
+		local tRuntimeActorRow = {}
+		tRuntimeActorRow.actorId = tRuntimeActor.actorId
+		tRuntimeActorRow.name = tRuntimeActor.name
+		tRuntimeActorRow.portrait = tRuntimeActor.portrait
+		tRuntimeActorRow.portraitHorizontal = tRuntimeActor.portraitHorizontal
+		tRuntimeActorRow.portraitFullBody = tRuntimeActor.portraitFullBody
+
+		return self:CreateRuntimeActorRowFromPlainTable(tRuntimeActorRow)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateRuntimeActorRowFromPlainTable(any tPlainTableData)
+		-- 외부 입력 table을 안전한 런타임 액터 저장 row로 정규화합니다.
+		if tPlainTableData == nil or type(tPlainTableData) ~= "table" then
+			return nil
+		end
+
+		local actorId = self:NormalizeString(tPlainTableData.actorId, "")
+		if actorId == "" then
+			return nil
+		end
+
+		local tRuntimeActorRow = {}
+		tRuntimeActorRow.actorId = actorId
+		tRuntimeActorRow.name = self:NormalizeString(tPlainTableData.name, "")
+		tRuntimeActorRow.portrait = self:NormalizeString(tPlainTableData.portrait, "")
+		tRuntimeActorRow.portraitHorizontal = self:NormalizeString(tPlainTableData.portraitHorizontal, "")
+		tRuntimeActorRow.portraitFullBody = self:NormalizeString(tPlainTableData.portraitFullBody, "")
+
+		return tRuntimeActorRow
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

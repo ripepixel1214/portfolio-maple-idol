@@ -1,0 +1,136 @@
+@Logic
+script WorldShopPurchaseLogic extends Logic
+
+	-- 등록 후 { productId = "실제 상품 ID", diamondAmount = 지급량, isSaleEnabled = true } 항목 추가
+	-- 지급량 변경은 새 상품 ID 사용, 판매 종료 항목은 false로 보존하여 미처리 구매 복구
+	property any packageDefinitions = {
+		{ productId = "8MNUV3CJJ", diamondAmount = 100, isSaleEnabled = true }
+	}
+	property any tPackagesByProductId = {}
+	property any requestedAtByUserId = {}
+	property any processPurchaseCallback = nil
+	property boolean isCatalogValid = false
+	property number lastClientRequestAt = -10
+	property string STATUS_READY = "ready"
+	property string STATUS_INVALID_PRODUCT = "invalid_product"
+	property string STATUS_WALLET_UNAVAILABLE = "wallet_unavailable"
+	property string STATUS_PRODUCT_UNAVAILABLE = "product_unavailable"
+	property string STATUS_THROTTLED = "throttled"
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 월드 세션 시작 시 플랫폼 구매 콜백 등록
+		self.requestedAtByUserId = {}
+		self:BuildCatalog()
+		self.processPurchaseCallback = function(purchaseInfo) return self:ProcessPurchase(purchaseInfo) end
+		_WorldShopService:SetProcessPurchaseCallback(self.processPurchaseCallback)
+		log("[WorldShop] purchase callback registered packages=" .. tostring(#self.packageDefinitions))
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean BuildCatalog()
+		-- 중복 상품 ID나 비정상 설정이 있으면 신규 지급 전체 차단
+		self.tPackagesByProductId = {}
+		self.isCatalogValid = false
+		if type(self.packageDefinitions) ~= "table" then return false end
+		for _, tPlainData in ipairs(self.packageDefinitions) do
+			local tPackage = DiamondPackageData()
+			if tPackage:FromPlainTable(tPlainData) == false or self.tPackagesByProductId[tPackage.productId] ~= nil then
+				log_error("[WorldShop] invalid or duplicate diamond package definition")
+				self.tPackagesByProductId = {}
+				return false
+			end
+			self.tPackagesByProductId[tPackage.productId] = tPackage
+		end
+		self.isCatalogValid = true
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ProcessPurchase(any purchaseInfo)
+		-- UI 성공 통지 대신 플랫폼 구매 콜백으로만 지급, 내구 저장 완료 시에만 true 반환
+		if purchaseInfo == nil then return false end
+		local tPackage = self.isCatalogValid and self.tPackagesByProductId[purchaseInfo.ProductId] or nil
+		-- 상품 설정이 없어도 이전에 지급한 구매 ID는 지갑에서 중복 처리 완료 판정
+		local amount = tPackage ~= nil and tPackage.diamondAmount or 0
+		local success = _DiamondWalletLogic:TryProcessPurchase(purchaseInfo, amount)
+		if success == false then
+			log_warning("[WorldShop] purchase remains pending id=" .. tostring(purchaseInfo.PurchaseId)
+				.. " product=" .. tostring(purchaseInfo.ProductId))
+		end
+		return success
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean BeginPurchase(string productId)
+		-- 확정될 구매 UI에서 호출할 상품 ID 기반 진입점
+		if type(productId) ~= "string" or productId == "" then return false end
+		local now = _UtilLogic.ElapsedSeconds
+		if now - self.lastClientRequestAt < 2 then return false end
+		self.lastClientRequestAt = now
+		self:RequestBeginPurchase(productId)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method table ClientGetPackageDefinitions()
+		-- 구매 UI가 표시할 설정 복사본 반환, 실제 가격은 WorldShopService 상품 조회 사용
+		local result = {}
+		for _, tPlainData in ipairs(self.packageDefinitions) do
+			local tPackage = DiamondPackageData()
+			if tPackage:FromPlainTable(tPlainData) and tPackage.isSaleEnabled then
+				table.insert(result, tPackage:ToPlainTable())
+			end
+		end
+		return result
+	end
+
+	@ExecSpace("Server")
+	method void RequestBeginPurchase(string productId)
+		-- 요청자 지갑과 등록 상품을 확인한 뒤 해당 클라이언트에 결제 창 열기 허용
+		if isvalid(_UserService:GetUserEntityByUserId(senderUserId)) == false then return end
+		local now = _UtilLogic.ElapsedSeconds
+		local previous = self.requestedAtByUserId[senderUserId]
+		if previous ~= nil and now - previous < 2 then
+			self:ReceivePurchaseRequestResult(productId, self.STATUS_THROTTLED, senderUserId)
+			return
+		end
+		self.requestedAtByUserId[senderUserId] = now
+		local tPackage = self.isCatalogValid and self.tPackagesByProductId[productId] or nil
+		if tPackage == nil or tPackage.isSaleEnabled == false then
+			self:ReceivePurchaseRequestResult(productId, self.STATUS_INVALID_PRODUCT, senderUserId)
+			return
+		end
+		if _UserDataManager.isResetInProgress or _DiamondWalletLogic:LoadForUser(senderUserId) == false then
+			self:ReceivePurchaseRequestResult(productId, self.STATUS_WALLET_UNAVAILABLE, senderUserId)
+			return
+		end
+		local ok, product = pcall(function() return _WorldShopService:GetProductAndWait(productId) end)
+		if ok == false or product == nil or product.Id ~= productId or product.Type ~= WorldShopProductType.Item then
+			self:ReceivePurchaseRequestResult(productId, self.STATUS_PRODUCT_UNAVAILABLE, senderUserId)
+			return
+		end
+		self:ReceivePurchaseRequestResult(productId, self.STATUS_READY, senderUserId)
+	end
+
+	@ExecSpace("Client")
+	method void ReceivePurchaseRequestResult(string productId, string status)
+		-- 서버의 사전 확인 결과 전달 및 플랫폼 결제 창 표시
+		local event = WorldShopPurchaseRequestEvent()
+		event.productId = productId
+		event.status = status
+		self:SendEvent(event)
+		if status == self.STATUS_READY then _WorldShopService:PromptPurchase(productId) end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 종료 중 새 구매 지급 차단 및 콜백 참조 해제
+		_WorldShopService:SetProcessPurchaseCallback(function(purchaseInfo) return false end)
+		self.processPurchaseCallback = nil
+		self.tPackagesByProductId = {}
+		self.requestedAtByUserId = {}
+		self.isCatalogValid = false
+	end
+
+end

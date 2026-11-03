@@ -5,13 +5,16 @@ script EMiniGameContextType extends Logic
 	property integer None = -1
 	property integer Standalone = 0
 	property integer Event = 1
+	-- 외출 이외의 서버 콘텐츠 호출용 확장 문맥
+	property integer Content = 3
+	-- 기존 데이터 식별용 예약 값, 신규 세션에서는 사용 불가
 	property integer Performance = 2
 
 	method boolean IsValid(integer contextType)
 		-- 알려진 실행 문맥인지 반환한다.
 		return contextType == self.Standalone
 			or contextType == self.Event
-			or contextType == self.Performance
+			or contextType == self.Content
 	end
 
 	method string ToName(integer contextType)
@@ -22,6 +25,8 @@ script EMiniGameContextType extends Logic
 			return "Event"
 		elseif contextType == self.Performance then
 			return "Performance"
+		elseif contextType == self.Content then
+			return "Content"
 		end
 
 		return "None"

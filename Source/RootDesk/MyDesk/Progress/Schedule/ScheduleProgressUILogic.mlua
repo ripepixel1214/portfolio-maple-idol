@@ -83,11 +83,7 @@ script ScheduleProgressUILogic extends Logic
 
 	property Entity FridayDay = "29f556c1-0d86-415e-9735-d359bc688800"
 
-	property string PracticeCharacterPath01 = "/maps/Map_Studio/AvatarActorModel_1"
-
-	property string PracticeCharacterPath02 = "/maps/Map_Studio/AvatarActorModel_2"
-
-	property string PracticeCharacterPath03 = "/maps/Map_Studio/AvatarActorModel_3"
+	property EntityRef PracticeMap = "5db1990a-8560-4401-b840-1c208340a2c8"
 
 	property number DayActiveY = 0
 
@@ -100,6 +96,8 @@ script ScheduleProgressUILogic extends Logic
 	property integer PendingPresentationDay = 0
 
 	property any PendingPresentationSlot = nil
+	property any currentPresentationSlot = nil
+	property string UI_ACTIVITY_MISSING_KEY = "ui.schedule_progress.activity_missing"
 
 	property boolean IsPresenting = false
 
@@ -139,6 +137,8 @@ script ScheduleProgressUILogic extends Logic
 
 	property any progressChangedHandler = nil
 
+	-- Public API
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- 진행 발표 UI를 초기화하고 진행 데이터 갱신 이벤트를 연결합니다.
@@ -165,6 +165,7 @@ script ScheduleProgressUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
+		-- 언어 변경 구독 해제
 		-- 진행 발표 UI가 연결한 이벤트 핸들러를 정리합니다.
 		self:RestorePracticeCharacters()
 		self:StopSequenceDayPresentationWait()
@@ -222,6 +223,7 @@ script ScheduleProgressUILogic extends Logic
 		end
 		
 		self.CurrentPresentationDay = day
+		self.currentPresentationSlot = slot
 		self:PrepareActivityResultPresentationForDay(day)
 		self:RefreshProgressHeader()
 		self:SetEntityRichText(self.ProgressMessageText, self:BuildActivityMessageForSlot(slot))
@@ -236,6 +238,7 @@ script ScheduleProgressUILogic extends Logic
 		-- 주간 시퀀스 표시를 시작할 수 있도록 UI 상태를 엽니다.
 		self:HidePracticeCharacters()
 		self.CurrentPresentationDay = 0
+		self.currentPresentationSlot = nil
 		self.PendingPresentationDay = 0
 		self.PendingPresentationSlot = nil
 		self.IsPresenting = true
@@ -392,6 +395,7 @@ script ScheduleProgressUILogic extends Logic
 	method void ResetPresentation()
 		-- 발표 UI가 들고 있는 표시 상태만 초기화합니다.
 		self.CurrentPresentationDay = 0
+		self.currentPresentationSlot = nil
 		self.PendingPresentationDay = 0
 		self.PendingPresentationSlot = nil
 		self:RestorePracticeCharacters()
@@ -422,9 +426,7 @@ script ScheduleProgressUILogic extends Logic
 			return
 		end
 
-		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath01, false)
-		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath02, false)
-		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath03, false)
+		self:SetPracticeCharactersHidden(true)
 		self.IsPracticeCharactersHidden = true
 	end
 
@@ -435,25 +437,17 @@ script ScheduleProgressUILogic extends Logic
 			return
 		end
 
-		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath01, true)
-		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath02, true)
-		self:SetPracticeCharacterVisibleByPath(self.PracticeCharacterPath03, true)
+		self:SetPracticeCharactersHidden(false)
 		self.IsPracticeCharactersHidden = false
 	end
 
 	@ExecSpace("ClientOnly")
-	method void SetPracticeCharacterVisibleByPath(string entityPath, boolean isVisible)
-		-- 지정된 경로의 연습실 캐릭터 루트 엔티티 표시 상태를 변경합니다.
-		if entityPath == nil or entityPath == "" then
-			return
-		end
-
-		local characterEntity = _EntityService:GetEntityByPath(entityPath)
-		if characterEntity == nil then
-			return
-		end
-
-		characterEntity:SetVisible(isVisible)
+	method void SetPracticeCharactersHidden(boolean isHidden)
+		-- 연출 중에는 전체 캐릭터를 숨기고 종료 후에는 현재 편성에 맞게 다시 표시합니다.
+		local studio = _EntityService:GetEntity(self.PracticeMap.EntityId)
+		if isvalid(studio) == false then return end
+		local roster = studio:GetComponent("script.StudioCharacterRosterComponent")
+		roster:SetPresentationHidden(isHidden)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -470,7 +464,10 @@ script ScheduleProgressUILogic extends Logic
 		self:SendEvent(uiVisibilityChangedEvent)
 	end
 
+	-- Private Methods
+
 	-- 활동 연출 표시 구역: activity type/training type에 맞는 이미지, 데코, 프레임, 포스트잇, 카메라 연출을 관리합니다.
+
 	@ExecSpace("ClientOnly")
 	method void RefreshActivityVisuals(any slot)
 		-- 현재 편성 슬롯의 활동 타입에 맞는 이미지, 프레임, 포스트잇을 표시합니다.
@@ -1137,7 +1134,7 @@ script ScheduleProgressUILogic extends Logic
 		local activityId = slot.activityId
 		local activity = _ActivityMaster ~= nil and _ActivityMaster:GetActivity(activityId) or nil
 		if activity == nil then
-			return tostring(activityId) .. " 활동 데이터를 찾을 수 없습니다."
+			return _LocaleTextUtil:Format(self.UI_ACTIVITY_MISSING_KEY, activityId, nil, nil, "")
 		end
 
 		local activityName = activity.description or ""
@@ -1150,8 +1147,8 @@ script ScheduleProgressUILogic extends Logic
 		end
 
 		local richActivityName = self:BuildActivityNameRichText(activityName, activity.nameColor or "")
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:Format(self.UI_ACTIVITY_COMPLETED_KEY, "{value1}을 진행했습니다.", richActivityName, nil, nil, "")
+		if _LocaleTextUtil ~= nil then
+			return _LocaleTextUtil:Format(self.UI_ACTIVITY_COMPLETED_KEY, richActivityName, nil, nil, "")
 		end
 
 		return richActivityName .. "을 진행했습니다."
@@ -1329,7 +1326,8 @@ script ScheduleProgressUILogic extends Logic
 		if _ProgressManager ~= nil then
 			local progress = _ProgressManager:ClientGetProgress()
 			if progress ~= nil then
-				perfId = progress.gameGoalId or ""
+				local stage = _StageMaster:GetStage(progress.eCurrentStage)
+				perfId = stage ~= nil and stage.performanceId or ""
 			end
 		end
 
@@ -1466,8 +1464,8 @@ script ScheduleProgressUILogic extends Logic
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
 		local month = progress ~= nil and progress.currentMonth or 1
 		local week = progress ~= nil and progress.currentWeek or 1
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:Format(self.UI_MONTH_WEEK_ACTIVITY_KEY, "{value1}월 {value2}주차 주간 활동", month, week, nil, "")
+		if _LocaleTextUtil ~= nil then
+			return _LocaleTextUtil:Format(self.UI_MONTH_WEEK_ACTIVITY_KEY, month, week, nil, "")
 		end
 
 		return tostring(month) .. "월 " .. tostring(week) .. "주차 주간 활동"
@@ -1506,4 +1504,5 @@ script ScheduleProgressUILogic extends Logic
 			entity.TextGUIRendererComponent.Text = value
 		end
 	end
+
 end

@@ -1,0 +1,32 @@
+---@description "게임에서 사용하는 고정 스탯의 표시 이름과 변화 방향을 정의합니다."
+@Logic
+script StatDefinitionModel extends Logic
+
+	property any Definitions = {}
+
+	method void OnBeginPlay()
+		self.Definitions = {
+			vocal = { LocalizationKey = "stat.vocal", SpriteName = "vocal", IsDecreaseBeneficial = false },
+			dance = { LocalizationKey = "stat.dance", SpriteName = "dance", IsDecreaseBeneficial = false },
+			visual = { LocalizationKey = "stat.visual", SpriteName = "visual", IsDecreaseBeneficial = false },
+			fandom = { LocalizationKey = "stat.fandom", SpriteName = "fandom", IsDecreaseBeneficial = false },
+			fatigue = { LocalizationKey = "stat.fatigue", SpriteName = "fatigue", IsDecreaseBeneficial = true }
+		}
+	end
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method string GetLocalizedName(string statKey)
+		return _LocaleTextUtil:GetText(self.Definitions[statKey].LocalizationKey)
+	end
+
+	method string GetSpriteName(string statKey)
+		return self.Definitions[statKey].SpriteName
+	end
+
+	method boolean IsDecreaseBeneficial(string statKey)
+		return self.Definitions[statKey].IsDecreaseBeneficial == true
+	end
+
+end

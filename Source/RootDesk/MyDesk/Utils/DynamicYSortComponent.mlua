@@ -21,6 +21,15 @@ script DynamicYSortComponent extends Component
 
 	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
+		-- 맵 전환 시 공통 레이어 재해석 및 정렬 캐시 초기화
+		local map = self.Entity.CurrentMap
+		if not isvalid(map) then return end
+		if self._T.sortMap ~= map then
+			self._T.sortMap = map
+			self._T.sortingLayer = _YSortLayerLogic:ResolveSortingLayer(map)
+			self._applied = false
+		end
+
 		-- 점프/공중 상태에서는 발밑 Y가 일시적으로 올라가 order가 뒤로 튀어(오브젝트 뒤로 숨음) 보이므로, 최초 지면 order를 적용한 뒤에는 착지 전까지 마지막 order를 유지한다
 		if self._applied and self:IsAirborne() then
 			return
@@ -35,6 +44,9 @@ script DynamicYSortComponent extends Component
 
 		-- 렌더러가 아직 준비 안 됐으면 이번 프레임은 넘기고 다음 프레임에 다시 시도한다.
 		if not self:ApplyOrder(order) then return end
+		if not self._applied and self.Entity == _UserService.LocalPlayer then
+			log("[DynamicYSort] map=" .. map.Name .. " layer=" .. self._T.sortingLayer .. " order=" .. tostring(order))
+		end
 		self._lastOrder = order
 		self._applied = true
 	end
@@ -66,6 +78,10 @@ script DynamicYSortComponent extends Component
 			for _, child in ipairs(self.Entity.Children:ToTable()) do
 				local r = child.SpriteRendererComponent
 				if isvalid(r) then
+					if self._T.sortingLayer ~= "" then
+						r.IgnoreMapLayerCheck = true
+						r.SortingLayer = self._T.sortingLayer
+					end
 					r.OrderInLayer = order
 					applied = true
 				end
@@ -75,12 +91,20 @@ script DynamicYSortComponent extends Component
 
 		local avatar = self.Entity.AvatarRendererComponent
 		if isvalid(avatar) then
+			if self._T.sortingLayer ~= "" then
+				avatar.IgnoreMapLayerCheck = true
+				avatar.SortingLayer = self._T.sortingLayer
+			end
 			avatar.OrderInLayer = order
 			return true
 		end
 
 		local sprite = self.Entity.SpriteRendererComponent
 		if isvalid(sprite) then
+			if self._T.sortingLayer ~= "" then
+				sprite.IgnoreMapLayerCheck = true
+				sprite.SortingLayer = self._T.sortingLayer
+			end
 			sprite.OrderInLayer = order
 			return true
 		end

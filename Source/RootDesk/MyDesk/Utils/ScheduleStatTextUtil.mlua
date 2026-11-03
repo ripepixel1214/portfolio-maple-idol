@@ -3,22 +3,14 @@ script ScheduleStatTextUtil extends Logic
 
 	property string UI_STAT_NO_CHANGE_KEY = "ui.schedule.no_stat_change"
 
-	property string UI_STAT_VOCAL_KEY = "ui.schedule.stat.vocal"
-
-	property string UI_STAT_DANCE_KEY = "ui.schedule.stat.dance"
-
-	property string UI_STAT_VISUAL_KEY = "ui.schedule.stat.visual"
-
-	property string UI_STAT_FANDOM_KEY = "ui.schedule.stat.fandom"
-
-	property string UI_STAT_FATIGUE_KEY = "ui.schedule.stat.fatigue"
+	-- Public API
 
 	@ExecSpace("ClientOnly")
 	method string BuildStatChangeIconRichText(any changes, boolean onlyChangedStats, string separator, number spriteVOffset)
 		-- 스탯 변화 테이블을 아이콘형 스케줄 리치 텍스트 문자열로 변환합니다.
 		local parts = {}
 		if changes == nil then
-			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_STAT_NO_CHANGE_KEY)
 		end
 
 		self:AddIconStatChangePart(parts, "vocal", changes.vocal or 0, onlyChangedStats, spriteVOffset)
@@ -28,7 +20,7 @@ script ScheduleStatTextUtil extends Logic
 		self:AddIconStatChangePart(parts, "fatigue", changes.fatigue or 0, onlyChangedStats, spriteVOffset)
 
 		if #parts <= 0 then
-			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_STAT_NO_CHANGE_KEY)
 		end
 
 		return table.concat(parts, separator or "\n")
@@ -39,49 +31,26 @@ script ScheduleStatTextUtil extends Logic
 		-- 스탯 이름 텍스트는 유지하고 수치에만 색을 입힌 리치 텍스트 문자열로 변환합니다.
 		local parts = {}
 		if changes == nil then
-			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_STAT_NO_CHANGE_KEY)
 		end
 
-		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("vocal", ""), "vocal", changes.vocal or 0, onlyChangedStats)
-		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("dance", ""), "dance", changes.dance or 0, onlyChangedStats)
-		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("visual", ""), "visual", changes.visual or 0, onlyChangedStats)
-		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("fandom", ""), "fandom", changes.fandom or 0, onlyChangedStats)
-		self:AddTextStatChangePart(parts, self:GetLocalizedStatName("fatigue", ""), "fatigue", changes.fatigue or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetStatName("vocal"), "vocal", changes.vocal or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetStatName("dance"), "dance", changes.dance or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetStatName("visual"), "visual", changes.visual or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetStatName("fandom"), "fandom", changes.fandom or 0, onlyChangedStats)
+		self:AddTextStatChangePart(parts, self:GetStatName("fatigue"), "fatigue", changes.fatigue or 0, onlyChangedStats)
 
 		if #parts <= 0 then
-			return self:GetLocalizedText(self.UI_STAT_NO_CHANGE_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_STAT_NO_CHANGE_KEY)
 		end
 
 		return table.concat(parts, separator or "\n")
 	end
 
 	@ExecSpace("ClientOnly")
-	method string GetLocalizedText(string key, string fallbackText)
-		-- 현재 locale의 UI 문구를 조회합니다.
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:GetText(key, fallbackText)
-		end
-
-		return fallbackText or ""
-	end
-
-	@ExecSpace("ClientOnly")
-	method string GetLocalizedStatName(string statKey, string fallbackText)
+	method string GetStatName(string statKey)
 		-- 스탯 키에 대응하는 locale별 표시 이름을 조회합니다.
-		local key = ""
-		if statKey == "vocal" then
-			key = self.UI_STAT_VOCAL_KEY
-		elseif statKey == "dance" then
-			key = self.UI_STAT_DANCE_KEY
-		elseif statKey == "visual" then
-			key = self.UI_STAT_VISUAL_KEY
-		elseif statKey == "fandom" then
-			key = self.UI_STAT_FANDOM_KEY
-		elseif statKey == "fatigue" then
-			key = self.UI_STAT_FATIGUE_KEY
-		end
-
-		return self:GetLocalizedText(key, fallbackText)
+		return _StatDefinitionModel:GetLocalizedName(statKey)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -140,19 +109,8 @@ script ScheduleStatTextUtil extends Logic
 	@ExecSpace("ClientOnly")
 	method string GetStatSpriteTag(string statKey)
 		-- TextSpriteSet에 등록된 스탯 아이콘 이름으로 sprite 태그를 만듭니다.
-		if statKey == "vocal" then
-			return "<sprite name=\"vocal\">"
-		elseif statKey == "dance" then
-			return "<sprite name=\"dance\">"
-		elseif statKey == "visual" then
-			return "<sprite name=\"visual\">"
-		elseif statKey == "fatigue" then
-			return "<sprite name=\"fatigue\">"
-		elseif statKey == "fandom" then
-			return "<sprite name=\"fandom\">"
-		end
-
-		return ""
+		local spriteName = _StatDefinitionModel:GetSpriteName(statKey)
+		return "<sprite name=\"" .. spriteName .. "\">"
 	end
 
 	@ExecSpace("ClientOnly")
@@ -162,7 +120,7 @@ script ScheduleStatTextUtil extends Logic
 			return false
 		end
 
-		if statKey == "fatigue" then
+		if _StatDefinitionModel:IsDecreaseBeneficial(statKey) then
 			return value < 0
 		end
 

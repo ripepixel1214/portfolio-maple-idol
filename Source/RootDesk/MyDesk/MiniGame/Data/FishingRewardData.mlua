@@ -1,0 +1,55 @@
+---@description "낚시 보상, 쿠키 소비와 친밀도 영속 데이터"
+@Struct
+script FishingRewardData
+	property integer version = 1
+	property integer revision = 0
+	property boolean badgeGranted = false
+	property integer cookies = 0
+	property any intimacyByCharacter = {}
+	property any pending = nil
+	property any pendingResult = nil
+
+	method table ToPlainTable()
+		local intimacy = {}
+		for id, value in pairs(self.intimacyByCharacter) do intimacy[id] = value end
+		local plain = {version = self.version, revision = self.revision, badgeGranted = self.badgeGranted, cookies = self.cookies}
+		-- MSW JSON 변환에서 빈 테이블 타입을 추론하지 못하므로 값이 있을 때만 포함
+		if next(intimacy) ~= nil then plain.intimacyByCharacter = intimacy end
+		if self.pending ~= nil then plain.pending = self.pending end
+		if self.pendingResult ~= nil then plain.pendingResult = self.pendingResult end
+		return plain
+	end
+
+	method boolean FromPlainTable(any tPlainData)
+		-- 손상 데이터를 기본값으로 덮어쓰지 않고 로드 실패 처리
+		if type(tPlainData) ~= "table" or tPlainData.version ~= 1
+			or type(tPlainData.revision) ~= "number" or tPlainData.revision < 0 or tPlainData.revision % 1 ~= 0
+			or type(tPlainData.badgeGranted) ~= "boolean" or type(tPlainData.cookies) ~= "number"
+			or tPlainData.cookies < 0 or tPlainData.cookies % 1 ~= 0
+			or (tPlainData.intimacyByCharacter ~= nil and type(tPlainData.intimacyByCharacter) ~= "table") then return false end
+		self.intimacyByCharacter = {}
+		for id, value in pairs(tPlainData.intimacyByCharacter or {}) do
+			if type(id) ~= "string" or id == "" or type(value) ~= "number" or value < 0
+				or value ~= value or value == math.huge then return false end
+			self.intimacyByCharacter[id] = value
+		end
+		if tPlainData.pending ~= nil then
+			local row = tPlainData.pending
+			if type(row) ~= "table" or type(row.id) ~= "string" or type(row.kind) ~= "string"
+				or type(row.revision) ~= "number" or row.revision ~= tPlainData.revision
+				or type(row.target) ~= "string" or type(row.score) ~= "number"
+				or type(row.itemId) ~= "string" or type(row.count) ~= "number" then return false end
+		end
+		self.revision = tPlainData.revision
+		self.badgeGranted = tPlainData.badgeGranted
+		self.cookies = tPlainData.cookies
+		self.pending = tPlainData.pending
+		if tPlainData.pendingResult ~= nil then
+			local row = tPlainData.pendingResult
+			if type(row) ~= "table" or type(row.id) ~= "string" or string.match(row.id, "^[%w_%-]+$") == nil
+				or type(row.score) ~= "number" or row.score < 0 or row.score % 1 ~= 0 then return false end
+		end
+		self.pendingResult = tPlainData.pendingResult
+		return true
+	end
+end

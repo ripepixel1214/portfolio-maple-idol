@@ -1,0 +1,25 @@
+---@description "럭키 큐브 공통 클라이언트 계약 연결"
+@Logic
+script MiniGameLuckyCubeClientHandler extends Logic
+	@ExecSpace("ClientOnly")
+	method any CreateBehavior()
+		local tBehavior = MiniGameClientBehavior()
+		tBehavior.requiredCapabilities = {_MiniGameViewRegistry.CAP_STAGE, _MiniGameViewRegistry.CAP_DICE}
+		tBehavior.usesInputHub = false
+		tBehavior.acceptsSelection = true
+		tBehavior.openLobby = function() _MiniGameLuckyCubePresenter:OpenLobby() end
+		tBehavior.openDebugLobby = function()
+			-- 서버 디버그 정산과 동일한 가상 코인으로 전체 판돈 범위 제공
+			_MiniGameLuckyCubePresenter:OpenDebugLobby(_MiniGameSettlementRule.DEBUG_TEST_BALANCE)
+		end
+		tBehavior.prepareView = function(presenter, tContext)
+			_MiniGameLuckyCubePresenter:BeginSession(tContext)
+		end
+		tBehavior.requestRejected = function(miniGameId, reason)
+			_MiniGameLuckyCubePresenter:HandleRejected(miniGameId)
+		end
+		tBehavior.reset = function() _MiniGameLuckyCubePresenter:ClearState() end
+		tBehavior.endSession = function(presenter) _MiniGameLuckyCubePresenter:EndSession() end
+		return tBehavior
+	end
+end

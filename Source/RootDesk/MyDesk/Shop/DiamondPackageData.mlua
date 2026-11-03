@@ -1,0 +1,26 @@
+@Struct
+script DiamondPackageData
+
+	property string productId = ""
+	property integer diamondAmount = 0
+	property boolean isSaleEnabled = false
+
+	method boolean FromPlainTable(any tPlainData)
+		-- 서버 상품 설정의 ID·지급량·판매 가능 여부 검증
+		if type(tPlainData) ~= "table" or type(tPlainData.productId) ~= "string"
+			or tPlainData.productId == "" or type(tPlainData.diamondAmount) ~= "number"
+			or tPlainData.diamondAmount <= 0 or tPlainData.diamondAmount > 9007199254740991
+			or tPlainData.diamondAmount ~= math.floor(tPlainData.diamondAmount)
+			or type(tPlainData.isSaleEnabled) ~= "boolean" then return false end
+		self.productId = tPlainData.productId
+		self.diamondAmount = tPlainData.diamondAmount
+		self.isSaleEnabled = tPlainData.isSaleEnabled
+		return true
+	end
+
+	method table ToPlainTable()
+		-- 확정 전 상점 UI 연결용 상품 설정 복사
+		return { productId = self.productId, diamondAmount = self.diamondAmount, isSaleEnabled = self.isSaleEnabled }
+	end
+
+end

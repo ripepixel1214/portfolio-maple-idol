@@ -10,6 +10,8 @@ script EventResultMaster extends Logic
 	-- EventResultRow[]
 	property any tEventResults = {}
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 이벤트 결과 정적 데이터는 클라이언트/서버 양쪽에서 조회하므로 시작 시 캐시를 준비합니다.
 		self:EnsureEventResultTableLoaded()
@@ -56,11 +58,7 @@ script EventResultMaster extends Logic
 		-- EventResultTable의 한 row를 EventResultRow 구조체로 변환합니다.
 		local tEventResult = EventResultRow()
 		tEventResult.id = id
-		local descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
-		tEventResult.description = ""
-		if _LocalizationLogic ~= nil then
-			tEventResult.description = _LocalizationLogic:GetText(descriptionKey, "")
-		end
+		tEventResult.descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
 		tEventResult.value1Action = _DataTableUtil:SafeGetString(dataSet, rowIndex, "value1Action", "")
 		tEventResult.value2Action = _DataTableUtil:SafeGetString(dataSet, rowIndex, "value2Action", "")
 		tEventResult.value3Action = _DataTableUtil:SafeGetString(dataSet, rowIndex, "value3Action", "")
@@ -79,7 +77,8 @@ script EventResultMaster extends Logic
 		return self.tEventResults
 	end
 
-	method string GetFormattedDescription(string eventResultId, any value1, any value2, any value3)
+	@ExecSpace("ClientOnly")
+	method string GetFormattedDescription(string eventResultId, any value1, any value2, any value3, string characterName)
 		-- 이벤트 결과 설명 템플릿에 value1~3 값을 반영한 표시 문자열을 반환합니다.
 		local tEventResult = self:GetEventResult(eventResultId)
 		if tEventResult == nil then
@@ -87,22 +86,16 @@ script EventResultMaster extends Logic
 			return ""
 		end
 
-		local text = tEventResult.description
-		if text == "" then
-			return ""
-		end
-
 		local displayValue1 = self:GetFormattedDescriptionValue(tEventResult.value1Action, value1)
 		local displayValue2 = self:GetFormattedDescriptionValue(tEventResult.value2Action, value2)
 		local displayValue3 = self:GetFormattedDescriptionValue(tEventResult.value3Action, value3)
 
-		text = self:FormatEventResultValue(text, 1, displayValue1)
-		text = self:FormatEventResultPercentValue(text, 1, displayValue1)
-		text = self:FormatEventResultValue(text, 2, displayValue2)
-		text = self:FormatEventResultPercentValue(text, 2, displayValue2)
-		text = self:FormatEventResultValue(text, 3, displayValue3)
-		text = self:FormatEventResultPercentValue(text, 3, displayValue3)
-		return text
+		return _LocalizationService:GetTextFormat(
+			tEventResult.descriptionKey,
+			displayValue1,
+			displayValue2,
+			displayValue3,
+			characterName)
 	end
 
 	method any GetFormattedDescriptionValue(string action, any value)
@@ -131,8 +124,11 @@ script EventResultMaster extends Logic
 			if tActivity ~= nil and tActivity.name ~= nil and tActivity.name ~= "" then
 				return tActivity.name
 			end
+		elseif unlockType == "trainingCard" then
+			local trainingCard = _TrainingDataMaster:GetTrainingCard(targetId)
+			if trainingCard ~= nil then return _LocalizationService:GetText(trainingCard.nameKey) end
 		elseif unlockType == "character" then
-			local actorName = _ActorMaster:GetActorName(targetId)
+			local actorName = _RuntimeActorManager:ClientGetLocalizedActorName(targetId)
 			if actorName ~= nil and actorName ~= "" then
 				return actorName
 			end
@@ -146,26 +142,7 @@ script EventResultMaster extends Logic
 		return targetId
 	end
 
-	method string FormatEventResultValue(string text, integer valueIndex, any value)
-		-- 숫자 value는 기존 숫자 포맷으로, 문자열 value는 그대로 템플릿에 반영합니다.
-		local numberValue = tonumber(value)
-		if numberValue ~= nil then
-			return _TemplateTextFormatter:FormatNumberValue(text, valueIndex, numberValue)
-		end
-
-		return _TemplateTextFormatter:FormatText(text, "{value" .. tostring(valueIndex) .. "}", self:NormalizeActionValueToString(value))
-	end
-
-	method string FormatEventResultPercentValue(string text, integer valueIndex, any value)
-		-- 퍼센트 토큰은 숫자로 해석 가능한 value에만 반영합니다.
-		local numberValue = tonumber(value)
-		if numberValue == nil then
-			return text
-		end
-
-		return _TemplateTextFormatter:FormatPercentValue(text, valueIndex, numberValue)
-	end
-
+	@ExecSpace("ClientOnly")
 	method string GetFormattedDescriptionByEvent(string eventId, string eventResultId)
 		-- 이벤트 row의 성공/실패 value를 찾아 이벤트 결과 설명 템플릿에 반영한 표시 문자열을 반환합니다.
 		local tEvent = _EventMaster:GetEvent(eventId)
@@ -174,32 +151,15 @@ script EventResultMaster extends Logic
 			return ""
 		end
 
-		local text = ""
+		local characterName = _RuntimeActorManager:ClientGetLocalizedActorName(tEvent.characterId)
 		if tEvent.successResultId == eventResultId then
-			text = self:GetFormattedDescription(eventResultId, tEvent.successValue1, tEvent.successValue2, tEvent.successValue3)
+			return self:GetFormattedDescription(eventResultId, tEvent.successValue1, tEvent.successValue2, tEvent.successValue3, characterName)
 		elseif tEvent.failResultId == eventResultId then
-			text = self:GetFormattedDescription(eventResultId, tEvent.failValue1, tEvent.failValue2, tEvent.failValue3)
+			return self:GetFormattedDescription(eventResultId, tEvent.failValue1, tEvent.failValue2, tEvent.failValue3, characterName)
 		else
 			log_warning("[EventResultMaster] event result does not belong to event eventId=" .. tostring(eventId) .. ", eventResultId=" .. tostring(eventResultId))
 			return ""
 		end
-
-		return self:FormatCharacterName(text, tEvent.characterId)
-	end
-
-	method string FormatCharacterName(string text, string characterId)
-		-- 결과 설명의 {character} 토큰을 대상 캐릭터의 표시 이름으로 치환합니다.
-		if text == nil or text == "" then
-			return text
-		end
-
-		if characterId == nil or characterId == "" then
-			return text
-		end
-
-		-- 런타임 이름 오버라이드까지 반영하기 위해 RuntimeActorManager를 사용합니다. (팝업은 Client 경로에서 호출됨)
-		local name = _RuntimeActorManager:ClientGetActorName(characterId)
-		return _TemplateTextFormatter:FormatText(text, "{character}", name or "")
 	end
 
 	method any BuildEventResultDataByEvent(string eventId, string eventResultId, string characterId)
@@ -236,6 +196,8 @@ script EventResultMaster extends Logic
 
 		return tData
 	end
+
+	-- Private Methods
 
 	method any GetEventResultValuesByEvent(string eventId, string eventResultId)
 		-- EventTable의 성공/실패 value 중 eventResultId에 대응되는 값을 반환합니다.
@@ -361,8 +323,8 @@ script EventResultMaster extends Logic
 			tDelta.actionPoint = (tDelta.actionPoint or 0) + value
 		elseif statKey == "fandom" then
 			tDelta.fandom = (tDelta.fandom or 0) + value
-		elseif statKey == "meso" or statKey == "groupMeso" then
-			tDelta.groupMeso = (tDelta.groupMeso or 0) + value
+		elseif statKey == "meso" then
+			tDelta.meso = (tDelta.meso or 0) + value
 		end
 	end
 

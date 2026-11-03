@@ -1,3 +1,4 @@
+---@description "미니게임 결과 데이터"
 @Struct
 script MiniGameResultData
 
@@ -6,6 +7,9 @@ script MiniGameResultData
 	property number progress = 0
 	property string accuracy = ""
 	property string reason = ""
+	property integer successCount = 0
+	property integer hitCount = 0
+	property number shapeRatio = 0
 
 	method any ToPlainTable()
 		-- RPC 전달용 plain table 생성
@@ -14,7 +18,10 @@ script MiniGameResultData
 			score = self.score,
 			progress = self.progress,
 			accuracy = self.accuracy,
-			reason = self.reason
+			reason = self.reason,
+			successCount = self.successCount,
+			hitCount = self.hitCount,
+			shapeRatio = self.shapeRatio
 		}
 	end
 
@@ -30,6 +37,9 @@ script MiniGameResultData
 		self.progress = tonumber(tPlainResult.progress) or 0
 		self.accuracy = type(tPlainResult.accuracy) == "string" and tPlainResult.accuracy or ""
 		self.reason = type(tPlainResult.reason) == "string" and tPlainResult.reason or ""
+		self.successCount = math.max(0, math.floor(tonumber(tPlainResult.successCount) or 0))
+		self.hitCount = math.max(0, math.floor(tonumber(tPlainResult.hitCount) or 0))
+		self.shapeRatio = math.max(0, math.min(1, tonumber(tPlainResult.shapeRatio) or 0))
 		return self
 	end
 

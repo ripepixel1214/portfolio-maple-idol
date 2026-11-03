@@ -1,12 +1,13 @@
+---@description "커맨드 아이콘과 입력 결과 표시 컴포넌트"
 @Component
 @ExecSpace("ClientOnly")
 script MiniGameCommandBox extends Component
 
-	-- 커맨드 아이콘 바 컴포넌트. CommandBox 엔티티에 붙어 자식(CommandIcon1~N / ErrorFlash)을 스스로 관리한다.
-	-- 두 미니게임 UI 스킨(MiniGameUILogic / MiniGamePerformanceUILogic)이 공용으로 사용해 중복 로직을 제거한다.
-	-- 공개 API: SetSequence(names) / IsArrowResourcesReady() / SetProgress(doneCount) / PlayHit(index) / ShowError() / HideAll()
+	-- 에디터에서 할당한 커맨드 아이콘과 오류 표시 관리
+	-- 미니게임 UI의 커맨드 아이콘 표시와 효과 공용 처리
+	-- 공개 API: SetSequence(names) / SetProgress(doneCount) / PlayHit(index) / ShowError() / ResetSequence()
 
-	-- 커맨드 아이콘 최대 개수(5~8 지원) / 배치 여백·최대 크기
+	-- 커맨드 아이콘 최대 개수(5~8 지원) / 배치 여백, 최대 크기
 	property integer commandIconCount = 8
 	property number commandBoxPadding = 30
 	property number commandIconMaxSize = 70
@@ -22,12 +23,15 @@ script MiniGameCommandBox extends Component
 	property string arrowDownRuid = "57ce2b1cd81e4f6baa464e9f9d79b643"
 	property string arrowLeftRuid = "9e2420affcd748afbdebe34617a0077e"
 	property string arrowRightRuid = "8d9eb632549f4242b269d7a048047491"
-	-- 화살표 리소스 사전 로드 완료 여부
-	property boolean arrowResourcesReady = false
-	-- 화살표 리소스 사전 로드 요청 여부
-	property boolean arrowResourcesRequested = false
-
 	property Entity errorFlash = nil
+	property Entity commandIcon1 = nil
+	property Entity commandIcon2 = nil
+	property Entity commandIcon3 = nil
+	property Entity commandIcon4 = nil
+	property Entity commandIcon5 = nil
+	property Entity commandIcon6 = nil
+	property Entity commandIcon7 = nil
+	property Entity commandIcon8 = nil
 
 	-- 런타임 상태 (자식 해석 여부 / 아이콘 풀 / 오답 플래시 / 현재 시퀀스 / 아이콘별 강조 타이머 / 오답 타이머)
 	@HideFromInspector
@@ -45,70 +49,40 @@ script MiniGameCommandBox extends Component
 	method void OnBeginPlay()
 		-- 로드 시 자식을 미리 해석한다. (Enable 타이밍에 따라 지연될 수 있어 각 공개 API에서도 재확인)
 		self:EnsureResolved()
-		self:PreloadArrowResources()
 	end
 
 	@ExecSpace("ClientOnly")
-	method void PreloadArrowResources()
-		-- 공연 cue 이전 네 방향 화살표 리소스 사전 로드
-		if self.arrowResourcesRequested == true then
-			return
-		end
-
-		self.arrowResourcesRequested = true
-		_ResourceService:PreloadAsync({
-			self.arrowUpRuid,
-			self.arrowDownRuid,
-			self.arrowLeftRuid,
-			self.arrowRightRuid
-		}, function()
-			self.arrowResourcesReady = true
-			if self.commandNames ~= nil and #self.commandNames > 0 then
-				self:Render(0)
-			end
-		end)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void EnsureResolved()
-		-- 자식(CommandIcon*/ErrorFlash)을 최초 1회 해석한다. (Enable 타이밍과 무관하게 지연 해석)
-		if self.resolved == true then
-			return
-		end
-
-		self.commandIcons = {}
+	method boolean EnsureResolved()
+		-- 직접 할당한 아이콘과 오류 표시 참조 확인
+		if self.resolved then return true end
+		local icons = {self.commandIcon1, self.commandIcon2, self.commandIcon3, self.commandIcon4, self.commandIcon5, self.commandIcon6, self.commandIcon7, self.commandIcon8}
 		for i = 1, self.commandIconCount do
-			self.commandIcons[i] = self.Entity:GetChildByName("CommandIcon" .. tostring(i))
+			if not isvalid(icons[i]) then
+				log_warning("[MiniGameCommandBox] 커맨드 아이콘 참조 누락 index=" .. tostring(i))
+				return false
+			end
 		end
-		self.errorFlash = self.Entity:GetChildByName("ErrorFlash")
+		if not isvalid(self.errorFlash) then return false end
+		self.commandIcons = icons
 		self.resolved = true
+		return true
 	end
 
 	@ExecSpace("ClientOnly")
 	method boolean SetSequence(any names)
 		-- 커맨드 시퀀스를 저장하고, 개수에 맞춰 아이콘을 배치한 뒤 진행 0 상태로 표시한다.
-		self:EnsureResolved()
+		if not self:EnsureResolved() then return false end
 		self.commandNames = names or {}
 		self:ComputeLayout(#self.commandNames)
-		if self.arrowResourcesReady == false then
-			self:HideAll()
-			return false
-		end
-		self:Render(0)
+		self:Render(0, true)
 		return true
-	end
-
-	@ExecSpace("ClientOnly")
-	method boolean IsArrowResourcesReady()
-		-- 화살표 아이콘 즉시 표시 가능 여부 반환
-		return self.arrowResourcesReady
 	end
 
 	@ExecSpace("ClientOnly")
 	method void SetProgress(integer doneCount)
 		-- 현재까지 입력한 개수에 맞춰 커맨드 표시를 갱신한다.
 		self:EnsureResolved()
-		self:Render(doneCount)
+		self:Render(doneCount, false)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -142,6 +116,10 @@ script MiniGameCommandBox extends Component
 		-- 모든 커맨드 아이콘을 숨기고 강조 효과 상태를 초기화한다. (세션 간 이전 커맨드/효과 잔상 방지)
 		self:EnsureResolved()
 		self.hitTimers = {}
+		self.commandErrorTimer = 0
+		if self.errorFlash ~= nil then
+			self.errorFlash.Enable = false
+		end
 		for i = 1, #self.commandIcons do
 			local icon = self.commandIcons[i]
 			if icon ~= nil then
@@ -189,7 +167,37 @@ script MiniGameCommandBox extends Component
 	end
 
 	@ExecSpace("ClientOnly")
-	method void Render(integer doneCount)
+	method void ResetSequence()
+		-- 이전 세션의 커맨드 데이터 제거
+		self.commandNames = {}
+		self:HideAll()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BindArrowSprite(Entity icon, string ruid, boolean forceRebind)
+		-- 활성 UI 렌더러에 동적 화살표 스프라이트 재바인딩
+		if icon == nil or ruid == nil or ruid == "" then return end
+		local renderer = icon.SpriteGUIRendererComponent
+		if renderer == nil then return end
+
+		local currentRuid = ""
+		if renderer.ImageRUID ~= nil and renderer.ImageRUID.DataId ~= nil then
+			currentRuid = renderer.ImageRUID.DataId
+		end
+		if forceRebind == true or currentRuid ~= ruid or renderer.Enable == false then
+			icon.Enable = false
+			renderer.Enable = false
+			renderer.ImageRUID = DataRef("")
+			renderer.StartFrameIndex = 0
+			renderer.ImageRUID = DataRef(ruid)
+			renderer.Color = Color(1, 1, 1, 1)
+			renderer.Enable = true
+		end
+		icon.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render(integer doneCount, boolean forceRebind)
 		-- 남은 커맨드를 방향에 맞는 화살표 이미지로 표시하고, 이미 입력한(완료) 커맨드는 숨긴다.
 		if self.commandIcons == nil then
 			return
@@ -207,11 +215,7 @@ script MiniGameCommandBox extends Component
 				if hit ~= nil and hit > 0 then
 					-- 정답 강조 이펙트 재생 중: OnUpdate가 처리하므로 그대로 둔다.
 				elseif i <= count and i > doneCount then
-					local renderer = icon.SpriteGUIRendererComponent
-					if renderer ~= nil then
-						renderer.ImageRUID = DataRef(self:ArrowRuid(self.commandNames[i]))
-					end
-					icon.Enable = true
+					self:BindArrowSprite(icon, self:ArrowRuid(self.commandNames[i]), forceRebind)
 				else
 					icon.Enable = false
 				end

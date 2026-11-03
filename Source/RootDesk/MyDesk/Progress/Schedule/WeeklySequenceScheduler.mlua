@@ -222,13 +222,13 @@ script WeeklySequenceScheduler extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void CompleteWeeklySequence()
-		-- 주간 활동 시퀀스를 완료하고 진행 단계를 다음 단계로 넘깁니다.
+		-- 주간 활동 시퀀스를 완료하고 훈련 후 스텝으로 전환합니다.
 		local weeklyTotals = self:BuildWeeklyTotals()
 		self.IsRunning = false
 
 		if _ProgressManager ~= nil then
-			-- 요청 시점 단계를 함께 보내 서버가 중복 요청을 거절할 수 있게 한다
-			_ProgressManager:RequestMoveToNextStep(_ProgressManager:ClientGetCurrentStep())
+			-- 요청 시점의 Step을 함께 보내 중복 요청을 거절합니다.
+			_ProgressManager:RequestCompleteStep(_ProgressManager:ClientGetCurrentStep())
 		end
 
 		if _ScheduleProgressUILogic ~= nil then

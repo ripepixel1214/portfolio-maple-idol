@@ -51,6 +51,8 @@ script SettlementCardUILogic extends Logic
 
 	property any tRuntimeStatDeltaItems = {}
 
+	-- Public API
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- 결산 카드 UI를 시작 시 숨깁니다.
@@ -76,7 +78,7 @@ script SettlementCardUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void SetCards(table settlementCards)
-		-- 결산 카드 목록을 각 슬롯에 반영합니다.
+		-- 전달받은 캐릭터 순서를 유지한 채 카드 슬롯에 반영합니다.
 		local cardCount = self:GetSettlementCardCount(settlementCards)
 		self:ApplyCardLayout(cardCount)
 
@@ -102,6 +104,8 @@ script SettlementCardUILogic extends Logic
 
 		return cardCount
 	end
+
+	-- Private Methods
 
 	@ExecSpace("ClientOnly")
 	method void ApplyCardLayout(integer cardCount)
@@ -148,27 +152,9 @@ script SettlementCardUILogic extends Logic
 		local characterName = self:GetCardCharacterName(characterId)
 
 		self:SetText(nameTextComponent, characterName)
-		self:LogSettlementCardStats(index, card, characterName)
 		self:SetStatDeltas(index, statDeltaArea, statDeltaTemplate, card)
 		self:SetPortrait(portraitComponent, characterId)
 		self:SetConditionIcon(conditionComponent, characterId)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void LogSettlementCardStats(integer cardIndex, any card, string characterName)
-		-- 디버그 확인용으로 결산 카드에 들어온 캐릭터별 스탯 변화량을 출력합니다.
-		if card == nil then
-			return
-		end
-
-		log("[SettlementCardUILogic] card=" .. tostring(cardIndex)
-			.. " characterId=" .. tostring(card.characterId or "")
-			.. " name=" .. tostring(characterName or "")
-			.. " vocal=" .. self:FormatStatDeltaNumber(card.vocal or 0)
-			.. " dance=" .. self:FormatStatDeltaNumber(card.dance or 0)
-			.. " visual=" .. self:FormatStatDeltaNumber(card.visual or 0)
-			.. " fandom=" .. self:FormatStatDeltaNumber(card.fandom or 0)
-			.. " fatigue=" .. self:FormatStatDeltaNumber(card.fatigue or 0))
 	end
 
 	@ExecSpace("ClientOnly")
@@ -233,11 +219,11 @@ script SettlementCardUILogic extends Logic
 			return parts
 		end
 
-		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("vocal", "보컬"), "vocal", card.vocal or 0)
-		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("dance", "댄스"), "dance", card.dance or 0)
-		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("visual", "비주얼"), "visual", card.visual or 0)
-		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("fandom", "팬덤"), "fandom", card.fandom or 0)
-		self:AddSettlementStatDeltaPart(parts, self:GetLocalizedStatName("fatigue", "피로도"), "fatigue", card.fatigue or 0)
+		self:AddSettlementStatDeltaPart(parts, _ScheduleStatTextUtil:GetStatName("vocal"), "vocal", card.vocal or 0)
+		self:AddSettlementStatDeltaPart(parts, _ScheduleStatTextUtil:GetStatName("dance"), "dance", card.dance or 0)
+		self:AddSettlementStatDeltaPart(parts, _ScheduleStatTextUtil:GetStatName("visual"), "visual", card.visual or 0)
+		self:AddSettlementStatDeltaPart(parts, _ScheduleStatTextUtil:GetStatName("fandom"), "fandom", card.fandom or 0)
+		self:AddSettlementStatDeltaPart(parts, _ScheduleStatTextUtil:GetStatName("fatigue"), "fatigue", card.fatigue or 0)
 
 		return parts
 	end
@@ -287,62 +273,8 @@ script SettlementCardUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	@ExecSpace("ClientOnly")
-	method string GetLocalizedStatName(string statKey, string fallbackText)
-		-- 스탯 키에 대응하는 현재 locale 이름 조회
-		if _ScheduleStatTextUtil ~= nil then
-			return _ScheduleStatTextUtil:GetLocalizedStatName(statKey, fallbackText)
-		end
-
-		return fallbackText or ""
-	end
-
 	method string BuildStatDeltaNumberRichText(string statKey, number value)
-		if _ScheduleStatTextUtil ~= nil then
-			return _ScheduleStatTextUtil:BuildSignedNumberRichText(statKey, value)
-		end
-
-		return "<color=" .. self:GetStatDeltaColorHex(statKey, value) .. "><b>" .. self:FormatStatDeltaNumber(value) .. "</b></color>"
-	end
-
-	@ExecSpace("ClientOnly")
-	method string GetStatDeltaColorHex(string statKey, number value)
-		if value == nil or value == 0 then
-			return "#FFFFFF"
-		end
-
-		if self:IsGoodStatDeltaChange(statKey, value) then
-			return "#00C72B"
-		end
-
-		return "#FF4D4D"
-	end
-
-	@ExecSpace("ClientOnly")
-	method boolean IsGoodStatDeltaChange(string statKey, number value)
-		if _ScheduleStatTextUtil ~= nil then
-			return _ScheduleStatTextUtil:IsGoodStatChange(statKey, value)
-		end
-
-		if statKey == "fatigue" then
-			return value < 0
-		end
-
-		return value > 0
-	end
-
-	@ExecSpace("ClientOnly")
-	method string FormatStatDeltaNumber(number value)
-		if _ScheduleStatTextUtil ~= nil then
-			return _ScheduleStatTextUtil:FormatSignedNumber(value)
-		end
-
-		local safeValue = value or 0
-		if safeValue > 0 then
-			return "+" .. tostring(safeValue)
-		end
-
-		return tostring(safeValue)
+		return _ScheduleStatTextUtil:BuildSignedNumberRichText(statKey, value)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -356,7 +288,7 @@ script SettlementCardUILogic extends Logic
 			return characterId
 		end
 
-		return _RuntimeActorManager:ClientGetActorName(characterId)
+		return _RuntimeActorManager:ClientGetLocalizedActorName(characterId)
 	end
 
 	@ExecSpace("ClientOnly")

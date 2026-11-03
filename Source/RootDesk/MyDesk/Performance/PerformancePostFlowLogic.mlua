@@ -1,4 +1,4 @@
----@description "공연 결과 후속 흐름 오케스트레이터. 점수 UI의 Next 이후 성공/실패로 분기한다. 실패=Map_Studio 복귀(재도전), 성공=포토카드 획득→Map_Studio 이동→공연 후 대화→데모 종료 UI."
+---@description "공연 결과 후속 흐름 오케스트레이터. 점수 UI의 Next 이후 성공/실패로 분기한다. 실패=Map_Studio 복귀(재도전), 성공=Map_Studio 이동→공연 후 대화→스테이지 보상."
 @Logic
 script PerformancePostFlowLogic extends Logic
 
@@ -16,49 +16,20 @@ script PerformancePostFlowLogic extends Logic
 	-- 센터를 확인할 수 없을 때 사용할 기본 화자 actorId
 	property string fallbackSpeakerActorId = "character_cygnus"
 
-	-- 데모 종료 패널 (PerformanceResultUI/DemoEndPanel)
-	property Entity demoEndPanel = "3835e345-3620-475e-b1a6-a3e0aeefd074"
-	-- 데모 종료 패널의 확인 버튼 (PerformanceResultUI/DemoEndPanel/Panel/ConfirmButton)
-	property ButtonComponent demoEndConfirmButton = "a17f4ab6-4829-4f90-9c5d-e13e6c402691"
-
 	-- 스튜디오 도착을 기다렸다가 대화를 재생하기 위한 대기 플래그
 	property boolean waitingStudioForDialog = false
 	-- 대화 종료 이벤트 핸들러
 	property any dialogClosedHandler = nil
-	-- 저장 데이터 로드 후 데모 종료 단계를 복원하기 위한 진행 변경 이벤트 핸들러
-	property any progressChangedHandler = nil
-	-- 데모 종료 저장 데이터를 불러온 뒤 스튜디오 도착을 기다리는 플래그
-	property boolean waitingStudioForDemoEnd = false
-	-- 현재 세션에서 데모 종료 패널을 이미 표시했는지 여부
-	property boolean isDemoEndShown = false
-	-- 데모 종료 확인 버튼 클릭 이벤트 핸들러
-	property any demoEndConfirmClickHandler = nil
 
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
-		-- 새 세션에서는 패널을 숨긴 상태로 시작하고, 저장된 진행 단계 동기화를 구독합니다.
-		self:SetDemoEndPanelVisible(false)
-		if self.demoEndConfirmButton ~= nil and self.demoEndConfirmButton.Entity ~= nil then
-			self.demoEndConfirmClickHandler = self.demoEndConfirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDemoEndConfirmClicked)
-		end
-		if _ProgressManager ~= nil then
-			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
-		end
-		self:RefreshDemoEndFromProgress()
+		log("[PerformancePostFlow] initialized")
 	end
 
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
-		-- 데모 종료 UI와 공연 후 흐름에서 연결한 이벤트를 정리합니다.
+		-- 공연 후 흐름에서 연결한 이벤트를 정리합니다.
 		self:DisconnectDialogClosed()
-		if self.demoEndConfirmButton ~= nil and self.demoEndConfirmButton.Entity ~= nil and self.demoEndConfirmClickHandler ~= nil then
-			self.demoEndConfirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.demoEndConfirmClickHandler)
-		end
-		self.demoEndConfirmClickHandler = nil
-		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
-			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
-		end
-		self.progressChangedHandler = nil
 	end
 
 	@ExecSpace("ClientOnly")
@@ -77,13 +48,9 @@ script PerformancePostFlowLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void StartSuccessFlow()
-		-- 성공: 포토카드 획득 UI 표시 (확인 시 OnPhotocardConfirmed로 이어짐)
-		if _PerformancePhotocardUILogic ~= nil then
-			_PerformancePhotocardUILogic:Open()
-		else
-			-- 포토카드 UI가 없으면 바로 다음 단계로
-			self:OnPhotocardConfirmed()
-		end
+		-- 성공: 포토카드 보상·획득 화면 없이 스튜디오로 복귀하고 공연 후 대화를 이어갑니다.
+		self:GoToStudio()
+		self.waitingStudioForDialog = true
 	end
 
 	@ExecSpace("ClientOnly")
@@ -115,8 +82,8 @@ script PerformancePostFlowLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnUpdate(number delta)
-		-- 저장 데이터 복원 또는 포토카드 확인 후 스튜디오 도착을 기다립니다.
-		if self.waitingStudioForDialog == false and self.waitingStudioForDemoEnd == false then
+		-- 공연 성공 후 스튜디오 도착을 기다립니다.
+		if self.waitingStudioForDialog == false then
 			return
 		end
 
@@ -127,12 +94,6 @@ script PerformancePostFlowLogic extends Logic
 		if self.waitingStudioForDialog == true then
 			self.waitingStudioForDialog = false
 			self:PlayAfterDialog()
-			return
-		end
-
-		if self.waitingStudioForDemoEnd == true then
-			self.waitingStudioForDemoEnd = false
-			self:ShowDemoEndPanelOnly()
 		end
 	end
 
@@ -160,9 +121,9 @@ script PerformancePostFlowLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void PlayAfterDialog()
-		-- 공연 후 대화를 재생하고, 종료되면 데모 종료 UI를 표시
+		-- 공연 후 대화를 재생하고 종료를 기다립니다.
 		if _DialogUILogic == nil then
-			self:ShowDemoEnd()
+			self:FinishSuccessFlow()
 			return
 		end
 
@@ -211,12 +172,12 @@ script PerformancePostFlowLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnDialogClosed(any dialogClosedEvent)
-		-- 공연 후 대화가 닫히면 데모 종료 UI 표시
+		-- 공연 후 대화가 닫히면 성공 후속 흐름을 종료합니다.
 		if dialogClosedEvent == nil or dialogClosedEvent.dialogId ~= self.afterDialogId then
 			return
 		end
 		self:DisconnectDialogClosed()
-		self:ShowDemoEnd()
+		self:FinishSuccessFlow()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -232,60 +193,21 @@ script PerformancePostFlowLogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void ShowDemoEnd()
-		-- 데모 종료 패널을 표시 — 버튼 없이 그대로 두어 더 이상 진행을 막는다
-		self:ShowDemoEndPanelOnly()
-		if _ProgressManager ~= nil then
-			_ProgressManager:RequestCompleteDemo()
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnProgressChanged(any progressChangedEvent)
-		-- 서버에서 로드·동기화된 진행 단계가 데모 종료인지 확인합니다.
-		self:RefreshDemoEndFromProgress()
-	end
-
-	@ExecSpace("ClientOnly")
-	method void RefreshDemoEndFromProgress()
-		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
-		local isDemoEnd = progress ~= nil and _EProgressStep:IsDemoEndStep(progress.eCurrentStep)
-		if isDemoEnd == false then
-			self.waitingStudioForDemoEnd = false
-			if self.isDemoEndShown == true then
-				self:SetDemoEndPanelVisible(false)
-				self.isDemoEndShown = false
-			end
+	method void FinishSuccessFlow()
+		-- 공연 성공 후 스테이지 선택 상태로 복귀합니다.
+		if _ProgressManager == nil then
+			log_warning("[PerformancePostFlow] ProgressManager is nil")
 			return
 		end
 
-		if self:IsLocalPlayerInStudio() then
-			self.waitingStudioForDemoEnd = false
-			self:ShowDemoEndPanelOnly()
+		local currentStep = _ProgressManager:ClientGetCurrentStep()
+		if currentStep ~= _EProgressStep.Performance then
+			log_warning("[PerformancePostFlow] StageSelect step request rejected locally step=" .. _EProgressStep:GetName(currentStep))
 			return
 		end
 
-		self.waitingStudioForDemoEnd = true
-	end
-
-	@ExecSpace("ClientOnly")
-	method void ShowDemoEndPanelOnly()
-		self:SetDemoEndPanelVisible(true)
-		self.isDemoEndShown = true
-	end
-
-	@ExecSpace("ClientOnly")
-	method void SetDemoEndPanelVisible(boolean visible)
-		if isvalid(self.demoEndPanel) then
-			self.demoEndPanel.Enable = visible
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnDemoEndConfirmClicked(ButtonClickEvent event)
-		-- 확인 버튼을 누르면 딤머를 포함한 데모 종료 패널 전체를 닫습니다.
-		self:SetDemoEndPanelVisible(false)
-		self.isDemoEndShown = false
+		log("[PerformancePostFlow] success flow completed. request next step=" .. _EProgressStep:GetName(currentStep))
+		_ProgressManager:RequestCompleteStep(currentStep)
 	end
 
 end

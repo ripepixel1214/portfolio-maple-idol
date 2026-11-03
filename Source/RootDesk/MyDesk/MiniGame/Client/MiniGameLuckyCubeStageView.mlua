@@ -1,0 +1,357 @@
+---@description "럭키 큐브 화면 표시와 UI 입력 전달 로직"
+@Component
+script MiniGameLuckyCubeStageView extends Component
+	@HideFromInspector
+	property boolean initialized = false
+	property Entity dice3 = nil
+	property Entity dice2 = nil
+	property Entity dice1 = nil
+	property Entity multiplier5 = nil
+	property Entity choice5 = nil
+	property Entity multiplier4 = nil
+	property Entity choice4 = nil
+	property Entity multiplier3 = nil
+	property Entity choice3 = nil
+	property Entity multiplier2 = nil
+	property Entity choice2 = nil
+	property Entity multiplier1 = nil
+	property Entity choice1 = nil
+	property Entity betValue = nil
+	property Entity closeButton = nil
+	property Entity speechText = nil
+	property Entity betIcon = nil
+	property Entity balanceChangeIcon = nil
+	property Entity coinBalanceIcon = nil
+	property Entity mesoBalanceIcon = nil
+	property Entity balanceChange = nil
+	property Entity coinBalanceAmount = nil
+	property Entity coinBalanceLabel = nil
+	property Entity mesoBalanceAmount = nil
+	property Entity mesoBalanceLabel = nil
+	property Entity betSlider = nil
+	property string TEXT_UI_LUCKY_CUBE_LOSE = "ui.lucky_cube.lose"
+	property string TEXT_UI_LUCKY_CUBE_WIN = "ui.lucky_cube.win"
+	property string TEXT_UI_LUCKY_CUBE_THIRD = "ui.lucky_cube.third"
+	property string TEXT_UI_LUCKY_CUBE_CHANGE_CHOICE = "ui.lucky_cube.change_choice"
+	property string TEXT_UI_LUCKY_CUBE_SECOND = "ui.lucky_cube.second"
+	property string TEXT_UI_LUCKY_CUBE_FIRST = "ui.lucky_cube.first"
+	property string TEXT_UI_LUCKY_CUBE_CHECKING = "ui.lucky_cube.checking"
+	property string TEXT_UI_LUCKY_CUBE_LOBBY = "ui.lucky_cube.lobby"
+	property string TEXT_UI_LUCKY_CUBE_BALANCE = "ui.lucky_cube.balance"
+	property string TEXT_UI_LUCKY_CUBE_BALANCE_MESO = "ui.lucky_cube.balance_meso"
+	property Entity root = nil
+	property Entity panel = nil
+	property number RESULT_POPUP_OPEN_SECONDS = 0.35
+	property number RESULT_POPUP_CLOSE_SECONDS = 0.2
+	property number RESULT_POPUP_START_SCALE = 0.8
+	property integer resultPopupCloseId = 0
+	property boolean resultPopupClosing = false
+	property string MESO_RUID = "224bf515c09b4be4b9874aa6e868312c"
+	property string COIN_RUID = "d731d51e16e44eff8bf68becf3bb7f2a"
+	property string DICE_ICON_RUID = "2314fba591f04078b7fb57b8d095614c"
+	property string ROLL_RUID = "4ea81a784101450eb80c16cc6475e0fd"
+	-- 실제 눈금 1~6 순서, 원본 스킬의 icon 번호와 눈금은 불일치
+	property any diceRuids = {"74dfcb36e9ef4ba39703d83b437b961a", "2f407123869d46a986ef0862aa0a15a5", "a862aaaf78e048bfb70f8ac3e24c7e1f", "35bdb831cfe748608b1dd4044a419048", "d96b6493f87044519a5760f092eeaffe", "7d44092c96f94214967010712cb7abaf"}
+	property any buttonBindings = {}
+	property any sliderBinding = nil
+	property any tState = nil
+	property boolean rendering = false
+	property any choices = {}
+	property any multipliers = {}
+	property any dice = {}
+
+	-- 화면 표시 API
+
+	@ExecSpace("ClientOnly")
+	method Entity GetStageRoot()
+		-- 럭키 큐브 화면 루트 제공
+		return self.root
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCapabilities()
+		if not isvalid(self.root) then
+			log_warning("[LuckyCube] UI 루트 연결 확인 필요")
+			return {}
+		end
+		local caps = _MiniGameViewRegistry
+		return {[caps.CAP_STAGE] = self, [caps.CAP_DICE] = self}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BindButton(Entity child, any callback)
+		local entity = child
+		if not isvalid(entity) then return end
+		local subscription = entity:ConnectEvent(ButtonClickEvent, callback)
+		table.insert(self.buttonBindings, {entity = entity, subscription = subscription})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:Initialize()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCurrencyIcons()
+		-- 코인과 메소 잔액의 아이콘을 단계와 무관하게 고정
+		for _, child in ipairs({self.coinBalanceIcon, self.balanceChangeIcon, self.betIcon}) do
+			local icon = child
+			if isvalid(icon) and icon.SpriteGUIRendererComponent ~= nil then
+				icon.SpriteGUIRendererComponent.ImageRUID = DataRef(self.COIN_RUID)
+				icon.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+			end
+		end
+		if isvalid(self.mesoBalanceIcon) and self.mesoBalanceIcon.SpriteGUIRendererComponent ~= nil then
+			self.mesoBalanceIcon.SpriteGUIRendererComponent.ImageRUID = DataRef(self.MESO_RUID)
+			self.mesoBalanceIcon.SpriteGUIRendererComponent.Color = Color(1, 1, 1, 1)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- 활성화 후 새 표시 상태 적용, 이전 주사위 화면 제거
+		self:ResetResultAnimation()
+		self:ApplyCurrencyIcons()
+		self.tState = nil
+		_MiniGameUIRouter:SetStageVisible(self.root, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(any tContext)
+		self:OpenLobby()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		_MiniGameUIRouter:SetStageVisible(self.root, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectStage(integer inputType, boolean useGauge)
+		self:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 강제 종료와 화면 전환 시 지연 콜백 취소 및 크기 복원
+		self:ResetResultAnimation()
+		_MiniGameUIRouter:SetStageVisible(self.root, false)
+		self.tState = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestClose()
+		-- 결과 화면만 축소 후 닫기, 로비와 준비 단계는 기존 종료 경로 유지
+		if self.resultPopupClosing then return end
+		if self.tState == nil or self.tState.stage ~= _MiniGameLuckyCubeRule.STAGE_RESULT then
+			_MiniGameLuckyCubePresenter:Close()
+			return
+		end
+		self.resultPopupClosing = true
+		self:SetButton(self.closeButton, false)
+		local finish = function()
+			self.resultPopupCloseId = 0
+			self.resultPopupClosing = false
+			_MiniGameLuckyCubePresenter:Close()
+		end
+		self.resultPopupCloseId = _UITween:PopOut(self.panel, self.RESULT_POPUP_CLOSE_SECONDS, 0, finish)
+		if self.resultPopupCloseId == 0 then finish() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayResultPopupOpen()
+		-- 별도 결과 패널이 없는 화면에서 결과 단계 진입 시 기존 패널 등장 효과 재생
+		if not isvalid(self.panel) then return end
+		self.panel.Enable = true
+		_UITween:PopIn(self.panel, self.RESULT_POPUP_OPEN_SECONDS, self.RESULT_POPUP_START_SCALE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetResultAnimation()
+		-- 재진입과 종료 시 미완료 효과 정리, 숨겨진 패널과 원래 크기 복원
+		_UITween:Stop(self.resultPopupCloseId)
+		self.resultPopupCloseId = 0
+		self.resultPopupClosing = false
+		if not isvalid(self.panel) then return end
+		_UITween:StopEffect(self.panel, _UITween.EFFECT_POP_IN)
+		_UITween:StopEffect(self.panel, _UITween.EFFECT_POP_OUT)
+		self.panel.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(Entity child, string value)
+		local entity = child
+		if isvalid(entity) and entity.TextGUIRendererComponent ~= nil then entity.TextGUIRendererComponent.Text = value end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetButton(Entity child, boolean enabled)
+		local entity = child
+		if isvalid(entity) and entity.ButtonComponent ~= nil then entity.ButtonComponent.Enable = enabled end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderState(any tState, boolean pending, string message)
+		-- 복사된 서버 표시 상태로 화면 갱신, 슬라이더 재진입 차단
+		self.rendering = true
+		local wasFinished = self.tState ~= nil and self.tState.stage == _MiniGameLuckyCubeRule.STAGE_RESULT
+		self.tState = tState
+		local rule = _MiniGameLuckyCubeRule
+		local lobby = tState.stage == rule.STAGE_LOBBY
+		local ready = tState.stage == rule.STAGE_READY
+		local rolling = tState.stage == rule.STAGE_ROLLING
+		local decision = tState.stage == rule.STAGE_DECISION
+		local finished = tState.stage == rule.STAGE_RESULT
+		if wasFinished and not finished then self:ResetResultAnimation() end
+		local entry = _MiniGameTable:FindMiniGame(rule.MINI_GAME_ID).settlementRule
+		local mesoEntry = tState.entryCurrency == _MiniGameSettlementRule.CURRENCY_MESO
+		local affordableBet = mesoEntry and math.floor(tState.mesoBalance * entry.entryCoin / entry.entryMeso) or tState.coinBalance
+		local betUnitCount = _MiniGameSettlementRule:GetBetUnitCount(entry, affordableBet)
+		self:SetText(self.coinBalanceLabel, _LocaleTextUtil:GetText(self.TEXT_UI_LUCKY_CUBE_BALANCE))
+		self:SetText(self.coinBalanceAmount, tostring(tState.coinBalance))
+		self:SetText(self.mesoBalanceLabel, _LocaleTextUtil:GetText(self.TEXT_UI_LUCKY_CUBE_BALANCE_MESO))
+		self:SetText(self.mesoBalanceAmount, tostring(tState.mesoBalance))
+		local change = self.balanceChange
+		if isvalid(change) then
+			change.Enable = (rolling or decision or finished) and tState.coinChange ~= 0
+			if tState.coinChange > 0 then
+				self:SetText(self.balanceChange, "+ " .. tostring(tState.coinChange))
+				change.TextGUIRendererComponent.FontColor = Color(0.16, 0.68, 0.25, 1)
+			else
+				self:SetText(self.balanceChange, "- " .. tostring(math.abs(tState.coinChange)))
+				change.TextGUIRendererComponent.FontColor = Color(0.92, 0.12, 0.16, 1)
+			end
+		end
+		local bet = self.betSlider
+		if isvalid(bet) then
+			bet.Enable = lobby
+			local slider = bet.SliderComponent
+			slider.Enable = lobby and not pending and betUnitCount > 0
+			slider.MaxValue = math.max(slider.MinValue, betUnitCount)
+			slider.Value = math.max(slider.MinValue, _MiniGameSettlementRule:GetBetUnitsFromAmount(entry, tState.bet))
+		end
+		self:SetText(self.betValue, tostring(tState.bet))
+		local close = self.closeButton
+		if isvalid(close) then close.Enable = lobby or ready or finished end
+		self:SetButton(self.closeButton, not pending and not self.resultPopupClosing and (lobby or ready or finished))
+		-- 최초 선택 유지 시에만 최초 배율 표시, 변경 확정 후 이전 항목도 변경 배율 적용
+		local retainedInitialChoice = tState.choice == tState.initialChoice and tState.initialChoice or ""
+		for i, choice in ipairs(rule:GetChoices()) do
+			local name = self.choices[i]
+			self:SetButton(name, not pending and _MiniGameSettlementRule:IsValidAmount(entry, tState.bet)
+				and (decision or ((lobby or ready) and tState.bet <= affordableBet)))
+			local selected = tState.choice == choice.id
+			name.SpriteGUIRendererComponent.Color = selected and Color(1, 0.43, 0.38, 1) or Color(1, 1, 1, 1)
+			local multiplier = choice.initial
+			if tState.revealed >= 2 then multiplier = rule:GetMultiplierTenths(choice.id, retainedInitialChoice) end
+			self:SetText(self.multipliers[i], "x" .. string.format("%.1f", multiplier / 10))
+		end
+		local values = {tState.first, tState.second, tState.third}
+		for i = 1, 3 do
+			local name = self.dice[i]
+			local dice = name
+			dice.Enable = i <= tState.revealed or (rolling and i == tState.revealed + 1)
+			local value = values[i]
+			local ruid = value > 0 and self.diceRuids[value] or self.DICE_ICON_RUID
+			if rolling and i == tState.revealed + 1 then ruid = self.ROLL_RUID end
+			dice.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
+		end
+		local speech = self.TEXT_UI_LUCKY_CUBE_LOBBY
+		if pending then speech = self.TEXT_UI_LUCKY_CUBE_CHECKING end
+		if rolling and tState.revealed == 0 then speech = self.TEXT_UI_LUCKY_CUBE_FIRST end
+		if rolling and tState.revealed == 1 then speech = self.TEXT_UI_LUCKY_CUBE_SECOND end
+		if decision then speech = self.TEXT_UI_LUCKY_CUBE_CHANGE_CHOICE end
+		if rolling and tState.revealed == 2 then speech = self.TEXT_UI_LUCKY_CUBE_THIRD end
+		if finished then speech = tState.isWin and self.TEXT_UI_LUCKY_CUBE_WIN or self.TEXT_UI_LUCKY_CUBE_LOSE end
+		if message ~= "" then speech = message end
+		self:SetText(self.speechText, _LocaleTextUtil:GetText(speech))
+		if finished and not wasFinished then self:PlayResultPopupOpen() end
+		self.rendering = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		self:ReleaseView()
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetDynamicPreloadRuids()
+		-- UI에 저장되지 않은 코인과 주사위 교체 이미지 제공
+		local ruids = {self.MESO_RUID, self.COIN_RUID, self.DICE_ICON_RUID, self.ROLL_RUID}
+		for _, ruid in ipairs(self.diceRuids) do table.insert(ruids, ruid) end
+		return ruids
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		-- 숨겨진 스테이지에서도 중복 없이 UI 입력 연결
+		if self.initialized then return true end
+		if not _MiniGameViewRegistry:ValidateBindings("MiniGameLuckyCubeStageView", {
+			{"betSlider", self.betSlider},
+			{"coinBalanceLabel", self.coinBalanceLabel},
+			{"coinBalanceAmount", self.coinBalanceAmount},
+			{"mesoBalanceLabel", self.mesoBalanceLabel},
+			{"mesoBalanceAmount", self.mesoBalanceAmount},
+			{"balanceChange", self.balanceChange},
+			{"coinBalanceIcon", self.coinBalanceIcon},
+			{"mesoBalanceIcon", self.mesoBalanceIcon},
+			{"balanceChangeIcon", self.balanceChangeIcon},
+			{"betIcon", self.betIcon},
+			{"speechText", self.speechText},
+			{"closeButton", self.closeButton},
+			{"betValue", self.betValue},
+			{"choice1", self.choice1},
+			{"multiplier1", self.multiplier1},
+			{"choice2", self.choice2},
+			{"multiplier2", self.multiplier2},
+			{"choice3", self.choice3},
+			{"multiplier3", self.multiplier3},
+			{"choice4", self.choice4},
+			{"multiplier4", self.multiplier4},
+			{"choice5", self.choice5},
+			{"multiplier5", self.multiplier5},
+			{"dice1", self.dice1},
+			{"dice2", self.dice2},
+			{"dice3", self.dice3},
+			{"root", self.root},
+			{"panel", self.panel}
+		}) then return false end
+		self.choices = {self.choice1, self.choice2, self.choice3, self.choice4, self.choice5}
+		self.multipliers = {self.multiplier1, self.multiplier2, self.multiplier3, self.multiplier4, self.multiplier5}
+		self.dice = {self.dice1, self.dice2, self.dice3}
+		for i, entry in ipairs(_MiniGameLuckyCubeRule:GetChoices()) do
+			local choice = entry.id
+			local child = self.choices[i]
+			local button = child
+			-- 비활성 상태에서도 선택 색상 유지
+			if isvalid(button) and button.ButtonComponent ~= nil then button.ButtonComponent.Colors.DisabledColor = Color(1, 1, 1, 1) end
+			self:BindButton(child, function() _MiniGameLuckyCubePresenter:Choose(choice) end)
+		end
+		self:BindButton(self.closeButton, function() self:RequestClose() end)
+		local slider = self.betSlider
+		if isvalid(slider) then
+			self.sliderBinding = slider:ConnectEvent(SliderValueChangedEvent, function(event)
+				if not self.rendering then _MiniGameLuckyCubePresenter:SetBet(math.floor(event.Value)) end
+			end)
+		end
+		self.initialized = true
+		log("[VRF][MiniGameLuckyCubeStageView] View 초기화 완료")
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReleaseView()
+		-- 수동 초기화와 엔티티 생명주기 종료의 중복 해제 방지
+		if not self.initialized then return end
+		self.initialized = false
+		-- UI 이벤트 구독과 화면 참조 해제
+		for _, binding in ipairs(self.buttonBindings) do
+			if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.subscription) end
+		end
+		local slider = self.betSlider
+		if isvalid(slider) and self.sliderBinding ~= nil then slider:DisconnectEvent(SliderValueChangedEvent, self.sliderBinding) end
+		self.buttonBindings = {}
+		self.sliderBinding = nil
+		self:Close()
+	end
+end

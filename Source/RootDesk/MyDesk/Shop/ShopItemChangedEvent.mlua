@@ -1,0 +1,4 @@
+@Event
+script ShopItemChangedEvent extends EventType
+
+end

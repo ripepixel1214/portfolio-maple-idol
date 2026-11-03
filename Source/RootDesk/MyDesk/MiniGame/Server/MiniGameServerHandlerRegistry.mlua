@@ -1,0 +1,39 @@
+---@description "미니게임별 서버 처리기 관리 로직"
+@Logic
+script MiniGameServerHandlerRegistry extends Logic
+
+	@ExecSpace("ServerOnly")
+	method any Resolve(string gameKind)
+		-- 게임 규칙 종류별 등록, 동일한 서버 계약만 공통 처리기로 연결
+		local kinds = _EMiniGameKind
+		if gameKind == kinds.COMMAND_SEQUENCE then
+			return _MiniGameCommandServerHandler
+		elseif gameKind == kinds.DALGONA_DRAW then
+			return _MiniGameDalgonaServerHandler
+		elseif gameKind == kinds.LUCKY_CUBE then
+			return _MiniGameLuckyCubeServerHandler
+		elseif gameKind == kinds.FISHING then
+			return _MiniGameFishingServerHandler
+		elseif gameKind == kinds.SNAIL_LADDER then
+			return _MiniGameSnailLadderServerHandler
+		elseif gameKind == kinds.RAPID_PRESS_COUNT
+			or gameKind == kinds.TIMING_ACCURACY
+			or gameKind == kinds.GAUGE_MAINTENANCE
+			or gameKind == kinds.SHAPE_TRACE then
+			return _MiniGameClientResultServerHandler
+		end
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsValidPreset(any preset)
+		-- 누락 종류와 규칙이 지원하지 않는 입력 조합을 시작 전에 차단
+		if preset == nil or type(preset.gameKind) ~= "string" then
+			return false
+		end
+		return self:Resolve(preset.gameKind) ~= nil
+			and _EMiniGameInputType:IsValid(preset.inputType)
+			and _EMiniGameKind:GetSupportedInputType(preset.gameKind) == preset.inputType
+	end
+
+end

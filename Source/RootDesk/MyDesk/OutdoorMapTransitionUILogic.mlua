@@ -1,6 +1,8 @@
 @Logic
-@ExecSpace("ClientOnly")
 script OutdoorMapTransitionUILogic extends Logic
+	property string TEXT_UI_OUTDOOR_LOADING = "ui.outdoor.loading"
+	property string TEXT_UI_OUTDOOR_EMPTY = "ui.outdoor.empty"
+	property string TEXT_UI_OUTDOOR_FAILED = "ui.outdoor.failed"
 
 	property Entity root = "18b008f7-e860-4a5c-b684-3b35fc37bb33"
 
@@ -38,8 +40,18 @@ script OutdoorMapTransitionUILogic extends Logic
 
 	property any closeClickHandler = nil
 
+	property string pendingMapListRequestId = ""
+
+	property integer listSequence = 0
+
+	property boolean isEnding = false
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- 이동 버튼 연결과 초기 닫힘 상태 적용
+		self.isEnding = false
 		if self.destinationButton ~= nil and self.destinationButton.Entity ~= nil then
 			self.destinationClickHandler = self.destinationButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDestinationClicked)
 		end
@@ -52,8 +64,11 @@ script OutdoorMapTransitionUILogic extends Logic
 		self:SetVisible(false)
 	end
 
+	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
 		-- UI 버튼 연결 해제
+		self.isEnding = true
+		self:Close()
 		if self.destinationClickHandler ~= nil and self.destinationButton ~= nil and self.destinationButton.Entity ~= nil then
 			self.destinationButton.Entity:DisconnectEvent(ButtonClickEvent, self.destinationClickHandler)
 		end
@@ -63,45 +78,97 @@ script OutdoorMapTransitionUILogic extends Logic
 		if self.closeClickHandler ~= nil and self.closeButton ~= nil and self.closeButton.Entity ~= nil then
 			self.closeButton.Entity:DisconnectEvent(ButtonClickEvent, self.closeClickHandler)
 		end
+		self.destinationClickHandler = nil
+		self.destinationClickHandler2 = nil
+		self.closeClickHandler = nil
 	end
 
+	@ExecSpace("ClientOnly")
 	method void Open()
-		-- 현재 맵에서 이동 가능한 외출 맵 표시
-		if self.root == nil or _OutdoorMapTransitionLogic == nil then
+		-- 서버가 판정한 목적지 목록을 비동기로 표시
+		if isvalid(self.root) == false or self.isEnding == true or _OutdoorMapTransitionLogic == nil
+			or _OutdoorMapTransitionLogic:IsMoving() == true then
 			return
 		end
+		self:Close()
+		local sequence = self.listSequence
+		self:ApplyDestinations({})
+		self:SetStatusText(self.TEXT_UI_OUTDOOR_LOADING)
+		self:SetVisible(true)
+		local isCompleted = false
+		local requestId = _OutdoorMapTransitionLogic:RequestMapList(function(tResult)
+			isCompleted = true
+			if self.isEnding == true or self.listSequence ~= sequence then
+				return
+			end
+			self.pendingMapListRequestId = ""
+			if tResult.reason == _OutdoorMapTransitionLogic.REASON_PLAY_ENDED then
+				self:Close()
+				return
+			end
+			if tResult.success == false then
+				self:SetStatusText(self.TEXT_UI_OUTDOOR_FAILED)
+				log_warning("[OutdoorMapTransitionUI] list failed reason=" .. tostring(tResult.reason))
+				return
+			end
+			local player = _UserService.LocalPlayer
+			if isvalid(player) == false or isvalid(player.CurrentMap) == false
+				or player.CurrentMap.Name ~= tResult.currentMapName then
+				self:Close()
+				return
+			end
+			local tDestinations = {}
+			for _, tDestination in ipairs(tResult.tDestinations) do
+				if tDestination.isMoveAllowed == true then
+					table.insert(tDestinations, tDestination)
+				end
+			end
+			self:ApplyDestinations(tDestinations)
+			self:SetStatusText(self.TEXT_UI_OUTDOOR_EMPTY)
+			log("[OutdoorMapTransitionUI] open count=" .. tostring(#tDestinations))
+		end)
+		if isCompleted == false and self.listSequence == sequence then
+			self.pendingMapListRequestId = requestId
+		end
+	end
 
-		local player = _UserService.LocalPlayer
-		local currentMapName = player ~= nil and player.CurrentMap ~= nil and player.CurrentMap.Name or ""
-		local destinations = _OutdoorMapTransitionLogic:GetDestinations(currentMapName)
+	@ExecSpace("ClientOnly")
+	method void ApplyDestinations(table tDestinations)
+		-- 기존 두 버튼 팝업에 서버 승인 목적지만 적용
 		self.selectedMapName = ""
 		self.selectedMapName2 = ""
 
-		if #destinations > 0 then
-			local destination = destinations[1]
-			self.selectedMapName = destination.mapName
-			self.destinationButtonText.Text = destination.displayName
+		if #tDestinations > 0 then
+			local tDestination = tDestinations[1]
+			self.selectedMapName = tDestination.mapName
+			_LocaleTextUtil:SetLocalizedText(self.destinationButtonText, "ui.stage_select.outdoor." .. string.lower(tDestination.mapName) .. ".name", nil, nil, nil)
 			self.destinationButton.Entity.Enable = true
 		else
 			self.destinationButton.Entity.Enable = false
 		end
 
-		if #destinations > 1 then
-			local destination = destinations[2]
-			self.selectedMapName2 = destination.mapName
-			self.destinationButtonText2.Text = destination.displayName
+		if #tDestinations > 1 then
+			local tDestination = tDestinations[2]
+			self.selectedMapName2 = tDestination.mapName
+			_LocaleTextUtil:SetLocalizedText(self.destinationButtonText2, "ui.stage_select.outdoor." .. string.lower(tDestination.mapName) .. ".name", nil, nil, nil)
 			self.destinationButton2.Entity.Enable = true
 		else
 			self.destinationButton2.Entity.Enable = false
 		end
 
-		self.emptyText.Enable = #destinations == 0
-		self:ApplyDestinationLayout(math.min(#destinations, 2))
-
-		self:SetVisible(true)
-		log("[OutdoorMapTransitionUI] open count=" .. tostring(#destinations))
+		self.emptyText.Enable = #tDestinations == 0
+		self:ApplyDestinationLayout(math.min(#tDestinations, 2))
 	end
 
+	@ExecSpace("ClientOnly")
+	method void SetStatusText(string text)
+		-- 기존 빈 목록 문구로 로딩·실패 상태 표시
+		if isvalid(self.emptyText) == true and self.emptyText.TextGUIRendererComponent ~= nil then
+			self.emptyText.TextGUIRendererComponent.Text = text
+		end
+	end
+
+	@ExecSpace("ClientOnly")
 	method void ApplyDestinationLayout(integer activeCount)
 		-- 활성 목적지 수 기준 패널 높이와 버튼 중앙 정렬
 		if self.panelTransform == nil then
@@ -123,33 +190,59 @@ script OutdoorMapTransitionUILogic extends Logic
 		end
 	end
 
+	@ExecSpace("ClientOnly")
 	method void Close()
+		-- 늦게 도착한 목록 응답과 닫힌 팝업의 요청 정리
+		self.listSequence = self.listSequence + 1
+		self.selectedMapName = ""
+		self.selectedMapName2 = ""
+		local requestId = self.pendingMapListRequestId
+		self.pendingMapListRequestId = ""
+		if requestId ~= "" and _OutdoorMapTransitionLogic ~= nil then
+			_OutdoorMapTransitionLogic:CancelMapListRequest(requestId)
+		end
 		self:SetVisible(false)
 	end
 
+	@ExecSpace("ClientOnly")
 	method void OnDestinationClicked(ButtonClickEvent event)
-		local mapName = self.selectedMapName
-		if mapName == "" then
-			return
-		end
-		self:Close()
-		_OutdoorMapTransitionLogic:MoveToMap(mapName)
+		-- 첫 번째 목적지의 공통 이동 요청
+		self:MoveToSelectedMap(self.selectedMapName)
 	end
 
+	@ExecSpace("ClientOnly")
 	method void OnDestination2Clicked(ButtonClickEvent event)
-		local mapName = self.selectedMapName2
-		if mapName == "" then
+		-- 두 번째 목적지의 공통 이동 요청
+		self:MoveToSelectedMap(self.selectedMapName2)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void MoveToSelectedMap(string mapName)
+		-- 완료 결과에 따른 팝업 복구를 호출 UI에서 결정
+		if mapName == "" or _OutdoorMapTransitionLogic == nil then
 			return
 		end
 		self:Close()
-		_OutdoorMapTransitionLogic:MoveToMap(mapName)
+		local sequence = self.listSequence
+		_OutdoorMapTransitionLogic:MoveToMapWithResult(mapName, function(tResult)
+			if tResult.success == false and tResult.reason ~= _OutdoorMapTransitionLogic.REASON_PLAY_ENDED
+				and self.isEnding == false and self.listSequence == sequence then
+				self:Open()
+			end
+		end)
 	end
 
+	@ExecSpace("ClientOnly")
 	method void OnCloseClicked(ButtonClickEvent event)
+		-- 닫기 버튼 처리
 		self:Close()
 	end
 
+	-- Private Methods
+
+	@ExecSpace("ClientOnly")
 	method void SetVisible(boolean visible)
+		-- 팝업 표시와 공통 UI 잠금 상태 통지
 		if self.root == nil then
 			return
 		end

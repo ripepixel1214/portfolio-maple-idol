@@ -1,4 +1,4 @@
----@description "미니게임 목표 평가 식별자를 공통 진행 상태 값으로 해석하는 규칙"
+---@description "미니게임 목표 평가 식별자를 공통 진행 상태 값으로 해석 규칙"
 @Logic
 script MiniGameObjectiveRule extends Logic
 

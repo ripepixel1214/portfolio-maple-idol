@@ -2,10 +2,9 @@
 @Logic
 script EventResultHandler extends Logic
 
-	@ExecSpace("ServerOnly")
-	method void OnBeginPlay()
-		-- 이벤트 결과 핸들러는 별도 초기화 없이 호출 시점에 마스터 데이터를 조회합니다.
-	end
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ServerOnly")
 	method any ApplyEventResultActions(string eventId, string eventResultId, string characterId, string requesterUserId)
@@ -44,6 +43,10 @@ script EventResultHandler extends Logic
 
 		return applyResult
 	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ServerOnly")
 	method any GetEventResultValues(any tEvent, string eventResultId)
@@ -107,7 +110,7 @@ script EventResultHandler extends Logic
 
 	@ExecSpace("ServerOnly")
 	method any ApplyUnlockAction(string unlockType, any value, string requesterUserId)
-		-- unlock_* 액션의 대상 id를 읽어 활동, 캐릭터, 아이템 매니저에 해금 처리를 위임합니다.
+		-- unlock_* 액션의 대상 ID를 읽어 각 데이터 소유 매니저에 해금 처리를 위임합니다.
 		local targetId = self:NormalizeActionValueToString(value)
 		if targetId == "" then
 			log_warning("[EventResultHandler] unlock target id is empty unlockType=" .. tostring(unlockType))
@@ -116,6 +119,10 @@ script EventResultHandler extends Logic
 
 		if unlockType == "activity" then
 			return self:ApplyUnlockActivity(targetId, requesterUserId)
+		end
+
+		if unlockType == "trainingCard" then
+			return self:ApplyUnlockTrainingCard(targetId)
 		end
 
 		if unlockType == "character" then
@@ -143,6 +150,20 @@ script EventResultHandler extends Logic
 		end
 
 		local isApplied = _ActivityManager:UnlockActivityWithCommit(activityId, requesterUserId)
+		return self:CreateApplyResult(isApplied, isApplied == true)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyUnlockTrainingCard(string cardId)
+		-- 육성 카드 해금을 TagTrainingManager의 전용 저장 경로에 적용합니다.
+		if _TagTrainingManager:IsTrainingCardsLoaded() == false then
+			log_warning("[EventResultHandler] training cards are not loaded")
+			return self:CreateApplyResult(false, false)
+		end
+		if _TagTrainingManager:ServerHasTrainingCardUnlocked(cardId) then
+			return self:CreateApplyResult(true, false)
+		end
+		local isApplied = _TagTrainingManager:UnlockTrainingCardWithCommit(cardId)
 		return self:CreateApplyResult(isApplied, isApplied == true)
 	end
 
@@ -240,7 +261,7 @@ script EventResultHandler extends Logic
 	@ExecSpace("ServerOnly")
 	method boolean IsProgressStatKey(string statKey)
 		-- 액션의 스탯 키가 진행 데이터에 속하는지 확인합니다.
-		return statKey == "fandom" or statKey == "actionPoint" or statKey == "meso" or statKey == "groupMeso"
+		return statKey == "fandom" or statKey == "actionPoint" or statKey == "meso"
 	end
 
 	@ExecSpace("ServerOnly")
@@ -284,8 +305,8 @@ script EventResultHandler extends Logic
 			tDelta.actionPoint = value
 		elseif statKey == "fandom" then
 			tDelta.fandom = value
-		elseif statKey == "meso" or statKey == "groupMeso" then
-			tDelta.groupMeso = value
+		elseif statKey == "meso" then
+			tDelta.meso = value
 		else
 			log_warning("[EventResultHandler] unsupported progress statKey=" .. tostring(statKey))
 			return false

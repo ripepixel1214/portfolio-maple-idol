@@ -23,7 +23,7 @@ script SoundManager extends Logic
 
 	property number scheduleActivityFailSfxVolume = 1
 
-	property string studioMapName = "Map_Studio"
+	property string STUDIO_MAP_NAME = "Map_Studio"
 
 	property string studioBgmRuid = "87455f5f463441b4befc83a2c0b8b12a"
 
@@ -31,13 +31,21 @@ script SoundManager extends Logic
 
 	property number studioBgmFadeOutDuration = 0.5
 
-	property string downtownMapName = "Map_Downtown"
+	property string DOWNTOWN_MAP_NAME = "Map_Downtown"
 
 	property string downtownBgmRuid = "5935885b480a4f84ba880f71c97accbe"
 
 	property number downtownBgmBaseVolume = 1
 
 	property number downtownBgmFadeOutDuration = 0.5
+
+	property string NIGHT_MARKET_MAP_NAME = "Map_NightMarket"
+
+	property string nightMarketBgmRuid = "77f1b112b7c54d2d8f6d7673ad3fb4c5"
+
+	property number nightMarketBgmBaseVolume = 1
+
+	property number nightMarketBgmFadeOutDuration = 0.5
 
 	property string observedMapName = ""
 
@@ -68,6 +76,20 @@ script SoundManager extends Logic
 	property boolean wasBgmPlayingBeforeWeeklySchedule = false
 
 	property string mapNameBeforeWeeklySchedule = ""
+
+	property string miniGameBgmRuid = "a2a643c1872544a3a2fa2b0a738b78ce"
+
+	property number miniGameBgmBaseVolume = 1
+
+	property boolean isMiniGameBgmActive = false
+
+	property string bgmBeforeMiniGameRuid = ""
+
+	property number bgmBeforeMiniGameBaseVolume = 1
+
+	property boolean wasBgmPlayingBeforeMiniGame = false
+
+	property string mapNameBeforeMiniGame = ""
 
 	property boolean isDialogBgmActive = false
 
@@ -136,24 +158,32 @@ script SoundManager extends Logic
 
 		local previousMapName = self.observedMapName
 		self.observedMapName = currentMapName
-		if self.isShopBgmActive == true or self.isWeeklyScheduleBgmActive == true or self.isDialogBgmActive == true then
+		if self.isShopBgmActive == true or self.isWeeklyScheduleBgmActive == true
+			or self.isDialogBgmActive == true or self.isMiniGameBgmActive == true then
 			return
 		end
 
-		if currentMapName == self.studioMapName then
+		if currentMapName == self.STUDIO_MAP_NAME then
 			self:ReplaceBGMImmediately(self.studioBgmRuid, self.studioBgmBaseVolume)
 			return
 		end
 
-		if currentMapName == self.downtownMapName then
+		if currentMapName == self.DOWNTOWN_MAP_NAME then
 			self:ReplaceBGMImmediately(self.downtownBgmRuid, self.downtownBgmBaseVolume)
 			return
 		end
 
-		if previousMapName == self.studioMapName and self.currentBgmRuid == self.studioBgmRuid then
+		if currentMapName == self.NIGHT_MARKET_MAP_NAME then
+			self:ReplaceBGMImmediately(self.nightMarketBgmRuid, self.nightMarketBgmBaseVolume)
+			return
+		end
+
+		if previousMapName == self.STUDIO_MAP_NAME and self.currentBgmRuid == self.studioBgmRuid then
 			self:StopBGM(self.studioBgmFadeOutDuration)
-		elseif previousMapName == self.downtownMapName and self.currentBgmRuid == self.downtownBgmRuid then
+		elseif previousMapName == self.DOWNTOWN_MAP_NAME and self.currentBgmRuid == self.downtownBgmRuid then
 			self:StopBGM(self.downtownBgmFadeOutDuration)
+		elseif previousMapName == self.NIGHT_MARKET_MAP_NAME and self.currentBgmRuid == self.nightMarketBgmRuid then
+			self:StopBGM(self.nightMarketBgmFadeOutDuration)
 		end
 	end
 
@@ -192,13 +222,18 @@ script SoundManager extends Logic
 		self.wasBgmPlayingBeforeShop = false
 		self.mapNameBeforeShop = ""
 
-		if currentMapName == self.studioMapName then
+		if currentMapName == self.STUDIO_MAP_NAME then
 			self:ReplaceBGMImmediately(self.studioBgmRuid, self.studioBgmBaseVolume)
 			return
 		end
 
-		if currentMapName == self.downtownMapName then
+		if currentMapName == self.DOWNTOWN_MAP_NAME then
 			self:ReplaceBGMImmediately(self.downtownBgmRuid, self.downtownBgmBaseVolume)
+			return
+		end
+
+		if currentMapName == self.NIGHT_MARKET_MAP_NAME then
+			self:ReplaceBGMImmediately(self.nightMarketBgmRuid, self.nightMarketBgmBaseVolume)
 			return
 		end
 
@@ -256,19 +291,79 @@ script SoundManager extends Logic
 			return
 		end
 
-		if currentMapName == self.studioMapName then
+		if currentMapName == self.STUDIO_MAP_NAME then
 			self:ReplaceBGMImmediately(self.studioBgmRuid, self.studioBgmBaseVolume)
 			return
 		end
 
-		if currentMapName == self.downtownMapName then
+		if currentMapName == self.DOWNTOWN_MAP_NAME then
 			self:ReplaceBGMImmediately(self.downtownBgmRuid, self.downtownBgmBaseVolume)
+			return
+		end
+
+		if currentMapName == self.NIGHT_MARKET_MAP_NAME then
+			self:ReplaceBGMImmediately(self.nightMarketBgmRuid, self.nightMarketBgmBaseVolume)
 			return
 		end
 
 		if self.isBgmPlaying == true and self.currentBgmRuid == self.weeklyScheduleBgmRuid then
 			self:StopBGM(0)
 		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayMiniGameBGM()
+		-- 로비 최초 표시 시 이전 BGM 보관 후 미니게임 공통 BGM 재생
+		if self.isMiniGameBgmActive == true then
+			return
+		end
+
+		-- NPC 대화의 BGM이 미니게임 종료 후 복원되는 상황 방지
+		self:EndDialogBGM()
+		self.isMiniGameBgmActive = true
+		self.bgmBeforeMiniGameRuid = self.currentBgmRuid
+		self.bgmBeforeMiniGameBaseVolume = self.currentBgmBaseVolume
+		self.wasBgmPlayingBeforeMiniGame = self.isBgmPlaying
+		self.mapNameBeforeMiniGame = self:GetCurrentMapName()
+		self:ReplaceBGMImmediately(self.miniGameBgmRuid, self.miniGameBgmBaseVolume)
+		log("[VRF][SoundManager] 미니게임 BGM 시작")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreBGMAfterMiniGame()
+		-- 활성 미니게임 화면 종료 시 현재 맵 BGM 또는 진입 전 BGM 복원
+		if self.isMiniGameBgmActive == false then
+			return
+		end
+
+		local previousRuid = self.bgmBeforeMiniGameRuid
+		local previousBaseVolume = self.bgmBeforeMiniGameBaseVolume
+		local wasPlaying = self.wasBgmPlayingBeforeMiniGame
+		local openedMapName = self.mapNameBeforeMiniGame
+		local currentMapName = self:GetCurrentMapName()
+		local isMiniGameBgmStillPlaying = self.isBgmPlaying == true and self.currentBgmRuid == self.miniGameBgmRuid
+
+		self.isMiniGameBgmActive = false
+		self.bgmBeforeMiniGameRuid = ""
+		self.bgmBeforeMiniGameBaseVolume = 1
+		self.wasBgmPlayingBeforeMiniGame = false
+		self.mapNameBeforeMiniGame = ""
+		if isMiniGameBgmStillPlaying == false then
+			return
+		end
+
+		if currentMapName == self.STUDIO_MAP_NAME then
+			self:ReplaceBGMImmediately(self.studioBgmRuid, self.studioBgmBaseVolume)
+		elseif currentMapName == self.DOWNTOWN_MAP_NAME then
+			self:ReplaceBGMImmediately(self.downtownBgmRuid, self.downtownBgmBaseVolume)
+		elseif currentMapName == self.NIGHT_MARKET_MAP_NAME then
+			self:ReplaceBGMImmediately(self.nightMarketBgmRuid, self.nightMarketBgmBaseVolume)
+		elseif currentMapName == openedMapName and wasPlaying == true and previousRuid ~= "" then
+			self:ReplaceBGMImmediately(previousRuid, previousBaseVolume)
+		else
+			self:StopBGM(0)
+		end
+		log("[VRF][SoundManager] 미니게임 종료 BGM 복원 map=" .. currentMapName)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -327,13 +422,18 @@ script SoundManager extends Logic
 			return
 		end
 
-		if currentMapName == self.studioMapName then
+		if currentMapName == self.STUDIO_MAP_NAME then
 			self:ReplaceBGMImmediately(self.studioBgmRuid, self.studioBgmBaseVolume)
 			return
 		end
 
-		if currentMapName == self.downtownMapName then
+		if currentMapName == self.DOWNTOWN_MAP_NAME then
 			self:ReplaceBGMImmediately(self.downtownBgmRuid, self.downtownBgmBaseVolume)
+			return
+		end
+
+		if currentMapName == self.NIGHT_MARKET_MAP_NAME then
+			self:ReplaceBGMImmediately(self.nightMarketBgmRuid, self.nightMarketBgmBaseVolume)
 			return
 		end
 

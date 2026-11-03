@@ -5,6 +5,8 @@ script ActorSpeechMaster extends Logic
 
 	property boolean isCached = false
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 액터 발화 마스터 테이블을 캐싱합니다.
 		self:CacheAll()
@@ -29,8 +31,8 @@ script ActorSpeechMaster extends Logic
 			if actorId ~= "" then
 				local messageKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "messageKey", "")
 				local localizedMessage = ""
-				if _LocalizationLogic ~= nil then
-					localizedMessage = _LocalizationLogic:GetText(messageKey, "")
+				if _LocaleTextUtil ~= nil then
+					localizedMessage = _LocaleTextUtil:GetText(messageKey)
 				end
 				local tSpeech = {
 					speechId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "speechId", ""),
@@ -102,6 +104,8 @@ script ActorSpeechMaster extends Logic
 		
 		return tSpeeches[_UtilLogic:RandomIntegerRange(1, #tSpeeches)]
 	end
+
+	-- Private Methods
 
 	method boolean IsIntimacyMatched(any tSpeech, integer intimacyLevel)
 		-- 스피치의 친밀도 구간이 현재 친밀도와 맞는지 확인합니다.

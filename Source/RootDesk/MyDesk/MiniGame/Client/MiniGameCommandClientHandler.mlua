@@ -1,0 +1,71 @@
+---@description "클라이언트 측 커맨드 미니게임 처리 로직"
+@Logic
+script MiniGameCommandClientHandler extends Logic
+
+	@ExecSpace("ClientOnly")
+	method any CreateBehavior()
+		-- 게임별 클라이언트 처리와 필수 View 기능 구성
+		local tBehavior = MiniGameClientBehavior()
+		local caps = _MiniGameViewRegistry
+		tBehavior.requiredCapabilities = {caps.CAP_STAGE, caps.CAP_HUD, caps.CAP_RESULT, caps.CAP_COMMAND}
+		tBehavior.configureInput = function(presenter, config)
+			config.sequenceNames = presenter.tModel.commandSequence
+			config.sequence = presenter:ResolveKeySequence(config.sequenceNames)
+		end
+		tBehavior.prepareView = function(presenter, tContext)
+			presenter:GetViewCapability(caps.CAP_COMMAND):ResetCommand()
+		end
+		tBehavior.isViewReady = function(presenter)
+			if #presenter.tModel.commandSequence <= 0 then return false end
+			return presenter:GetViewCapability(caps.CAP_COMMAND):IsCommandVisualReady()
+		end
+		tBehavior.startPresentation = function(presenter, targetSessionId, inputConfig)
+			local state = presenter.tModel.commandFlowState
+			if _MiniGameCommandFlow:IsAwaitingActivation(state) == false then return false end
+			if _MiniGameCommandFlow:TryMarkInputReadyRequested(state) then
+				local stageView = presenter:GetViewCapability(caps.CAP_STAGE)
+				stageView:SelectStage(presenter.tModel.inputType, presenter.tModel.useGauge)
+				stageView:ShowActiveSession()
+				presenter:GetViewCapability(caps.CAP_COMMAND):SetupCommand(presenter.tModel.commandSequence)
+				presenter:PushHud()
+				_MiniGameInputHubLogic:StartInputs(targetSessionId, presenter:BuildInputChannelConfigs(inputConfig))
+				_MiniGameManager:RequestInputReady(targetSessionId)
+			end
+			return true
+		end
+		tBehavior.activate = function(presenter)
+			_MiniGameCommandFlow:Activate(presenter.tModel.commandFlowState)
+		end
+		tBehavior.afterInput = function(presenter, event)
+			local view = presenter:GetViewCapability(caps.CAP_COMMAND)
+			if event.action == _EMiniGameInputAction.Hit then
+				view:PlayCommandHit(presenter.tModel.commandIndex)
+			elseif event.action == _EMiniGameInputAction.Miss then
+				view:ShowCommandError()
+			end
+		end
+		tBehavior.updateView = function(presenter)
+			presenter:GetViewCapability(caps.CAP_COMMAND):UpdateCommandProgress(presenter.tModel.commandIndex)
+		end
+		tBehavior.endSession = function(presenter)
+			presenter:GetViewCapability(caps.CAP_COMMAND):ResetCommand()
+		end
+		tBehavior.commandFeedback = function(presenter, tFeedback)
+			tFeedback.localInputSequence = _CommandInputLogic.inputSequence
+			local feedback = _MiniGameCommandFlow:ApplyFeedback(presenter.tModel.commandFlowState, tFeedback)
+			if feedback.accepted ~= true then return end
+			presenter.tModel.commandIndex = feedback.commandIndex
+			presenter.tModel.lastProgress = feedback.progress
+			if feedback.terminal == true then
+				presenter:FinishSessionFromServer(feedback.success, feedback.reason)
+				return
+			end
+			local view = presenter:GetViewCapability(caps.CAP_COMMAND)
+			view:UpdateCommandProgress(presenter.tModel.commandIndex)
+			if feedback.showError == true then view:ShowCommandError() end
+			presenter:PushHud()
+		end
+		return tBehavior
+	end
+
+end

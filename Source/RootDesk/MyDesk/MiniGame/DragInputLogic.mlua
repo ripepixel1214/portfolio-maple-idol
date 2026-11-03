@@ -1,3 +1,4 @@
+---@description "미니게임 드래그 입력 처리 로직"
 @Logic
 @ExecSpace("ClientOnly")
 script DragInputLogic extends Logic

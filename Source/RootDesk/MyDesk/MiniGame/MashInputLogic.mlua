@@ -1,3 +1,4 @@
+---@description "미니게임 연타 입력 처리 로직"
 @Logic
 @ExecSpace("ClientOnly")
 script MashInputLogic extends Logic
@@ -36,13 +37,13 @@ script MashInputLogic extends Logic
 			self.targetKeyName = config.targetKeyName
 		end
 
-		if Environment:IsPCPlatform() == true then
+		if _ApplicationService:IsPCPlatform() == true then
 			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
 		end
 		self.isActive = true
 
 		local inputName = self.targetKeyName
-		if Environment:IsMobilePlatform() == true then
+		if _ApplicationService:IsMobilePlatform() == true then
 			inputName = self.MOBILE_INPUT_NAME
 		end
 		_MiniGameInputHubLogic:EmitForChannel(self.channelId, _EMiniGameInputAction.Start, {

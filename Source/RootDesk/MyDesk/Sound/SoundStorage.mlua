@@ -1,0 +1,191 @@
+-- SoundManager가 사용하는 유저별 사운드 설정을 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script SoundStorage extends Logic
+
+	property string soundSettingsStorageKey = "soundSettingsData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedSoundSettingsString = ""
+
+	property boolean canSaveSoundSettings = false
+
+	property boolean isSoundSettingsSaveInProgress = false
+
+	property string pendingSoundSettingsUserId = ""
+
+	property string pendingSoundSettingsString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadSoundSettings(string userId)
+		-- UserDataStorage에서 사운드 설정을 로드하고 저장값이 없으면 기본 설정을 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[SoundStorage] userId is required")
+			self.loadedSoundSettingsString = ""
+			self.canSaveSoundSettings = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedSoundSettingsString = userStorage:GetAndWait(self.soundSettingsStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedSoundSettingsString = ""
+			self.canSaveSoundSettings = true
+			return self:CreateDefaultSoundSettings()
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedSoundSettingsString = ""
+			self.canSaveSoundSettings = false
+			return nil
+		end
+
+		if storedSoundSettingsString == nil or storedSoundSettingsString == "" then
+			self.loadedSoundSettingsString = ""
+			self.canSaveSoundSettings = true
+			return self:CreateDefaultSoundSettings()
+		end
+
+		local tSoundSettings = self:DecodeSoundSettings(storedSoundSettingsString)
+		if tSoundSettings == nil then
+			log_warning("[SoundStorage] sound settings load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedSoundSettingsString = storedSoundSettingsString
+			self.canSaveSoundSettings = false
+			return nil
+		end
+
+		self.loadedSoundSettingsString = storedSoundSettingsString
+		self.canSaveSoundSettings = true
+		return tSoundSettings
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveSoundSettingsAsync(string userId, number masterVolume, number backgroundVolume, number effectVolume)
+		-- 세 가지 사운드 설정을 현재 버전의 문자열로 직렬화해 비동기 저장합니다.
+		if self.canSaveSoundSettings == false then
+			log_warning("[SoundStorage] sound settings save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[SoundStorage] userId is required")
+			return
+		end
+
+		local soundSettingsString = self:CreateSoundSettingsString(masterVolume, backgroundVolume, effectVolume)
+		if soundSettingsString == self.loadedSoundSettingsString then
+			return
+		end
+
+		if self.isSoundSettingsSaveInProgress then
+			self.pendingSoundSettingsUserId = userId
+			self.pendingSoundSettingsString = soundSettingsString
+			return
+		end
+
+		self:SaveSoundSettingsStringAsync(userId, soundSettingsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveSoundSettingsStringAsync(string userId, string soundSettingsString)
+		-- 직렬화된 사운드 설정 문자열을 UserDataStorage에 비동기 저장합니다.
+		self.isSoundSettingsSaveInProgress = true
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.soundSettingsStorageKey, soundSettingsString, function(errorCode, key)
+			self:OnSoundSettingsSaveCompleted(userId, soundSettingsString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnSoundSettingsSaveCompleted(string userId, string soundSettingsString, integer errorCode)
+		-- 저장 결과를 반영하고 처리 중 들어온 최신 설정 저장 요청을 이어서 실행합니다.
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.loadedSoundSettingsString = soundSettingsString
+			self.canSaveSoundSettings = true
+		end
+
+		self.isSoundSettingsSaveInProgress = false
+		self:CheckPendingSoundSettingsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingSoundSettingsSave()
+		-- 대기 중인 최신 사운드 설정 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.pendingSoundSettingsString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingSoundSettingsUserId
+		local pendingSettingsString = self.pendingSoundSettingsString
+		self.pendingSoundSettingsUserId = ""
+		self.pendingSoundSettingsString = ""
+
+		if pendingSettingsString == self.loadedSoundSettingsString then
+			return
+		end
+
+		self:SaveSoundSettingsStringAsync(pendingUserId, pendingSettingsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any DecodeSoundSettings(string soundSettingsString)
+		-- 저장 문자열을 현재 버전에 맞는 안전한 사운드 설정 테이블로 복원합니다.
+		local ok, tPlainSettings = pcall(function()
+			return _UtilLogic:StringToTable(soundSettingsString)
+		end)
+		if ok == false or tPlainSettings == nil then
+			return nil
+		end
+
+		local saveVersion = tonumber(tPlainSettings.saveVersion)
+		if saveVersion ~= 1 then
+			log_warning("[SoundStorage] unsupported saveVersion=" .. tostring(saveVersion))
+			return nil
+		end
+
+		return self:CreateNormalizedSoundSettings(
+			tPlainSettings.masterVolume,
+			tPlainSettings.backgroundVolume,
+			tPlainSettings.effectVolume)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateSoundSettingsString(number masterVolume, number backgroundVolume, number effectVolume)
+		-- 사운드 설정을 버전 정보가 포함된 저장 문자열로 만듭니다.
+		local tSettings = self:CreateNormalizedSoundSettings(masterVolume, backgroundVolume, effectVolume)
+		tSettings.saveVersion = self.currentSaveVersion
+		return _UtilLogic:TableToString(tSettings)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateDefaultSoundSettings()
+		-- 저장 데이터가 없을 때 사용할 기본 사운드 설정을 반환합니다.
+		return self:CreateNormalizedSoundSettings(1, 0.3, 0.5)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateNormalizedSoundSettings(any masterVolume, any backgroundVolume, any effectVolume)
+		-- 세 볼륨 값을 각각 0~1 범위로 정규화한 plain table을 반환합니다.
+		return {
+			masterVolume = self:NormalizeVolume(masterVolume, 1),
+			backgroundVolume = self:NormalizeVolume(backgroundVolume, 0.3),
+			effectVolume = self:NormalizeVolume(effectVolume, 0.5)
+		}
+	end
+
+	@ExecSpace("ServerOnly")
+	method number NormalizeVolume(any value, number defaultValue)
+		-- 숫자로 변환할 수 없는 값은 기본값으로, 정상 값은 0~1 범위로 제한합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.max(0, math.min(1, numberValue))
+	end
+
+end

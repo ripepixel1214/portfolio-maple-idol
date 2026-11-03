@@ -1,3 +1,4 @@
+---@description "미니게임별 설정과 규칙 데이터"
 @Logic
 script MiniGameTable extends Logic
 
@@ -45,15 +46,17 @@ script MiniGameTable extends Logic
 
 	property string PRESENTATION_DEFAULT_TRAINING = "default_training"
 
-	property string PRESENTATION_PERFORMANCE_TRAINING = "performance_training"
-
 	property string PRESENTATION_DALGONA_CHALLENGE = "dalgona_challenge"
 
 	property string MINI_GAME_DALGONA_CHALLENGE = "dalgona_challenge"
 
 	property string SETTLEMENT_AMOUNT_PLAYER_SELECTED = "PlayerSelected"
 
-	property string CURRENCY_GROUP_MESO = "groupMeso"
+	property string CURRENCY_MESO = "meso"
+	property string CURRENCY_NIGHT_MARKET_COIN = "nightMarketCoin"
+	property integer DEFAULT_ENTRY_MESO = 1000
+	property integer DALGONA_BET_STEP = 100
+	property integer MAX_BET_AMOUNT = 1000
 
 	method any GetDalgonaChallengeBlockCatalog()
 		-- 기획 기준 달고나 블록 형태와 임시 배율 반환
@@ -129,6 +132,7 @@ script MiniGameTable extends Logic
 		return {
 			{
 				id = "rapid_press_count",
+				gameKind = _EMiniGameKind.RAPID_PRESS_COUNT,
 				name = "속도 훈련",
 				authority = self.AUTHORITY_CLIENT,
 				inputChannels = {
@@ -150,8 +154,7 @@ script MiniGameTable extends Logic
 				},
 				resultResolver = self.RESULT_RESOLVER_OBJECTIVE,
 				presentations = {
-					default = self.PRESENTATION_DEFAULT_TRAINING,
-					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+					default = self.PRESENTATION_DEFAULT_TRAINING
 				},
 				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
 				inputType = EMInput.Mash,
@@ -161,13 +164,14 @@ script MiniGameTable extends Logic
 				},
 				timeMode = EMTime.Countdown,
 				timeConfig = { duration = 8 },
-				skin = { id = "rapid_press_training", title = "속도 훈련", instruction = "연습생이 과도한 일정으로 인해 화가 났습니다!\n제한시간내에 SPACE바를 연타해서 사과하세요." },
-				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				skin = { id = "rapid_press_training", titleKey = "ui.minigame.rapid.title", title = "속도 훈련", instructionKey = "ui.minigame.rapid.instruction", instruction = "연습생이 과도한 일정으로 인해 화가 났습니다!\n제한시간내에 SPACE바를 연타해서 사과하세요." },
+				allowedContexts = { EMContext.Standalone, EMContext.Event, EMContext.Content },
 				successRewards = { { type = "Stat", stat = S.Fatigue, amount = -1 } },
 				failureRewards = { { type = "Fatigue", amount = 1 } }
 			},
 			{
 				id = "timing_accuracy",
+				gameKind = _EMiniGameKind.TIMING_ACCURACY,
 				name = "박자 맞추기",
 				authority = self.AUTHORITY_CLIENT,
 				inputChannels = {
@@ -194,8 +198,7 @@ script MiniGameTable extends Logic
 				},
 				resultResolver = self.RESULT_RESOLVER_ACCURACY,
 				presentations = {
-					default = self.PRESENTATION_DEFAULT_TRAINING,
-					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+					default = self.PRESENTATION_DEFAULT_TRAINING
 				},
 				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
 				inputType = EMInput.Timing,
@@ -210,13 +213,14 @@ script MiniGameTable extends Logic
 				},
 				timeMode = EMTime.Countdown,
 				timeConfig = { duration = 6 },
-				skin = { id = "performance_timing", title = "박자 맞추기", instruction = "타이밍에 맞춰 스페이스바를 눌러 트레이닝 효율을 극대화하세요." },
-				allowedContexts = { EMContext.Standalone, EMContext.Performance, EMContext.Event },
-				successRewards = { { type = "PerformanceScore", amount = 100 } },
-				failureRewards = { { type = "PerformanceScore", amount = 30 } }
+				skin = { id = "timing_accuracy", titleKey = "ui.minigame.timing.title", title = "박자 맞추기", instructionKey = "ui.minigame.timing.instruction", instruction = "타이밍에 맞춰 스페이스바를 눌러 트레이닝 효율을 극대화하세요." },
+				allowedContexts = { EMContext.Standalone, EMContext.Event, EMContext.Content },
+				successRewards = {},
+				failureRewards = {}
 			},
 			{
 				id = "command_sequence",
+				gameKind = _EMiniGameKind.COMMAND_SEQUENCE,
 				name = "안무 순서 기억",
 				authority = self.AUTHORITY_SERVER,
 				inputChannels = {
@@ -242,8 +246,7 @@ script MiniGameTable extends Logic
 				},
 				resultResolver = self.RESULT_RESOLVER_OBJECTIVE,
 				presentations = {
-					default = self.PRESENTATION_DEFAULT_TRAINING,
-					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+					default = self.PRESENTATION_DEFAULT_TRAINING
 				},
 				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
 				inputType = EMInput.Command,
@@ -257,13 +260,14 @@ script MiniGameTable extends Logic
 				},
 				timeMode = EMTime.Countdown,
 				timeConfig = { duration = 8 },
-				skin = { id = "command_choreography", title = "안무 순서 기억", instruction = "일정에 늦었습니다. \n제한시간 내에 커맨드를 입력해서 목적지까지 도착하세요!" },
-				allowedContexts = { EMContext.Standalone, EMContext.Performance, EMContext.Event },
+				skin = { id = "command_choreography", titleKey = "ui.minigame.command.title", title = "안무 순서 기억", instructionKey = "ui.minigame.command.instruction", instruction = "일정에 늦었습니다. \n제한시간 내에 커맨드를 입력해서 목적지까지 도착하세요!" },
+				allowedContexts = { EMContext.Standalone, EMContext.Event, EMContext.Content },
 				successRewards = { { type = "Stat", stat = S.Visual, amount = 1 } },
 				failureRewards = { { type = "Fatigue", amount = 1 } }
 			},
 			{
 				id = "mash_gauge_drain",
+				gameKind = _EMiniGameKind.GAUGE_MAINTENANCE,
 				name = "집중력 유지",
 				authority = self.AUTHORITY_CLIENT,
 				inputChannels = {
@@ -290,8 +294,7 @@ script MiniGameTable extends Logic
 				},
 				resultResolver = self.RESULT_RESOLVER_OBJECTIVE,
 				presentations = {
-					default = self.PRESENTATION_DEFAULT_TRAINING,
-					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+					default = self.PRESENTATION_DEFAULT_TRAINING
 				},
 				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
 				inputType = EMInput.Mash,
@@ -301,13 +304,14 @@ script MiniGameTable extends Logic
 				},
 				timeMode = EMTime.GaugeDrain,
 				timeConfig = { startGauge = 30, drainPerSecond = 6, failAt = 0 },
-				skin = { id = "focus_gauge", title = "집중력 유지", instruction = "응원봉을 흔들어서 연습생을 칭찬해주세요." },
-				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				skin = { id = "focus_gauge", titleKey = "ui.minigame.gauge.title", title = "집중력 유지", instructionKey = "ui.minigame.gauge.instruction", instruction = "응원봉을 흔들어서 연습생을 칭찬해주세요." },
+				allowedContexts = { EMContext.Standalone, EMContext.Event, EMContext.Content },
 				successRewards = { { type = "Stat", stat = S.Fatigue, amount = -1 } },
 				failureRewards = { { type = "Fatigue", amount = 1 } }
 			},
 			{
 				id = "shape_trace_match",
+				gameKind = _EMiniGameKind.SHAPE_TRACE,
 				name = "동선 따라 그리기",
 				authority = self.AUTHORITY_CLIENT,
 				inputChannels = {
@@ -336,8 +340,7 @@ script MiniGameTable extends Logic
 				},
 				resultResolver = self.RESULT_RESOLVER_ACCURACY,
 				presentations = {
-					default = self.PRESENTATION_DEFAULT_TRAINING,
-					performance = self.PRESENTATION_PERFORMANCE_TRAINING
+					default = self.PRESENTATION_DEFAULT_TRAINING
 				},
 				-- 새 RuleEngine 전환 완료 전 현재 실행 경로와의 호환 필드 유지
 				inputType = EMInput.Drag,
@@ -347,13 +350,14 @@ script MiniGameTable extends Logic
 				},
 				timeMode = EMTime.Countdown,
 				timeConfig = { duration = 12 },
-				skin = { id = "shape_trace", title = "동선 따라 그리기", instruction = "새로운 안무가 생각났습니다! \n제한 시간 내에 마우스를 사용해서 스케치를 따라 그리세요!" },
-				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				skin = { id = "shape_trace", titleKey = "ui.minigame.shape.title", title = "동선 따라 그리기", instructionKey = "ui.minigame.shape.instruction", instruction = "새로운 안무가 생각났습니다! \n제한 시간 내에 마우스를 사용해서 스케치를 따라 그리세요!" },
+				allowedContexts = { EMContext.Standalone, EMContext.Event, EMContext.Content },
 				successRewards = { { type = "Stat", stat = S.Visual, amount = 1 } },
 				failureRewards = { { type = "Fatigue", amount = 1 } }
 			},
 			{
 				id = self.MINI_GAME_DALGONA_CHALLENGE,
+				gameKind = _EMiniGameKind.DALGONA_DRAW,
 				name = "달고나 메소 뽑기",
 				authority = self.AUTHORITY_SERVER,
 				inputChannels = {
@@ -362,7 +366,8 @@ script MiniGameTable extends Logic
 						adapter = self.INPUT_ADAPTER_SELECTION,
 						config = {
 							boardRows = 4,
-							boardColumns = 4
+							boardColumns = 4,
+							requiredPlacementCount = 1
 						}
 					}
 				},
@@ -392,7 +397,8 @@ script MiniGameTable extends Logic
 				inputType = EMInput.Selection,
 				inputConfig = {
 					boardRows = 4,
-					boardColumns = 4
+					boardColumns = 4,
+					requiredPlacementCount = 1
 				},
 				objectives = {
 					{
@@ -410,21 +416,95 @@ script MiniGameTable extends Logic
 				timeConfig = {},
 				skin = {
 					id = self.PRESENTATION_DALGONA_CHALLENGE,
-					title = "달고나 메소 뽑기",
-					instruction = "블록을 배치하고 숫자를 뽑아 메소 배율을 확인하세요."
+					titleKey = "ui.dalgona.title", title = "달고나 메소 뽑기",
+					instructionKey = "ui.dalgona.skin_instruction", instruction = "블록을 배치하고 숫자를 뽑아 메소 배율을 확인하세요."
 				},
-				allowedContexts = { EMContext.Standalone, EMContext.Event },
+				allowedContexts = { EMContext.Standalone, EMContext.Event, EMContext.Content },
 				settlementRule = {
 					type = EMSettlement.MesoBet,
 					amountMode = self.SETTLEMENT_AMOUNT_PLAYER_SELECTED,
-					inputCurrency = self.CURRENCY_GROUP_MESO,
-					outputCurrency = self.CURRENCY_GROUP_MESO,
-					min = 100,
-					step = 100
+					inputCurrency = self.CURRENCY_MESO,
+					outputCurrency = self.CURRENCY_MESO,
+					min = self.DEFAULT_ENTRY_MESO,
+					step = self.DALGONA_BET_STEP
 				},
 				blockCatalog = self:GetDalgonaChallengeBlockCatalog(),
 				successRewards = {},
 				failureRewards = {}
+			},
+			{
+				id = _MiniGameLuckyCubeRule.MINI_GAME_ID,
+				gameKind = _EMiniGameKind.LUCKY_CUBE,
+				name = "럭키 큐브",
+				authority = self.AUTHORITY_SERVER,
+				inputType = EMInput.Selection,
+				inputConfig = {},
+				inputChannels = {},
+				objectives = {},
+				phases = {{id = self.PHASE_PLAYING, objectives = {}}},
+				timeMode = EMTime.None,
+				timeConfig = {},
+				presentations = {default = _MiniGameLuckyCubeRule.MINI_GAME_ID},
+				skin = {titleKey = "ui.lucky_cube.title", title = "럭키 큐브", instructionKey = "ui.lucky_cube.instruction", instruction = "판돈을 정하고 주사위 결과를 예측하세요."},
+				allowedContexts = {EMContext.Standalone, EMContext.Event, EMContext.Content},
+				settlementRule = {
+					type = EMSettlement.CoinBet,
+					amountMode = self.SETTLEMENT_AMOUNT_PLAYER_SELECTED,
+					inputCurrency = self.CURRENCY_MESO,
+					entryMeso = self.DEFAULT_ENTRY_MESO,
+					entryCoin = 100,
+					allowCoinFallback = true,
+					outputCurrency = self.CURRENCY_NIGHT_MARKET_COIN,
+					min = 100, step = 100, max = self.MAX_BET_AMOUNT
+				},
+				successRewards = {},
+				failureRewards = {}
+			},
+			{
+				id = _MiniGameSnailLadderRule.MINI_GAME_ID,
+				gameKind = _EMiniGameKind.SNAIL_LADDER,
+				name = "달팽이 사다리 타기",
+				authority = self.AUTHORITY_SERVER,
+				inputType = EMInput.Selection,
+				inputConfig = {},
+				inputChannels = {},
+				objectives = {},
+				phases = {{id = self.PHASE_PLAYING, objectives = {}}},
+				timeMode = EMTime.None,
+				timeConfig = {},
+				presentations = {default = _MiniGameSnailLadderRule.MINI_GAME_ID},
+				skin = {titleKey = "ui.snail_ladder.title", title = "달팽이 사다리 타기", instructionKey = "ui.snail_ladder.instruction", instruction = "달팽이 한 마리를 골라 관문 보상을 받으세요."},
+				allowedContexts = {EMContext.Standalone, EMContext.Event, EMContext.Content},
+				settlementRule = {
+					type = EMSettlement.CoinBet,
+					amountMode = _MiniGameSettlementRule.AMOUNT_MODE_FIXED,
+					amount = _MiniGameSnailLadderRule.ENTRY_COIN,
+					inputCurrency = self.CURRENCY_NIGHT_MARKET_COIN,
+					outputCurrency = self.CURRENCY_NIGHT_MARKET_COIN,
+					min = _MiniGameSnailLadderRule.ENTRY_COIN,
+					step = _MiniGameSnailLadderRule.ENTRY_COIN,
+					max = _MiniGameSnailLadderRule.ENTRY_COIN
+				},
+				successRewards = {},
+				failureRewards = {}
+			},
+			{
+				id = _MiniGameFishingRule.MINI_GAME_ID,
+				gameKind = _EMiniGameKind.FISHING,
+				name = "잡아라! 날치왕",
+				authority = self.AUTHORITY_SERVER,
+				inputType = EMInput.Selection,
+				inputConfig = {}, inputChannels = {}, objectives = {},
+				phases = {{id = self.PHASE_PLAYING, objectives = {}}},
+				timeMode = EMTime.None, timeConfig = {},
+				presentations = {default = _MiniGameFishingRule.MINI_GAME_ID},
+				skin = {titleKey = "ui.fishing.title", title = "잡아라! 날치왕", instructionKey = "ui.fishing.instruction", instruction = "화면을 눌러 작살 발사! 폭탄을 피하고 한 번에 여러 마리를 잡으세요."},
+				allowedContexts = {EMContext.Standalone, EMContext.Event, EMContext.Content},
+				settlementRule = {type = EMSettlement.FixedEntry,
+					amountMode = _MiniGameSettlementRule.AMOUNT_MODE_FIXED,
+					amount = _MiniGameFishingRule.ENTRY_MESO, min = _MiniGameFishingRule.ENTRY_MESO, step = 1,
+					inputCurrency = self.CURRENCY_MESO, outputCurrency = ""},
+				successRewards = {}, failureRewards = {}
 			}
 		}
 	end

@@ -8,6 +8,8 @@ script ConditionMaster extends Logic
 	-- fatigueMin 오름차순으로 정렬된 등급 구간 목록 [{conditionKey, condition, fatigueMin, fatigueMax, failureChance}]
 	property any tGrades = {}
 
+	-- Public API
+
 	method void OnBeginPlay()
 		-- 로직 시작 시 컨디션 등급 테이블을 로드
 		self:LoadGrades()
@@ -29,8 +31,8 @@ script ConditionMaster extends Logic
 			if gradeKey ~= "" then
 				local displayNameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "displayNameKey", "")
 				local localizedDisplayName = ""
-				if _LocalizationLogic ~= nil then
-					localizedDisplayName = _LocalizationLogic:GetText(displayNameKey, "")
+				if _LocaleTextUtil ~= nil then
+					localizedDisplayName = _LocaleTextUtil:GetText(displayNameKey)
 				end
 				local iconResourceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "icon", "")
 				if iconResourceId == "" then

@@ -13,21 +13,17 @@ script DefaultUILogic extends Logic
 
 	property Entity performanceProgressGroup = "4664e40a-5ab7-4e7e-bd6e-ff9d2d40b8cf"
 
-	property Entity demoDimmer = "e4db4e97-bb1b-4942-a89e-31eb8e5eb812"
-
-	property Entity demoPanel = "c5edb88a-de22-49c6-9829-0e26a71fa88d"
-
-	property ButtonComponent demoConfirmButton = "439ca803-f111-4835-8650-ad4c1bf73839"
-
 	property Entity rootGroup = "7de246e2-077d-4dd2-8d7e-ffa5ac81c2bc"
 
 	property SliderComponent actionPointGauge = "08ff4af5-1092-4d9e-a860-089cca03b23d"
 
 	property TextGUIRendererComponent actionPointText = "43d4a9cb-b97d-47e1-aa69-1bc87419c73a"
 
-	property TextGUIRendererComponent fandomText = "b3e3671e-b051-47ae-a711-bbd77daa4e0f"
-
 	property TextGUIRendererComponent mesoText = "b19c9907-24ef-4f10-be1d-13bf2f596178"
+
+	property TextGUIRendererComponent diamondText = "b3e3671e-b051-47ae-a711-bbd77daa4e0f"
+
+	property TextGUIRendererComponent nightMarketCoinText = "aeb71edf-50cb-4a44-bd4b-ceb556eaf3e0"
 
 	property Entity cloudSunImage = "fa8eaee1-d125-41b2-9cd9-de7a2b94dec3"
 
@@ -71,7 +67,6 @@ script DefaultUILogic extends Logic
 
 	property any progressChangedHandler = nil
 
-	property any languageChangedHandler = nil
 
 	property integer languageRefreshTimerId = 0
 
@@ -79,11 +74,17 @@ script DefaultUILogic extends Logic
 
 	property any scheduleVisibilityChangedHandler = nil
 
+	property any tagTrainingVisibilityChangedHandler = nil
+
+	property any stageSelectVisibilityChangedHandler = nil
+
+	property any characterSelectVisibilityChangedHandler = nil
+
+	property any stageStartVisibilityChangedHandler = nil
+
 	property any scheduleProgressVisibilityChangedHandler = nil
 
 	property any settlementVisibilityChangedHandler = nil
-
-	property any demoConfirmButtonClickHandler = nil
 
 	property any tOpenUiById = {}
 
@@ -93,29 +94,150 @@ script DefaultUILogic extends Logic
 
 	property integer moveRequestTimeoutTimerId = 0
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void SetVisibleRoot(boolean visible)
+		-- 공연 중에는 기본 HUD를 통째로 숨긴다. 루트 그룹만 토글하므로 내부 진행단계 갱신과 무관하게 유지된다.
+		if self.rootGroup == nil then
+			return
+		end
+
+		self.rootGroup.Enable = visible
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Event Handlers
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressActionButtonClicked(ButtonClickEvent event)
+		-- 현재 내부 스텝에 맞는 DefaultUI 액션을 실행합니다.
+		if self:IsProgressActionButtonVisible() == false then
+			return
+		end
+
+		local currentStep = self:GetCurrentStep()
+		if currentStep == _EProgressStep.StageSelect then
+			if self:IsStageSelectOutdoor(currentStep) then
+				_StepEntryLogic:RequestEnterStudio()
+			else
+				self:OpenStageSelectUI()
+			end
+			return
+		end
+
+		if currentStep == _EProgressStep.BeforeTraining then
+			_TagTrainingUILogic:Open()
+			return
+		end
+
+		if currentStep == _EProgressStep.Performance then
+			self:OpenScheduleUI()
+			return
+		end
+
+		if currentStep == _EProgressStep.AfterTraining then
+			self:SendMoveToNextStepRequest(currentStep)
+			return
+		end
+
+		if currentStep == _EProgressStep.Outdoor then
+			self:SendMoveToNextStepRequest(currentStep)
+			return
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressActionButtonStateChanged(ButtonStateChangeEvent event)
+		-- 메인 진행 버튼의 호버 상태를 진행 이미지에도 동일하게 반영합니다.
+		self.isProgressActionButtonHovered = self:IsHoverLikeButtonState(event)
+		self:RefreshProgressActionHoverVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressImageButtonStateChanged(ButtonStateChangeEvent event)
+		-- 현재 표시된 진행 이미지의 호버 상태를 메인 진행 버튼에도 동일하게 반영합니다.
+		self.isProgressImageHovered = self:IsHoverLikeButtonState(event)
+		self:RefreshProgressActionHoverVisual()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 스테이지 또는 진행 데이터가 변경되면 DefaultUI를 갱신합니다.
+		-- 서버 응답이 도착했으므로 이동 요청 잠금을 푼다
+		self:EndMoveRequest()
+		self:RefreshDefaultUI()
+		self:RefreshProgressText()
+		self:RefreshActionPoint(true)
+		self:RefreshProgressStats()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnDiamondWalletChanged(DiamondWalletChangedEvent event)
+		-- 구매·소비 완료 시 진행 변경 없이도 다이아몬드 HUD 갱신
+		self:RefreshProgressStats()
+	end
+
+	@ExecSpace("ClientOnly")
+	@EventSender("LocalPlayer")
+	handler HandleLocalPlayerMapChanged(EntityMapChangedEvent event)
+		-- 스텝 변경 없이 외출하거나 복귀해도 진행 버튼 표시를 갱신합니다.
+		self:RefreshDefaultUI()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUIVisibilityChanged(any uiVisibilityChangedEvent)
+		-- 진행 버튼을 가리는 UI가 열리거나 닫히면 버튼 표시 상태를 갱신합니다.
+		if uiVisibilityChangedEvent == nil then
+			return
+		end
+
+		local uiId = uiVisibilityChangedEvent.uiId or ""
+		if uiId == "" then
+			return
+		end
+
+		if self:IsProgressButtonBlockingUI(uiId) == false then
+			return
+		end
+
+		if self.tOpenUiById == nil then
+			self.tOpenUiById = {}
+		end
+
+		if uiVisibilityChangedEvent.isOpen == true then
+			self.tOpenUiById[uiId] = true
+		else
+			self.tOpenUiById[uiId] = nil
+		end
+
+		self:RefreshDefaultUI()
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
-		-- Connects DefaultUI button and visibility state events.
-		-- 에디터 저장 상태와 관계없이 데모 종료 팝업은 게임 시작 시 닫힌 상태로 초기화합니다.
-		self:SetEntityEnable(self.demoDimmer, false)
-		self:SetEntityEnable(self.demoPanel, false)
-
+		-- DefaultUI 버튼과 UI 표시 상태 이벤트를 연결합니다.
 		if self.progressActionButton ~= nil then
 			self.progressActionButtonClickHandler = self.progressActionButton.Entity:ConnectEvent(ButtonClickEvent, self.OnProgressActionButtonClicked)
 			self.progressActionButtonStateChangedHandler = self.progressActionButton.Entity:ConnectEvent(ButtonStateChangeEvent, self.OnProgressActionButtonStateChanged)
 		end
 
-		if self.demoConfirmButton ~= nil and self.demoConfirmButton.Entity ~= nil then
-			self.demoConfirmButtonClickHandler = self.demoConfirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnDemoConfirmButtonClicked)
-		end
 		self:ConnectProgressImageButtonEvents()
 
 		if _ProgressManager ~= nil then
 			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
 		end
+		self._T.diamondWalletChangedHandler = _DiamondWalletLogic:ConnectEvent(DiamondWalletChangedEvent, self.OnDiamondWalletChanged)
 
-		if _LocalizationLogic ~= nil then
-			self.languageChangedHandler = _LocalizationLogic:ConnectEvent(LanguageChangedEvent, self.OnLanguageChanged)
+		if _LocaleTextUtil ~= nil then
 		end
 
 		self:ConnectUIVisibilityChangedEvents()
@@ -127,7 +249,7 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
-		-- Disconnects DefaultUI event handlers.
+		-- DefaultUI에서 연결한 이벤트 핸들러를 해제합니다.
 		self:StopActionPointTween()
 		self:StopMoveRequestTimeout()
 		self:StopLanguageRefreshTimer()
@@ -140,33 +262,25 @@ script DefaultUILogic extends Logic
 			self.progressActionButton.Entity:DisconnectEvent(ButtonStateChangeEvent, self.progressActionButtonStateChangedHandler)
 		end
 
-		if self.demoConfirmButton ~= nil and self.demoConfirmButton.Entity ~= nil and self.demoConfirmButtonClickHandler ~= nil then
-			self.demoConfirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.demoConfirmButtonClickHandler)
-		end
-
 		self:DisconnectProgressImageButtonEvents()
 
 		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
 			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
 		end
-
-		if self.languageChangedHandler ~= nil and _LocalizationLogic ~= nil then
-			_LocalizationLogic:DisconnectEvent(LanguageChangedEvent, self.languageChangedHandler)
+		if self._T.diamondWalletChangedHandler ~= nil then
+			_DiamondWalletLogic:DisconnectEvent(DiamondWalletChangedEvent, self._T.diamondWalletChangedHandler)
+			self._T.diamondWalletChangedHandler = nil
 		end
 
 		self:DisconnectUIVisibilityChangedEvents()
 		self.progressActionButtonClickHandler = nil
 		self.progressActionButtonStateChangedHandler = nil
-		self.demoConfirmButtonClickHandler = nil
 		self.progressChangedHandler = nil
-		self.languageChangedHandler = nil
 	end
 
-	@ExecSpace("ClientOnly")
-	method void OnLanguageChanged(LanguageChangedEvent event)
-		-- Master 번역 캐시 갱신 완료 이후 동적 HUD 문구 갱신 예약
-		self:ScheduleLanguageRefresh()
-	end
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ClientOnly")
 	method void ScheduleLanguageRefresh()
@@ -191,66 +305,20 @@ script DefaultUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void SetVisibleRoot(boolean visible)
-		-- 공연 중에는 기본 HUD를 통째로 숨긴다. 루트 그룹만 토글하므로 내부 진행단계 갱신과 무관하게 유지된다.
-		if self.rootGroup == nil then
-			return
-		end
-
-		self.rootGroup.Enable = visible
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnProgressActionButtonClicked(ButtonClickEvent event)
-		-- 현재 진행 단계에 맞는 DefaultUI 액션을 실행합니다.
-		if self:IsProgressActionButtonVisible() == false then
-			return
-		end
-
-		local currentStep = self:GetCurrentStep()
-		if _EProgressStep:IsDemoEndStep(currentStep) then
-			self:OpenDemoEndPanel()
-			return
-		end
-
-		if currentStep == _EProgressStep.Step_Weekly then
-			self:OpenScheduleUI()
-			return
-		end
-
-		if currentStep == _EProgressStep.Step_Performance then
-			self:OpenScheduleUI()
-			return
-		end
-
-		if currentStep == _EProgressStep.Step_TrainingCompleted then
-			self:EnterWeekendDowntown(currentStep)
-			return
-		end
-
-		if currentStep == _EProgressStep.Step_Weekend then
-			self:ReturnToStudio(currentStep)
-			return
-		end
-
-		self:SendMoveToNextStepRequest(currentStep)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void SendMoveToNextStepRequest(integer expectedStep)
-		-- 서버에 진행 단계 이동을 요청. 응답 전까지 잠금을 걸어 연타를 막고, 요청 시점 단계를 함께 보내 서버가 중복 요청을 거절할 수 있게 함
+	method void SendMoveToNextStepRequest(integer currentStep)
+		-- 서버에 현재 Step을 보내 같은 Stage 안의 다음 Step 이동을 요청합니다.
 		if _ProgressManager == nil then
 			log_warning("[DefaultUILogic] ProgressManager is nil")
 			return
 		end
 
 		if self:TryBeginMoveRequest() == false then
-			log("[DefaultUILogic] move request ignored step=" .. tostring(expectedStep))
+			log("[DefaultUILogic] step request ignored currentStep=" .. _EProgressStep:GetName(currentStep))
 			return
 		end
 
-		log("[DefaultUILogic] request move to next step from=" .. tostring(expectedStep))
-		_ProgressManager:RequestMoveToNextStep(expectedStep)
+		log("[DefaultUILogic] request complete step currentStep=" .. _EProgressStep:GetName(currentStep))
+		_ProgressManager:RequestCompleteStep(currentStep)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -304,34 +372,19 @@ script DefaultUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void OnProgressActionButtonStateChanged(ButtonStateChangeEvent event)
-		-- Keeps the progress image hover state in sync when the main move button is hovered.
-		self.isProgressActionButtonHovered = self:IsHoverLikeButtonState(event)
-		self:RefreshProgressActionHoverVisual()
-	end
+	method void OpenStageSelectUI()
+		-- StageSelect 스텝의 스테이지 및 외출 맵 선택 UI를 엽니다.
+		if _StageSelectUILogic == nil then
+			log_warning("[DefaultUILogic] StageSelectUILogic is nil")
+			return
+		end
 
-	@ExecSpace("ClientOnly")
-	method void OnProgressImageButtonStateChanged(ButtonStateChangeEvent event)
-		-- Keeps the main move button hover state in sync when the visible progress image is hovered.
-		self.isProgressImageHovered = self:IsHoverLikeButtonState(event)
-		self:RefreshProgressActionHoverVisual()
-	end
-
-	@ExecSpace("ClientOnly")
-	method void EnterWeekendDowntown(integer expectedStep)
-		-- Requests transition from training-completed state to weekend state.
-		self:SendMoveToNextStepRequest(expectedStep)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void ReturnToStudio(integer expectedStep)
-		-- Requests transition from weekend state back to weekly state.
-		self:SendMoveToNextStepRequest(expectedStep)
+		_StageSelectUILogic:Open()
 	end
 
 	@ExecSpace("ClientOnly")
 	method void OpenScheduleUI()
-		-- Opens the weekly schedule UI.
+		-- 훈련 전 또는 공연 스텝의 스케줄 UI를 엽니다.
 		if _ScheduleUILogic == nil then
 			log_warning("[DefaultUILogic] ScheduleUILogic is nil")
 			return
@@ -341,39 +394,40 @@ script DefaultUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void OpenDemoEndPanel()
-		-- 데모 종료 단계의 진행 버튼은 스케줄 대신 종료 안내 팝업을 표시합니다.
-		self:SetEntityEnable(self.demoDimmer, true)
-		self:SetEntityEnable(self.demoPanel, true)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnDemoConfirmButtonClicked(ButtonClickEvent event)
-		-- 데모 종료 안내의 확인 버튼을 누르면 패널과 딤머를 함께 닫습니다.
-		self:CloseDemoEndPanel()
-	end
-
-	@ExecSpace("ClientOnly")
-	method void CloseDemoEndPanel()
-		-- 데모 종료 안내 패널과 배경 딤머를 비활성화합니다.
-		self:SetEntityEnable(self.demoPanel, false)
-		self:SetEntityEnable(self.demoDimmer, false)
-	end
-
-	@ExecSpace("ClientOnly")
 	method integer GetCurrentStep()
-		-- Returns the current client-side progress step.
+		-- 현재 클라이언트 내부 진행 스텝을 반환합니다.
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
 		if progress == nil or progress.eCurrentStep == nil then
-			return _EProgressStep.Step_Weekly
+			return _EProgressStep.StageSelect
 		end
 
 		return progress.eCurrentStep
 	end
 
 	@ExecSpace("ClientOnly")
+	method boolean IsStageSelectOutdoor(integer currentStep)
+		-- 스테이지 선택 상태에서 이동 가능한 외출 맵을 방문 중인지 확인합니다.
+		if currentStep ~= _EProgressStep.StageSelect then
+			return false
+		end
+
+		local player = _UserService.LocalPlayer
+		if isvalid(player) == false then
+			return false
+		end
+
+		for _, destination in ipairs(_OutdoorMapTransitionLogic:GetDestinations("")) do
+			if destination.mapName == player.CurrentMapName then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ClientOnly")
 	method void RefreshDefaultUI()
-		-- Refreshes DefaultUI groups and button visibility for the current progress step.
+		-- 현재 내부 스텝과 외출 여부에 맞춰 DefaultUI 그룹과 버튼 표시 상태를 갱신합니다.
 		local currentStep = self:GetCurrentStep()
 		local isActionVisible = self:IsProgressActionButtonVisible()
 		self:RefreshDefaultUIByProgressStep(currentStep, isActionVisible)
@@ -382,30 +436,29 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshDefaultUIByProgressStep(integer currentStep, boolean isActionVisible)
-		-- Toggles DefaultUI progress groups and button images for the given progress step.
-		local isWeekly = currentStep == _EProgressStep.Step_Weekly
-		local isTrainingCompleted = currentStep == _EProgressStep.Step_TrainingCompleted
-		local isWeekend = currentStep == _EProgressStep.Step_Weekend
-		local isPerformance = currentStep == _EProgressStep.Step_Performance
-			or _EProgressStep:IsDemoEndStep(currentStep)
+		-- 지정한 내부 스텝과 외출 여부에 맞춰 DefaultUI 진행 그룹과 버튼 이미지를 전환합니다.
+		local isBeforeTraining = currentStep == _EProgressStep.BeforeTraining
+		local isAfterTraining = currentStep == _EProgressStep.AfterTraining
+		local isReturn = currentStep == _EProgressStep.Outdoor or self:IsStageSelectOutdoor(currentStep)
+		local isPerformance = currentStep == _EProgressStep.Performance
 
-		self:SetEntityEnable(self.weeklyProgressGroup, isActionVisible == true and isWeekly == true)
-		self:SetEntityEnable(self.weekendProgressGroup, isActionVisible == true and isTrainingCompleted == true)
-		self:SetEntityEnable(self.outsideProgressGroup, isActionVisible == true and isWeekend == true)
+		self:SetEntityEnable(self.weeklyProgressGroup, isActionVisible == true and isBeforeTraining == true)
+		self:SetEntityEnable(self.weekendProgressGroup, isActionVisible == true and isAfterTraining == true)
+		self:SetEntityEnable(self.outsideProgressGroup, isActionVisible == true and isReturn == true)
 		self:SetEntityEnable(self.performanceProgressGroup, isActionVisible == true and isPerformance == true)
-		self:RefreshProgressActionButtonText(isWeekend)
+		self:RefreshProgressActionButtonText(isReturn)
 		self:RefreshCloudVisualByProgressStep(currentStep)
 		self:RefreshProgressActionHoverVisual()
 	end
 
 	@ExecSpace("ClientOnly")
-	method void RefreshProgressActionButtonText(boolean isWeekend)
-		-- 진행 단계에 따른 이동 버튼 문구 갱신
+	method void RefreshProgressActionButtonText(boolean isReturn)
+		-- 외출 복귀 동작이면 BACK, 그 외에는 START 문구를 표시합니다.
 		if self.progressActionButtonText == nil then
 			return
 		end
 
-		if isWeekend == true then
+		if isReturn == true then
 			self.progressActionButtonText.Text = "BACK"
 		else
 			self.progressActionButtonText.Text = "START"
@@ -526,11 +579,10 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshCloudVisualByProgressStep(integer currentStep)
-		-- 프로그레스 단계에 따라 Cloud 아이콘과 Week 텍스트 색상을 갱신합니다.
-		local isPerformance = currentStep == _EProgressStep.Step_Performance
-			or _EProgressStep:IsDemoEndStep(currentStep)
-		local isTreeStep = currentStep == _EProgressStep.Step_TrainingCompleted
-			or currentStep == _EProgressStep.Step_Weekend
+		-- 내부 스텝에 따라 Cloud 아이콘과 Week 텍스트 색상을 갱신합니다.
+		local isPerformance = currentStep == _EProgressStep.Performance
+		local isTreeStep = currentStep == _EProgressStep.AfterTraining
+			or currentStep == _EProgressStep.Outdoor
 
 		self:SetEntityEnable(self.cloudSunImage, isTreeStep == false or isPerformance == true)
 		self:SetEntityEnable(self.cloudTreeImage, isTreeStep == true and isPerformance == false)
@@ -558,7 +610,7 @@ script DefaultUILogic extends Logic
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
 		local month = 1
 		local week = 1
-		local goalTextValue = self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+		local goalTextValue = _LocaleTextUtil:GetText(self.UI_GOAL_NONE_KEY)
 
 		if progress ~= nil then
 			if progress.currentMonth ~= nil and progress.currentMonth > 0 then
@@ -569,11 +621,10 @@ script DefaultUILogic extends Logic
 				week = math.floor(progress.currentWeek)
 			end
 
-			if _GameGoalMaster ~= nil then
-				local goal = _GameGoalMaster:GetGameGoal(progress.gameGoalId)
+			if _StageMaster ~= nil then
+				local goal = _StageMaster:GetStage(progress.eCurrentStage)
 				if goal ~= nil then
-					if progress.eCurrentStep == _EProgressStep.Step_Performance
-						or _EProgressStep:IsDemoEndStep(progress.eCurrentStep) then
+					if progress.eCurrentStep == _EProgressStep.Performance then
 						goalTextValue = self:GetGoalNameText(goal)
 					else
 						goalTextValue = self:BuildGoalScheduleText(month, week, goal)
@@ -583,8 +634,8 @@ script DefaultUILogic extends Logic
 		end
 
 		local monthWeekText = ""
-		if _LocalizationLogic ~= nil then
-			monthWeekText = _LocalizationLogic:Format(self.UI_MONTH_WEEK_KEY, "", month, week, nil, "")
+		if _LocaleTextUtil ~= nil then
+			monthWeekText = _LocaleTextUtil:Format(self.UI_MONTH_WEEK_KEY, month, week, nil, "")
 		end
 		self:SetGuiText(self.cloudMonthText, monthWeekText)
 		self:SetGuiText(self.goalText, goalTextValue)
@@ -594,42 +645,22 @@ script DefaultUILogic extends Logic
 	method string BuildGoalScheduleText(integer currentMonth, integer currentWeek, any goal)
 		-- 다음 공연까지 남은 주차와 공연명을 DefaultUI 목표 문구로 변환합니다.
 		if goal == nil then
-			return self:GetLocalizedText(self.UI_GOAL_NONE_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_GOAL_NONE_KEY)
 		end
 
 		local goalName = goal.name or ""
 		if goalName == "" then
-			goalName = self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+			goalName = _LocaleTextUtil:GetText(self.UI_PERFORMANCE_NAME_KEY)
 		end
 
 		local remainWeek = self:GetRemainWeeksUntilGoal(currentMonth, currentWeek, goal.month or 1, goal.week or 1)
-		return self:FormatLocalized(self.UI_GOAL_COUNTDOWN_KEY, "", remainWeek, goalName, nil)
-	end
-
-	@ExecSpace("ClientOnly")
-	method string GetLocalizedText(string key, string fallbackText)
-		-- 현재 locale의 UI 문구를 조회합니다.
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:GetText(key, fallbackText)
-		end
-
-		return fallbackText or ""
-	end
-
-	@ExecSpace("ClientOnly")
-	method string FormatLocalized(string key, string fallbackText, any value1, any value2, any value3)
-		-- 현재 locale의 UI 템플릿에 값을 반영
-		if _LocalizationLogic ~= nil then
-			return _LocalizationLogic:Format(key, fallbackText, value1, value2, value3, "")
-		end
-
-		return fallbackText or ""
+		return _LocaleTextUtil:Format(self.UI_GOAL_COUNTDOWN_KEY, remainWeek, goalName, nil, "")
 	end
 
 	@ExecSpace("ClientOnly")
 	method string GetGoalNameText(any goal)
 		if goal == nil or goal.name == nil or goal.name == "" then
-			return self:GetLocalizedText(self.UI_PERFORMANCE_NAME_KEY, "")
+			return _LocaleTextUtil:GetText(self.UI_PERFORMANCE_NAME_KEY)
 		end
 
 		return goal.name
@@ -653,7 +684,7 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method boolean IsProgressActionButtonVisible()
-		-- Returns whether the DefaultUI action button should be visible.
+		-- DefaultUI 진행 버튼을 표시할 수 있는 상태인지 반환합니다.
 		if self.tOpenUiById == nil then
 			self.tOpenUiById = {}
 		end
@@ -667,7 +698,7 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void SetProgressActionButtonVisible(boolean isVisible)
-		-- Applies visible state to the DefaultUI action button.
+		-- DefaultUI 진행 버튼에 표시 상태를 적용합니다.
 		if self.progressActionButton == nil or self.progressActionButton.Entity == nil then
 			return
 		end
@@ -678,7 +709,7 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void SetEntityEnable(Entity entity, boolean isEnabled)
-		-- Applies Enable state to a UI entity when the entity reference exists.
+		-- UI 엔티티가 존재하면 활성화 상태를 적용합니다.
 		if entity == nil then
 			return
 		end
@@ -708,16 +739,22 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void RefreshProgressStats()
-		-- ProgressManager의 클라이언트 캐시에서 메소와 팬덤 값을 가져와 DefaultUI에 반영합니다.
+		-- 진행 재화와 별도 유료 지갑 캐시의 잔액 표시
+		local diamond = _DiamondWalletLogic:ClientGetBalance()
+		if diamond == nil then
+			self:SetGuiText(self.diamondText, "…")
+		else
+			self:SetProgressStatText(self.diamondText, diamond)
+		end
 		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
 		if progress == nil then
 			self:SetProgressStatText(self.mesoText, 0)
-			self:SetProgressStatText(self.fandomText, 0)
+			self:SetProgressStatText(self.nightMarketCoinText, 0)
 			return
 		end
 
-		self:SetProgressStatText(self.mesoText, progress.groupMeso or 0)
-		self:SetProgressStatText(self.fandomText, progress.fandom or 0)
+		self:SetProgressStatText(self.mesoText, progress.meso or 0)
+		self:SetProgressStatText(self.nightMarketCoinText, progress.nightMarketCoin or 0)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -875,7 +912,8 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void ConnectUIVisibilityChangedEvents()
-		-- Subscribes to visibility events from UI that block the DefaultUI action button.
+		-- DefaultUI 진행 버튼을 가리는 UI의 표시 상태 이벤트를 연결합니다.
+		self.tagTrainingVisibilityChangedHandler = _TagTrainingUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
 		if _DialogUILogic ~= nil then
 			self.dialogVisibilityChangedHandler = _DialogUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
 		end
@@ -883,6 +921,13 @@ script DefaultUILogic extends Logic
 		if _ScheduleUILogic ~= nil then
 			self.scheduleVisibilityChangedHandler = _ScheduleUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
 		end
+
+		if _StageSelectUILogic ~= nil then
+			self.stageSelectVisibilityChangedHandler = _StageSelectUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		end
+
+		self.characterSelectVisibilityChangedHandler = _CharacterSelectUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
+		self.stageStartVisibilityChangedHandler = _StageStartUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
 
 		if _ScheduleProgressUILogic ~= nil then
 			self.scheduleProgressVisibilityChangedHandler = _ScheduleProgressUILogic:ConnectEvent(UIVisibilityChangedEvent, self.OnUIVisibilityChanged)
@@ -895,13 +940,27 @@ script DefaultUILogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void DisconnectUIVisibilityChangedEvents()
-		-- Disconnects visibility event handlers.
+		-- 연결한 UI 표시 상태 이벤트 핸들러를 해제합니다.
+		if self.tagTrainingVisibilityChangedHandler ~= nil then _TagTrainingUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.tagTrainingVisibilityChangedHandler) end
+		self.tagTrainingVisibilityChangedHandler = nil
 		if self.dialogVisibilityChangedHandler ~= nil and _DialogUILogic ~= nil then
 			_DialogUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.dialogVisibilityChangedHandler)
 		end
 
 		if self.scheduleVisibilityChangedHandler ~= nil and _ScheduleUILogic ~= nil then
 			_ScheduleUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.scheduleVisibilityChangedHandler)
+		end
+
+		if self.stageSelectVisibilityChangedHandler ~= nil and _StageSelectUILogic ~= nil then
+			_StageSelectUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.stageSelectVisibilityChangedHandler)
+		end
+
+		if self.characterSelectVisibilityChangedHandler ~= nil then
+			_CharacterSelectUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.characterSelectVisibilityChangedHandler)
+		end
+
+		if self.stageStartVisibilityChangedHandler ~= nil then
+			_StageStartUILogic:DisconnectEvent(UIVisibilityChangedEvent, self.stageStartVisibilityChangedHandler)
 		end
 
 		if self.scheduleProgressVisibilityChangedHandler ~= nil and _ScheduleProgressUILogic ~= nil then
@@ -914,55 +973,22 @@ script DefaultUILogic extends Logic
 
 		self.dialogVisibilityChangedHandler = nil
 		self.scheduleVisibilityChangedHandler = nil
+		self.stageSelectVisibilityChangedHandler = nil
+		self.characterSelectVisibilityChangedHandler = nil
+		self.stageStartVisibilityChangedHandler = nil
 		self.scheduleProgressVisibilityChangedHandler = nil
 		self.settlementVisibilityChangedHandler = nil
 	end
 
 	@ExecSpace("ClientOnly")
-	method void OnProgressChanged(any progressChangedEvent)
-		-- Refreshes DefaultUI when the progress step changes.
-		-- 서버 응답이 도착했으므로 이동 요청 잠금을 푼다
-		self:EndMoveRequest()
-		self:RefreshDefaultUI()
-		self:RefreshProgressText()
-		self:RefreshActionPoint(true)
-		self:RefreshProgressStats()
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnUIVisibilityChanged(any uiVisibilityChangedEvent)
-		-- Refreshes action button visibility when a blocking UI opens or closes.
-		if uiVisibilityChangedEvent == nil then
-			return
-		end
-
-		local uiId = uiVisibilityChangedEvent.uiId or ""
-		if uiId == "" then
-			return
-		end
-
-		if self:IsProgressButtonBlockingUI(uiId) == false then
-			return
-		end
-
-		if self.tOpenUiById == nil then
-			self.tOpenUiById = {}
-		end
-
-		if uiVisibilityChangedEvent.isOpen == true then
-			self.tOpenUiById[uiId] = true
-		else
-			self.tOpenUiById[uiId] = nil
-		end
-
-		self:RefreshDefaultUI()
-	end
-
-	@ExecSpace("ClientOnly")
 	method boolean IsProgressButtonBlockingUI(string uiId)
-		-- Returns whether the UI id should block the DefaultUI action button.
+		-- 지정한 UI가 DefaultUI 진행 버튼을 가려야 하는지 반환합니다.
 		return uiId == "dialog"
+			or uiId == "tagTraining"
 			or uiId == "schedule"
+			or uiId == "stageSelect"
+			or uiId == "characterSelect"
+			or uiId == "stageStart"
 			or uiId == "scheduleProgress"
 			or uiId == "settlement"
 	end

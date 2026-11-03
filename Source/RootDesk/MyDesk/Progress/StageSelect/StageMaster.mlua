@@ -1,0 +1,144 @@
+@Logic
+script StageMaster extends Logic
+
+	property boolean IsLoaded = false
+	property any tStageById = {}
+	property any tStages = {}
+	property string STAGE_TABLE_NAME = "StageTable"
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	-- Server/Client 공용
+	method any GetStage(string stageId)
+		-- 스테이지 ID에 해당하는 행을 반환하며, 없는 ID는 nil을 반환합니다.
+		self:EnsureLoaded()
+		local stage = self.tStageById[stageId]
+		if self:IsClient() and stage ~= nil then
+			self:LocalizeStageRow(stage)
+		end
+		return stage
+	end
+
+	-- Server/Client 공용
+	method any GetStages()
+		-- 표시 순서로 정렬된 전체 스테이지 목록을 반환합니다.
+		self:EnsureLoaded()
+		if self:IsClient() then
+			for _, stage in ipairs(self.tStages) do
+				self:LocalizeStageRow(stage)
+			end
+		end
+		return self.tStages
+	end
+
+	-- Server/Client 공용
+	method void LoadStages()
+		-- StageTable을 다시 읽어 서버·클라이언트 각각의 캐시를 구성합니다.
+		self.IsLoaded = false
+		self.tStageById = {}
+		self.tStages = {}
+		local dataSet = _DataService:GetTable(self.STAGE_TABLE_NAME)
+		if dataSet == nil then
+			log_warning("[StageMaster] StageTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local stageId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "stageId", "")
+			if stageId ~= "" then
+				local stage = self:CreateStageRow(dataSet, rowIndex, stageId)
+				if self.tStageById[stageId] ~= nil then
+					log_warning("[StageMaster] 중복 스테이지 ID 제외 id=" .. stageId)
+				elseif self:IsUsableStage(stage) then
+					self.tStageById[stageId] = stage
+					table.insert(self.tStages, stage)
+				else
+					log_warning("[StageMaster] 유효하지 않은 스테이지 제외 id=" .. stageId)
+				end
+			end
+		end
+
+		table.sort(self.tStages, function(leftStage, rightStage)
+			return self:CompareStageSortOrder(leftStage, rightStage)
+		end)
+		self.IsLoaded = true
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	-- Server/Client 공용
+	method void OnBeginPlay()
+		-- 스테이지 데이터를 로드합니다.
+		self:LoadStages()
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	-- Server/Client 공용
+	method void EnsureLoaded()
+		-- 최초 조회가 생명주기 초기화보다 빠르면 데이터를 먼저 로드합니다.
+		if self.IsLoaded == false then
+			self:LoadStages()
+		end
+	end
+
+	-- Server/Client 공용
+	method any CreateStageRow(any dataSet, integer rowIndex, string stageId)
+		-- CSV의 숫자와 참조 ID를 변환하고, 표시 문구는 클라이언트에서만 번역합니다.
+		local stage = StageRow()
+		stage.stageId = stageId
+		stage.sortOrder = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "sortOrder", 0)
+		stage.performanceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "performanceId", "")
+		stage.rewardId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "rewardId", "")
+		stage.targetScore = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "targetScore", 0)
+		-- month/week는 해당 월·주차를 시작하기 직전에 공연이 발생하는 시점입니다.
+		stage.month = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "month", 0)
+		stage.week = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "week", 0)
+		stage.nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "name", "")
+		stage.versionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "version", "")
+		stage.headlineKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "headline", "")
+		stage.previewKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "preview", "")
+		stage.descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "description", "")
+		stage.cardImageId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "cardImageId", "")
+		stage.previewImageId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "previewImageId", "")
+		if self:IsClient() then
+			self:LocalizeStageRow(stage)
+		end
+		return stage
+	end
+
+	method boolean IsUsableStage(any tStage)
+		-- 공연 참조·양수 목표 점수·유효한 월과 주차를 갖춘 스테이지만 허용
+		return tStage ~= nil and tStage.stageId ~= "" and tStage.performanceId ~= ""
+			and type(tStage.targetScore) == "number" and tStage.targetScore > 0 and tStage.targetScore < math.huge
+			and type(tStage.month) == "number" and tStage.month >= 1 and tStage.month < math.huge
+			and type(tStage.week) == "number" and tStage.week >= 1 and tStage.week <= 4
+			and _PerformanceMaster ~= nil and _PerformanceMaster:HasPerformance(tStage.performanceId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void LocalizeStageRow(any stage)
+		-- 공용 번역 로직을 통해 스테이지의 다섯 표시 문구를 번역합니다.
+		stage.name = _LocaleTextUtil:GetText(stage.nameKey)
+		stage.version = _LocaleTextUtil:GetText(stage.versionKey)
+		stage.headline = _LocaleTextUtil:GetText(stage.headlineKey)
+		stage.preview = _LocaleTextUtil:GetText(stage.previewKey)
+		stage.description = _LocaleTextUtil:GetText(stage.descriptionKey)
+	end
+
+	-- Server/Client 공용
+	method boolean CompareStageSortOrder(any leftStage, any rightStage)
+		-- 표시 순서가 같으면 스테이지 ID 순서로 정렬합니다.
+		if leftStage.sortOrder == rightStage.sortOrder then
+			return leftStage.stageId < rightStage.stageId
+		end
+		return leftStage.sortOrder < rightStage.sortOrder
+	end
+
+end

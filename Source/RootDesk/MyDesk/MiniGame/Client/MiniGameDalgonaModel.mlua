@@ -1,0 +1,317 @@
+---@description "달고나 블록 배치 및 진행 상태 관리 로직"
+@Struct
+script MiniGameDalgonaModel
+
+	property string FIELD_SEPARATOR = ","
+	property string PLACEMENT_SEPARATOR = ";"
+	property string CELL_KEY_SEPARATOR = ":"
+	property string REASON_START_REJECTED = "startRejected"
+	property string REQUEST_START = "start"
+	property string REQUEST_CONFIRM = "confirm"
+	property string REQUEST_DRAW = "draw"
+	property any preset = nil
+	property any tPlacements = {}
+	property any tRotations = {}
+	property string sessionId = ""
+	property integer betAmount = 0
+	property integer balance = 0
+	property integer minBet = 1000
+	property integer betStep = 100
+	property boolean selectionConfirmed = false
+	property string pendingRequest = ""
+	property boolean resultShown = false
+	property any tLastDrawResult = nil
+	property boolean autoDrawAfterConfirm = false
+
+	method void Initialize(any presetData)
+		-- 프리셋의 최소 판돈·증감 단위와 독립 배치 상태 구성
+		self.preset = presetData
+		local settlement = presetData.settlementRule or {}
+		self.minBet = math.max(1, math.floor(settlement.min or _MiniGameTable.DEFAULT_ENTRY_MESO))
+		self.betStep = math.max(1, math.floor(settlement.step or _MiniGameTable.DALGONA_BET_STEP))
+		self:ResetPlacementState()
+	end
+
+	method any GetBlockIds()
+		-- 프리셋 순서의 블록 식별자 반환
+		local ids = {}
+		for _, block in ipairs(self.preset.blockCatalog or {}) do ids[#ids + 1] = block.id end
+		return ids
+	end
+
+	method void ResetPlacementState()
+		-- 세션별 배치, 요청, 결과 상태 초기화
+		self.tPlacements = {}
+		self.tRotations = {}
+		local ids = self:GetBlockIds()
+		for _, id in ipairs(ids) do self.tRotations[id] = 0 end
+		self.selectionConfirmed = false
+		self.pendingRequest = ""
+		self.resultShown = false
+		self.tLastDrawResult = nil
+		self.autoDrawAfterConfirm = false
+	end
+
+	method void OpenLobby(integer currentBalance)
+		-- 서버 시작 전 판돈 선택 상태 구성
+		self:ResetPlacementState()
+		self.sessionId = ""
+		self.betAmount = self.minBet
+		self:UpdateLobbyBalance(currentBalance)
+	end
+
+	method integer GetMaximumBet()
+		-- 현재 잔액 안에서 최소 판돈과 증가 단위를 만족하는 최대 금액 산출
+		local settlement = self.preset.settlementRule
+		local units = _MiniGameSettlementRule:GetBetUnitCount(settlement, self.balance)
+		return _MiniGameSettlementRule:GetBetAmountFromUnits(settlement, units)
+	end
+
+	method void UpdateLobbyBalance(integer currentBalance)
+		-- 로비 잔액 변경 시 선택한 판돈을 최신 보유 메소 한도에 맞춰 보정
+		if self.sessionId ~= "" or self.pendingRequest ~= "" or self.resultShown then return end
+		self.balance = math.max(0, currentBalance)
+		local maximum = self:GetMaximumBet()
+		if maximum < self.minBet then
+			self.betAmount = 0
+			return
+		end
+		local units = math.max(0, math.floor((self.betAmount - self.minBet) / self.betStep))
+		self.betAmount = math.min(maximum, self.minBet + units * self.betStep)
+	end
+
+	method void BeginSession(any tContext)
+		-- 서버 승인 정보로 배치 상태 시작
+		self:ResetPlacementState()
+		self.sessionId = tContext.sessionId
+		self.balance = tContext.balance
+		self.betAmount = tContext.betAmount
+	end
+
+	method boolean CanEdit()
+		-- 서버 요청 대기와 확정 이후의 배치 변경 차단
+		return self.sessionId ~= "" and not self.selectionConfirmed
+			and self.pendingRequest == "" and not self.resultShown
+	end
+
+	method string GetPlacedBlockId()
+		-- 현재 보드에 배치된 단일 블록 식별자 반환
+		for _, blockId in ipairs(self:GetBlockIds()) do
+			if self.tPlacements[blockId] ~= nil then
+				return blockId
+			end
+		end
+		return ""
+	end
+
+	method boolean CanSelectBlock(string blockId)
+		-- 단일 블록 제한을 입력 경로와 무관하게 적용
+		if not self:CanEdit() or _MiniGameInputRule:FindBlock(self.preset.blockCatalog, blockId) == nil then return false end
+		local placedId = self:GetPlacedBlockId()
+		return placedId == "" or placedId == blockId
+	end
+
+	method boolean IsCandidateValid(string blockId, integer row, integer column, integer rotation)
+		-- 부분 배치의 경계와 겹침 사전 검증
+		local preset = self.preset
+		local block = preset ~= nil and _MiniGameInputRule:FindBlock(preset.blockCatalog, blockId) or nil
+		local cells = block ~= nil and _MiniGameInputRule:BuildRotatedCells(block.cells, rotation) or nil
+		if cells == nil or #cells == 0 or not _MiniGameInputRule:IsAllowedRotation(block, rotation) then
+			return false
+		end
+
+		local occupied = {}
+		for placedBlockId, placement in pairs(self.tPlacements) do
+			if placedBlockId ~= blockId then
+				for _, cell in ipairs(self:GetAbsoluteCells(placement)) do
+					occupied[tostring(cell.row) .. self.CELL_KEY_SEPARATOR .. tostring(cell.column)] = true
+				end
+			end
+		end
+		for _, cell in ipairs(cells) do
+			local absoluteRow = row + cell.row
+			local absoluteColumn = column + cell.column
+			if absoluteRow < 0 or absoluteRow >= (preset.inputConfig.boardRows or 4) or absoluteColumn < 0 or absoluteColumn >= (preset.inputConfig.boardColumns or 4) then
+				return false
+			end
+			if occupied[tostring(absoluteRow) .. self.CELL_KEY_SEPARATOR .. tostring(absoluteColumn)] == true then
+				return false
+			end
+		end
+		return true
+	end
+
+	method any GetAbsoluteCells(any placement)
+		-- 배치 정보의 절대 셀 배열 생성
+		if placement == nil then
+			return {}
+		end
+		local preset = self.preset
+		local block = preset ~= nil and _MiniGameInputRule:FindBlock(preset.blockCatalog, placement.blockId) or nil
+		local cells = block ~= nil and _MiniGameInputRule:BuildRotatedCells(block.cells, placement.rotation) or {}
+		local result = {}
+		for _, cell in ipairs(cells) do
+			result[#result + 1] = {
+				row = placement.row + cell.row,
+				column = placement.column + cell.column
+			}
+		end
+		return result
+	end
+
+	method string BuildSelectionPayload()
+		-- 단일 블록 서버 Selection 계약 문자열 생성
+		local fields = {}
+		for _, blockId in ipairs(self:GetBlockIds()) do
+			local placement = self.tPlacements[blockId]
+			if placement ~= nil then
+				fields[#fields + 1] = table.concat({
+					placement.blockId, tostring(placement.row), tostring(placement.column), tostring(placement.rotation)
+				}, self.FIELD_SEPARATOR)
+			end
+		end
+		if #fields ~= 1 then
+			return ""
+		end
+		return table.concat(fields, self.PLACEMENT_SEPARATOR)
+	end
+
+	method boolean IsCompletePlacementValid()
+		-- 단일 블록 배치의 공용 입력 규칙 검증
+		local payload = self:BuildSelectionPayload()
+		if payload == "" then
+			return false
+		end
+		local preset = self.preset
+		local validation = _MiniGameInputRule:ValidateSelection(preset, payload)
+		return validation ~= nil and validation.isValid == true
+	end
+
+	method boolean PlaceBlock(string blockId, integer row, integer column)
+		-- 변경 진입점에서 단일 블록과 요청 잠금 재검증
+		if not self:CanSelectBlock(blockId) then return false end
+		local rotation = self.tRotations[blockId] or 0
+		if not self:IsCandidateValid(blockId, row, column, rotation) then
+			return false
+		end
+		self.tPlacements[blockId] = { blockId = blockId, row = row, column = column, rotation = rotation }
+		return true
+	end
+
+	method boolean RemoveBlock(string blockId)
+		-- 변경 가능한 세션에서만 배치 해제
+		if not self:CanEdit() or self.tPlacements[blockId] == nil then return false end
+		self.tPlacements[blockId] = nil
+		self.tRotations[blockId] = 0
+		return true
+	end
+
+	method boolean CanStart()
+		-- 판돈 단위, 잔액, 중복 요청 검증
+		return self.sessionId == "" and self.pendingRequest == "" and not self.resultShown
+			and self.betAmount <= self.balance
+			and _MiniGameSettlementRule:IsValidAmount(self.preset.settlementRule, self.betAmount)
+	end
+
+	method void ChangeBet(integer delta)
+		-- 프리셋 단위의 판돈 증감
+		if self.sessionId ~= "" or self.pendingRequest ~= "" or self.resultShown then return end
+		local maximum = self:GetMaximumBet()
+		if maximum < self.minBet then self.betAmount = 0 return end
+		local nextAmount = self.betAmount + delta * self.betStep
+		self.betAmount = math.max(self.minBet, math.min(nextAmount, maximum))
+	end
+
+	method boolean TryStart()
+		-- 시작 요청을 한 번만 허용
+		if not self:CanStart() then
+			return false
+		end
+		self.pendingRequest = self.REQUEST_START
+		return true
+	end
+
+	method boolean TryConfirm(boolean autoDraw)
+		-- 배치 검증 요청 동안 로컬 배치 잠금
+		if not self:CanEdit() or not self:IsCompletePlacementValid() then return false end
+		self.pendingRequest = self.REQUEST_CONFIRM
+		self.autoDrawAfterConfirm = autoDraw
+		return true
+	end
+
+	method boolean AcceptSelection(string targetSessionId)
+		-- 현재 검증 요청의 응답만 반영
+		if self.sessionId ~= targetSessionId or self.pendingRequest ~= self.REQUEST_CONFIRM or self.resultShown then return false end
+		self.pendingRequest = ""
+		self.selectionConfirmed = true
+		return true
+	end
+
+	method boolean TryDraw()
+		-- 확정된 배치의 추첨 중복 요청 차단
+		if self.sessionId == "" or not self.selectionConfirmed or self.pendingRequest ~= "" or self.resultShown then return false end
+		self.pendingRequest = self.REQUEST_DRAW
+		self.autoDrawAfterConfirm = false
+		return true
+	end
+
+	method boolean RejectRequest(string reason, integer currentBalance)
+		-- 대기 중인 요청 실패 상태 복구
+		if self.pendingRequest == "" or self.resultShown then return false end
+		if reason == self.REASON_START_REJECTED then
+			if self.pendingRequest ~= self.REQUEST_START then return false end
+		end
+		self.pendingRequest = ""
+		if reason == self.REASON_START_REJECTED then self:UpdateLobbyBalance(currentBalance) end
+		self.autoDrawAfterConfirm = false
+		return true
+	end
+
+	method boolean ApplyDrawResult(string targetSessionId, any tDrawResult)
+		-- 현재 세션의 추첨 응답을 독립 결과 데이터로 보관
+		if self.sessionId ~= targetSessionId or self.resultShown or tDrawResult == nil then return false end
+		self.pendingRequest = ""
+		self.resultShown = true
+		self.autoDrawAfterConfirm = false
+		self.tLastDrawResult = MiniGameDrawResultData():FromPlainTable(tDrawResult:ToPlainTable())
+		self.balance = self.tLastDrawResult.balance
+		return true
+	end
+
+	method any BuildViewState()
+		-- Model 참조 없이 표시 전용 복사본 생성
+		local tState = MiniGameDalgonaViewState()
+		tState.sessionId = self.sessionId
+		tState.betAmount = self.betAmount
+		tState.balance = self.balance
+		tState.showResult = self.resultShown
+		tState.showPlacement = self.sessionId ~= ""
+		tState.showBetting = not self.resultShown and self.sessionId == ""
+		tState.canStart = self:CanStart()
+		tState.canBetMinus = tState.showBetting and self.pendingRequest == "" and self.betAmount > self.minBet
+		local maximum = self:GetMaximumBet()
+		tState.canBetPlus = tState.showBetting and self.pendingRequest == ""
+			and maximum >= self.minBet and self.betAmount + self.betStep <= maximum
+		local valid = self:IsCompletePlacementValid()
+		tState.showDrawButton = self.sessionId ~= "" and not self.resultShown and valid
+		tState.canDraw = tState.showDrawButton and self.pendingRequest == ""
+		tState.blockIds = self:GetBlockIds()
+		tState.blockCells = {}
+		tState.placements = {}
+		tState.canDrag = {}
+		for _, id in ipairs(tState.blockIds) do
+			local block = _MiniGameInputRule:FindBlock(self.preset.blockCatalog, id)
+			tState.blockCells[id] = _MiniGameInputRule:BuildRotatedCells(block.cells, self.tRotations[id] or 0)
+			tState.canDrag[id] = self:CanSelectBlock(id)
+			local placement = self.tPlacements[id]
+			if placement ~= nil then
+				tState.placements[id] = { blockId = id, row = placement.row, column = placement.column,
+					rotation = placement.rotation, cells = self:GetAbsoluteCells(placement) }
+			end
+		end
+		if self.tLastDrawResult ~= nil then
+			tState.tDrawResult = MiniGameDrawResultData():FromPlainTable(self.tLastDrawResult:ToPlainTable())
+		end
+		return tState
+	end
+end

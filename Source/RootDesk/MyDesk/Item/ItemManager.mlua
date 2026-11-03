@@ -66,6 +66,7 @@ script ItemManager extends Logic
 	@ExecSpace("Server")
 	method boolean RequestUnlockItem(string itemId)
 		-- 클라이언트 요청으로 지정한 아이템을 해금하고 최신 소유 목록을 동기화합니다.
+		if itemId == _MiniGameFishingRule.BADGE_ID or itemId == _MiniGameFishingRule.COOKIE_ID then return false end
 		if self:CanUseItems(senderUserId) == false then
 			return false
 		end
@@ -146,6 +147,13 @@ script ItemManager extends Logic
 	@ExecSpace("ServerOnly")
 	method boolean ServerHasItem(string itemId)
 		-- 서버 권위 캐시에 지정한 아이템을 보유하고 있는지 반환합니다.
+		if itemId == _MiniGameFishingRule.BADGE_ID then
+			local tData = _FishingRewardLogic.dataByUser[self.currentUserId]
+			return tData ~= nil and tData.badgeGranted
+		elseif itemId == _MiniGameFishingRule.COOKIE_ID then
+			local tData = _FishingRewardLogic.dataByUser[self.currentUserId]
+			return tData ~= nil and tData.cookies > 0
+		end
 		if self:IsItemsLoaded() == false then
 			return false
 		end
@@ -321,7 +329,13 @@ script ItemManager extends Logic
 			return
 		end
 
-		self:SyncItems(self:CopyStringList(self.ownedItemIds), forUserId)
+		local ids = self:CopyStringList(self.ownedItemIds)
+		local tData = _FishingRewardLogic.dataByUser[forUserId]
+		if tData ~= nil then
+			if tData.badgeGranted and not self.ownedItemIdSet[_MiniGameFishingRule.BADGE_ID] then table.insert(ids, _MiniGameFishingRule.BADGE_ID) end
+			if tData.cookies > 0 and not self.ownedItemIdSet[_MiniGameFishingRule.COOKIE_ID] then table.insert(ids, _MiniGameFishingRule.COOKIE_ID) end
+		end
+		self:SyncItems(ids, forUserId)
 	end
 
 	@ExecSpace("Client")

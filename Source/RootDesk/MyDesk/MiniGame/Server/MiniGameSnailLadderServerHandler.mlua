@@ -1,0 +1,145 @@
+---@description "달팽이 사다리 서버 추첨과 코인 정산"
+@Logic
+script MiniGameSnailLadderServerHandler extends Logic
+	@ExecSpace("ServerOnly")
+	method void Configure(any tSession, any preset)
+		-- 세션별 코인과 달팽이 경로 상태 구성
+		local tState = MiniGameSnailLadderState()
+		tState.stage = _MiniGameSnailLadderRule.STAGE_READY
+		tState.bet = tSession.settlement.amount
+		tState.balance = tSession.settlement.balance or 0
+		tState.isDebug = tSession.settlement.isDebug == true
+		tSession.tModeState = tState
+		log("[VRF][SnailLadder] 서버 상태 준비 session=" .. tSession.id .. " bet=" .. tostring(tState.bet))
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RequiresPreparation()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean AcceptsClientResult(any tSession)
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HandlesFinishedFeedback()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetLaunchCommandPayload(any tSession)
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetProgress(any tSession)
+		-- 진행 경로 시간의 0~1 범위 반환
+		local tState = tSession.tModeState
+		if tState == nil then return 0 end
+		if tState.stage == _MiniGameSnailLadderRule.STAGE_RESULT then return 1 end
+		return math.max(0, math.min(1, tState.elapsed / _MiniGameSnailLadderRule.RACE_SECONDS))
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushState(any tSession)
+		-- 소유 클라이언트에 검증된 경로와 코인 상태 전송
+		local tState = tSession.tModeState
+		tState.revision = tState.revision + 1
+		_MiniGameManager:PushSnailLadderState(tSession.id, tState:ToPlainTable(), tSession.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleChoice(any tSession, integer lane)
+		-- 선택 레인 검증, 참가비 차감 후 서버에서 경로 추첨
+		local rule = _MiniGameSnailLadderRule
+		local tState = tSession.tModeState
+		if tState == nil or tState.stage ~= rule.STAGE_READY or not rule:IsValidLane(lane) then return end
+		if not _MiniGameSettlementRule:TryReserve(tSession.settlement, tSession.userId) then
+			tState.balance = tSession.settlement.balance or tState.balance
+			tState.entryRejected = true
+			self:PushState(tSession)
+			return
+		end
+		tState.selectedLane = lane
+		tState.entryRejected = false
+		tState.balance = tSession.settlement.balance
+		-- 출발 레인과 독립적으로 세 관문을 동일 확률로 추첨
+		local exitLane = _UtilLogic:RandomIntegerRange(rule.LANE_TOP, rule.LANE_BOTTOM)
+		tState.route = self:BuildRoute(lane, exitLane)
+		tState.multiplier = rule:GetMultiplier(exitLane)
+		tState.payout = tState.bet * tState.multiplier
+		tState.isWin = tState.multiplier > 0
+		tState.stage = rule.STAGE_RACING
+		tState.elapsed = 0
+		tSession.status = _MiniGameSessionService.SESSION_STATUS_RUNNING
+		tSession.cancelOnMapChange = false
+		log("[VRF][SnailLadder] 추첨 session=" .. tSession.id .. " lane=" .. tostring(lane)
+			.. " exit=" .. tostring(exitLane) .. " multiplier=" .. tostring(tState.multiplier))
+		self:PushState(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateSession(any tSession, number delta)
+		-- 서버 시간으로 경주 종료와 실패 정산 재시도 진행
+		local tState = tSession.tModeState
+		local rule = _MiniGameSnailLadderRule
+		if tState == nil then return end
+		if tState.stage == rule.STAGE_RACING then
+			tState.elapsed = tState.elapsed + math.max(0, delta)
+			if tState.elapsed >= rule.RACE_SECONDS then self:Finish(tSession) end
+		elseif tState.stage == rule.STAGE_SETTLING then
+			tState.elapsed = tState.elapsed + math.max(0, delta)
+			if tState.elapsed >= rule.SETTLEMENT_RETRY_SECONDS then self:Finish(tSession) end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Finish(any tSession)
+		-- 최종 관문 배율을 정산하고 결과 이벤트 확정
+		local tState = tSession.tModeState
+		if tState == nil or (tState.stage ~= _MiniGameSnailLadderRule.STAGE_RACING
+			and tState.stage ~= _MiniGameSnailLadderRule.STAGE_SETTLING) then return end
+		tState.stage = _MiniGameSnailLadderRule.STAGE_SETTLING
+		tState.elapsed = 0
+		if not _MiniGameSettlementRule:TrySettle(tSession.settlement, tState.payout, tSession.userId) then
+			log_warning("[VRF][SnailLadder] 정산 재시도 session=" .. tSession.id)
+			self:PushState(tSession)
+			return
+		end
+		tState.balance = tSession.settlement.balance
+		tState.stage = _MiniGameSnailLadderRule.STAGE_RESULT
+		self:PushState(tSession)
+		local tResult = MiniGameResultData()
+		tResult.success = tState.isWin
+		tResult.score = tState.payout
+		tResult.progress = 1
+		tResult.reason = _MiniGameSessionService.SESSION_REASON_OBJECTIVE
+		_MiniGameSessionService:ConfirmSessionResult(tSession, tResult)
+		log("[VRF][SnailLadder] 정산 완료 session=" .. tSession.id
+			.. " payout=" .. tostring(tState.payout) .. " balance=" .. tostring(tState.balance))
+	end
+
+	@ExecSpace("ServerOnly")
+	method table BuildRoute(integer startLane, integer exitLane)
+		-- 남은 분기 수 안에 추첨 관문으로 도달 가능한 인접 레인만 선택
+		local rule = _MiniGameSnailLadderRule
+		local route = {startLane}
+		local currentLane = startLane
+		for crossing = 1, rule.CROSSING_COUNT do
+			local remaining = rule.CROSSING_COUNT - crossing
+			local candidates = {}
+			local firstLane = math.max(rule.LANE_TOP, currentLane - 1)
+			local lastLane = math.min(rule.LANE_BOTTOM, currentLane + 1)
+			for nextLane = firstLane, lastLane do
+				if math.abs(exitLane - nextLane) <= remaining then
+					table.insert(candidates, nextLane)
+				end
+			end
+			currentLane = candidates[_UtilLogic:RandomIntegerRange(1, #candidates)]
+			table.insert(route, currentLane)
+		end
+		return route
+	end
+end

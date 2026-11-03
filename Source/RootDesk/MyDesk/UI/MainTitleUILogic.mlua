@@ -113,9 +113,140 @@ script MainTitleUILogic extends Logic
 
 	property string EFFECT_VOLUME_TEXT_KEY = "ui.main_title.settings.effect_volume"
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void ApplyLoadedSoundSettings(number masterVolume, number backgroundVolume, number effectVolume)
+		-- 서버에서 로드한 0~1 사운드 설정을 0~100 슬라이더 값과 표시 텍스트로 복원합니다.
+		if self.masterBar ~= nil then
+			self.masterBar.Value = masterVolume * 100
+		end
+
+		if self.backgroundBar ~= nil then
+			self.backgroundBar.Value = backgroundVolume * 100
+		end
+
+		if self.effectBar ~= nil then
+			self.effectBar.Value = effectVolume * 100
+		end
+
+		self:RefreshSettingTextsFromBars()
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Event Handlers
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnSettingButtonClicked(ButtonClickEvent event)
+		-- 설정 버튼을 누르면 일반 설정 패널만 열고 초기화 확인 UI는 닫아 둡니다.
+		self:SetSettingPanelOpen(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnResetButtonClicked(ButtonClickEvent event)
+		-- 초기화 버튼을 누르면 딤머와 초기화 확인 패널을 함께 표시합니다.
+		self:SetResetEnsureOpen(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCancelButtonClicked(ButtonClickEvent event)
+		-- 취소 버튼을 누르면 초기화 확인 패널과 딤머를 함께 닫습니다.
+		self:SetResetEnsureOpen(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirmButtonClicked(ButtonClickEvent event)
+		-- 확인 버튼을 누르면 사운드 설정을 포함한 현재 유저의 전체 저장 데이터 초기화를 서버에 요청합니다.
+		self:SetResetEnsureOpen(false)
+
+		if _UserDataManager == nil then
+			log_warning("[MainTitleUI] UserDataManager is nil")
+			return
+		end
+
+		_UserDataManager:RequestResetAllStorageData()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnExitButtonClicked(ButtonClickEvent event)
+		-- 닫기 버튼을 누르면 설정 패널 전체를 닫습니다.
+		self:SetSettingPanelOpen(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnMasterBarValueChanged(SliderValueChangedEvent event)
+		-- 마스터 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
+		self:ApplySettingValueToText(self.masterText, event.Value, self.MASTER_VOLUME_TEXT_KEY)
+		if _SoundManager ~= nil then
+			_SoundManager:SetMasterVolume(event.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBackgroundBarValueChanged(SliderValueChangedEvent event)
+		-- 배경음 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
+		self:ApplySettingValueToText(self.backgroundText, event.Value, self.BACKGROUND_VOLUME_TEXT_KEY)
+		if _SoundManager ~= nil then
+			_SoundManager:SetBackgroundVolume(event.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEffectBarValueChanged(SliderValueChangedEvent event)
+		-- 효과음 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
+		self:ApplySettingValueToText(self.effectText, event.Value, self.EFFECT_VOLUME_TEXT_KEY)
+		if _SoundManager ~= nil then
+			_SoundManager:SetEffectVolume(event.Value / 100)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnStartButtonClicked(ButtonClickEvent event)
+		-- 메인 타이틀에서 게임 시작 입력을 받으면 현재 진행 상태의 게임 맵으로 이동합니다.
+		if self.isStartingGame == true then
+			return
+		end
+
+		if self:IsCurrentMap(self.titleMapId) == false then
+			return
+		end
+
+		if _ProgressManager == nil then
+			log_warning("[MainTitleUI] ProgressManager is nil")
+			return
+		end
+
+		local currentStage = _ProgressManager:ClientGetCurrentStage()
+		local currentStep = _ProgressManager:ClientGetCurrentStep()
+		if _ProgressManager:IsValidStageStep(currentStage, currentStep) == false then
+			log_warning("[MainTitleUI] current progress is not synchronized stage=" .. tostring(currentStage) .. " step=" .. _EProgressStep:GetName(currentStep))
+			return
+		end
+
+		self.isStartingGame = true
+		self:StopSweepTimer()
+		self:StopTitleBgm(self.titleBgmFadeOutDuration)
+
+		if _ScreenEffectUILogic ~= nil then
+			_ScreenEffectUILogic:FadeOut(0.5, function()
+				self:RunStartGameMiddleAction()
+			end)
+			return
+		end
+
+		self:RunStartGameMiddleAction()
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
-		-- 메인 타이틀 맵에서만 타이틀 UI를 표시하고 시작 입력을 준비합니다.
+		-- 시작 맵에서 메인 타이틀 UI를 표시하고 시작 입력을 준비합니다.
 		self:StopSweepTimer()
 		self:RefreshResponsiveHeightScale()
 		self:CacheSparkleBaseTransform()
@@ -160,6 +291,10 @@ script MainTitleUILogic extends Logic
 		self:ResetLogoTween()
 		self:StopTitleBgm(0)
 	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
 	@ExecSpace("ClientOnly")
 	method void PlayTitleBgm()
@@ -273,43 +408,6 @@ script MainTitleUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void OnSettingButtonClicked(ButtonClickEvent event)
-		-- 설정 버튼을 누르면 일반 설정 패널만 열고 초기화 확인 UI는 닫아 둡니다.
-		self:SetSettingPanelOpen(true)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnResetButtonClicked(ButtonClickEvent event)
-		-- 초기화 버튼을 누르면 딤머와 초기화 확인 패널을 함께 표시합니다.
-		self:SetResetEnsureOpen(true)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnCancelButtonClicked(ButtonClickEvent event)
-		-- 취소 버튼을 누르면 초기화 확인 패널과 딤머를 함께 닫습니다.
-		self:SetResetEnsureOpen(false)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnConfirmButtonClicked(ButtonClickEvent event)
-		-- 확인 버튼을 누르면 사운드 설정을 포함한 현재 유저의 전체 저장 데이터 초기화를 서버에 요청합니다.
-		self:SetResetEnsureOpen(false)
-
-		if _ProgressManager == nil then
-			log_warning("[MainTitleUI] ProgressManager is nil")
-			return
-		end
-
-		_ProgressManager:RequestResetAllStorageData()
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnExitButtonClicked(ButtonClickEvent event)
-		-- 닫기 버튼을 누르면 설정 패널 전체를 닫습니다.
-		self:SetSettingPanelOpen(false)
-	end
-
-	@ExecSpace("ClientOnly")
 	method void SetSettingPanelOpen(boolean isOpen)
 		-- 설정 패널 표시 상태를 변경하고, 열린 패널이 닫히는 순간 최신 사운드 설정을 한 번 저장합니다.
 		local wasOpen = self.isSettingPanelOpen
@@ -377,33 +475,6 @@ script MainTitleUILogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void OnMasterBarValueChanged(SliderValueChangedEvent event)
-		-- 마스터 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
-		self:ApplySettingValueToText(self.masterText, event.Value, self.MASTER_VOLUME_TEXT_KEY)
-		if _SoundManager ~= nil then
-			_SoundManager:SetMasterVolume(event.Value / 100)
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnBackgroundBarValueChanged(SliderValueChangedEvent event)
-		-- 배경음 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
-		self:ApplySettingValueToText(self.backgroundText, event.Value, self.BACKGROUND_VOLUME_TEXT_KEY)
-		if _SoundManager ~= nil then
-			_SoundManager:SetBackgroundVolume(event.Value / 100)
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnEffectBarValueChanged(SliderValueChangedEvent event)
-		-- 효과음 볼륨 슬라이더 값을 텍스트 괄호 안 수치와 SoundManager에 실시간 반영합니다.
-		self:ApplySettingValueToText(self.effectText, event.Value, self.EFFECT_VOLUME_TEXT_KEY)
-		if _SoundManager ~= nil then
-			_SoundManager:SetEffectVolume(event.Value / 100)
-		end
-	end
-
-	@ExecSpace("ClientOnly")
 	method void RefreshSettingTextsFromBars()
 		-- 시작 시 각 슬라이더의 현재 값을 텍스트 괄호 안 수치에 맞춥니다.
 		self:RefreshSettingTextFromBar(self.masterText, self.masterBar, self.MASTER_VOLUME_TEXT_KEY)
@@ -424,24 +495,6 @@ script MainTitleUILogic extends Logic
 
 		self:RefreshSettingTextsFromBars()
 		self:ApplySettingVolumesToSoundManager()
-	end
-
-	@ExecSpace("ClientOnly")
-	method void ApplyLoadedSoundSettings(number masterVolume, number backgroundVolume, number effectVolume)
-		-- 서버에서 로드한 0~1 사운드 설정을 0~100 슬라이더 값과 표시 텍스트로 복원합니다.
-		if self.masterBar ~= nil then
-			self.masterBar.Value = masterVolume * 100
-		end
-
-		if self.backgroundBar ~= nil then
-			self.backgroundBar.Value = backgroundVolume * 100
-		end
-
-		if self.effectBar ~= nil then
-			self.effectBar.Value = effectVolume * 100
-		end
-
-		self:RefreshSettingTextsFromBars()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -495,37 +548,12 @@ script MainTitleUILogic extends Logic
 		end
 
 		local intValue = math.floor(value + 0.5)
-		if _LocalizationLogic ~= nil then
-			textComponent.Text = _LocalizationLogic:Format(localizationKey, "", intValue, nil, nil, "")
+		if _LocaleTextUtil ~= nil then
+			_LocaleTextUtil:SetLocalizedText(textComponent, localizationKey, intValue, nil, nil)
 			return
 		end
 
 		textComponent.Text = ""
-	end
-
-	@ExecSpace("ClientOnly")
-	method void OnStartButtonClicked(ButtonClickEvent event)
-		-- 메인 타이틀에서 게임 시작 입력을 받으면 현재 진행 상태의 게임 맵으로 이동합니다.
-		if self.isStartingGame == true then
-			return
-		end
-
-		if self:IsCurrentMap(self.titleMapId) == false then
-			return
-		end
-
-		self.isStartingGame = true
-		self:StopSweepTimer()
-		self:StopTitleBgm(self.titleBgmFadeOutDuration)
-
-		if _ScreenEffectUILogic ~= nil then
-			_ScreenEffectUILogic:FadeOut(0.5, function()
-				self:RunStartGameMiddleAction()
-			end)
-			return
-		end
-
-		self:RunStartGameMiddleAction()
 	end
 
 	@ExecSpace("ClientOnly")
@@ -539,9 +567,7 @@ script MainTitleUILogic extends Logic
 			_ScreenEffectUILogic:HoldBlack()
 		end
 
-		if _ProgressManager ~= nil then
-			_ProgressManager:RequestEnterCurrentProgressMap()
-		end
+		_StepEntryLogic:RequestEnterCurrentStep()
 	end
 
 	@ExecSpace("ClientOnly")

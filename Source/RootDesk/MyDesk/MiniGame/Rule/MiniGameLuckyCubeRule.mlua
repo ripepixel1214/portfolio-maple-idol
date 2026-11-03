@@ -1,0 +1,61 @@
+---@description "럭키 큐브 족보 판정과 배당 계산 로직"
+@Logic
+script MiniGameLuckyCubeRule extends Logic
+	property string MINI_GAME_ID = "lucky_cube"
+	property string CHOICE_SMALL = "small"
+	property string CHOICE_BIG = "big"
+	property string CHOICE_DOUBLE = "double"
+	property string CHOICE_STRAIGHT = "straight"
+	property string CHOICE_TRIPLE = "triple"
+	property string STAGE_LOBBY = "lobby"
+	property string STAGE_READY = "ready"
+	property string STAGE_ROLLING = "rolling"
+	property string STAGE_DECISION = "decision"
+	property string STAGE_RESULT = "result"
+	property string STAGE_PENDING = "pending"
+	property number ROLL_SECONDS = 1.2
+
+	method any GetChoices()
+		-- 최초 선택, 변경 선택의 배율을 십분율 정수로 관리
+		return {
+			{id = self.CHOICE_SMALL, label = "스몰", condition = "합계 4~10", initial = 24, changed = 14},
+			{id = self.CHOICE_BIG, label = "빅", condition = "합계 11~17", initial = 24, changed = 14},
+			{id = self.CHOICE_DOUBLE, label = "더블", condition = "같은 숫자 2개", initial = 20, changed = 10},
+			{id = self.CHOICE_STRAIGHT, label = "스트레이트", condition = "연속된 숫자 3개", initial = 47, changed = 25},
+			{id = self.CHOICE_TRIPLE, label = "트리플", condition = "같은 숫자 3개", initial = 110, changed = 30}
+		}
+	end
+
+	method any FindChoice(string choice)
+		for _, entry in ipairs(self:GetChoices()) do
+			if entry.id == choice then return entry end
+		end
+		return nil
+	end
+
+	method boolean IsWin(string choice, integer a, integer b, integer c)
+		-- 중복 숫자는 더블과 트리플을 구분, 합계 족보는 별도 판정
+		if a < 1 or a > 6 or b < 1 or b > 6 or c < 1 or c > 6 then return false end
+		local sum = a + b + c
+		local triple = a == b and b == c
+		if choice == self.CHOICE_SMALL then return sum >= 4 and sum <= 10 end
+		if choice == self.CHOICE_BIG then return sum >= 11 and sum <= 17 end
+		if choice == self.CHOICE_DOUBLE then return not triple and (a == b or b == c or a == c) end
+		if choice == self.CHOICE_TRIPLE then return triple end
+		if choice == self.CHOICE_STRAIGHT then
+			return a ~= b and b ~= c and a ~= c and math.max(a, b, c) - math.min(a, b, c) == 2
+		end
+		return false
+	end
+
+	method integer GetMultiplierTenths(string choice, string initialChoice)
+		local entry = self:FindChoice(choice)
+		if entry == nil then return 0 end
+		return choice == initialChoice and entry.initial or entry.changed
+	end
+
+	method integer GetPayout(integer bet, integer multiplierTenths)
+		-- 소수점 배율의 부동소수 오차를 피한 정수 배당 계산
+		return math.floor(bet * multiplierTenths / 10)
+	end
+end

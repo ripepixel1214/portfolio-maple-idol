@@ -1,0 +1,253 @@
+---@description "서버 측 미니게임 커맨드 관련 처리 로직"
+@Logic
+script MiniGameCommandServerHandler extends Logic
+
+	property string COMMAND_KEY_UP = "Up"
+	property string COMMAND_KEY_DOWN = "Down"
+	property string COMMAND_KEY_LEFT = "Left"
+	property string COMMAND_KEY_RIGHT = "Right"
+	property string COMMAND_FEEDBACK_HIT = "hit"
+	property string COMMAND_FEEDBACK_MISS = "miss"
+	property string COMMAND_FEEDBACK_COMPLETE = "complete"
+	property string COMMAND_FEEDBACK_TIMEOUT = "timeout"
+	property string COMMAND_FIELD_SEPARATOR = ","
+	property string COMMAND_INPUT_HISTORY_SEPARATOR = ","
+	property integer COMMAND_SEQUENCE_MIN = 5
+	property integer COMMAND_SEQUENCE_MAX = 8
+
+	@ExecSpace("ServerOnly")
+	method any GenerateCommandSequence()
+		-- 서버 판정용 방향 커맨드 생성
+		local directions = {
+			self.COMMAND_KEY_UP,
+			self.COMMAND_KEY_DOWN,
+			self.COMMAND_KEY_LEFT,
+			self.COMMAND_KEY_RIGHT
+		}
+		local length = _UtilLogic:RandomIntegerRange(self.COMMAND_SEQUENCE_MIN, self.COMMAND_SEQUENCE_MAX)
+		local sequence = {}
+		for i = 1, length do
+			sequence[i] = directions[_UtilLogic:RandomIntegerRange(1, #directions)]
+		end
+		return sequence
+	end
+
+	@ExecSpace("ServerOnly")
+	method string SerializeCommandSequence(any sequence)
+		-- 클라이언트 실행 정보에 포함할 커맨드 문자열 생성
+		if sequence == nil or #sequence == 0 then
+			return ""
+		end
+		return table.concat(sequence, self.COMMAND_FIELD_SEPARATOR)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsValidCommandKey(string keyName)
+		-- 서버가 허용하는 방향키 이름 검증
+		return keyName == self.COMMAND_KEY_UP
+			or keyName == self.COMMAND_KEY_DOWN
+			or keyName == self.COMMAND_KEY_LEFT
+			or keyName == self.COMMAND_KEY_RIGHT
+	end
+
+	@ExecSpace("ServerOnly")
+	method any SplitCommandInputHistory(string text)
+		-- 누적 커맨드 입력 문자열을 순번 배열로 변환
+		local history = {}
+		if text == nil or text == "" then
+			return history
+		end
+
+		local separator = self.COMMAND_INPUT_HISTORY_SEPARATOR
+		local pattern = "([^" .. separator .. "]*)" .. separator
+		for keyName in string.gmatch(text .. separator, pattern) do
+			history[#history + 1] = keyName
+		end
+		return history
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetCommandProgress(any tSession)
+		-- 서버 커맨드 진행률 계산
+		if tSession == nil
+			or tSession.gameKind ~= _EMiniGameKind.COMMAND_SEQUENCE
+			or tSession.tModeState == nil
+			or tSession.tModeState.commandSequence == nil
+			or #tSession.tModeState.commandSequence == 0 then
+			return 0
+		end
+		return tSession.tModeState.commandIndex / #tSession.tModeState.commandSequence
+	end
+
+	@ExecSpace("ServerOnly")
+	method void FinishCommandTimeout(any tSession)
+		-- 제한 시간 초과 세션을 서버 결과로 확정
+		local progress = self:GetCommandProgress(tSession)
+		local score = math.floor(progress * 100)
+		self:DeliverCommandFeedback(tSession, tSession.tModeState.lastInputSequence, self.COMMAND_FEEDBACK_TIMEOUT, progress)
+		local tResult = MiniGameResultData()
+		tResult.success = false
+		tResult.score = score
+		tResult.progress = progress
+		tResult.accuracy = _MiniGameSessionService.SESSION_REASON_TIMEOUT
+		tResult.reason = _MiniGameSessionService.SESSION_REASON_TIMEOUT
+		_MiniGameSessionService:ConfirmSessionResult(tSession, tResult)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void DeliverCommandFeedback(any tSession, integer inputSequence, string action, number progress)
+		-- 서버 커맨드 판정 결과를 세션 소유 클라이언트에 전달
+		if tSession == nil or tSession.userId == nil or tSession.userId == "" then
+			return
+		end
+
+		local tFeedback = MiniGameCommandFeedbackData()
+		tFeedback.inputSequence = inputSequence
+		tFeedback.action = action
+		tFeedback.commandIndex = tSession.tModeState.commandIndex
+		tFeedback.progress = progress
+		_MiniGameManager:PushCommandFeedback(
+			tSession.id,
+			tFeedback:ToPlainTable(),
+			tSession.userId
+		)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Configure(any tSession, any preset)
+		-- 커맨드 세션 전용 상태 생성
+		tSession.tModeState = MiniGameCommandSessionState()
+		tSession.tModeState.commandSequence = self:GenerateCommandSequence()
+		tSession.tModeState.resetOnError = (preset.inputConfig or {}).resetOnError == true
+		tSession.tModeState.serverInputStarted = tSession.status == _MiniGameSessionService.SESSION_STATUS_RUNNING
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RequiresPreparation()
+		-- 소유 클라이언트의 입력 준비 응답 대기
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetLaunchCommandPayload(any tSession)
+		-- 기존 실행 프로토콜의 커맨드 필드 반환
+		return self:SerializeCommandSequence(tSession.tModeState.commandSequence)
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetProgress(any tSession)
+		-- 취소 시점 커맨드 진행률 반환
+		return self:GetCommandProgress(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean AcceptsClientResult(any tSession)
+		-- 서버 입력 시작 후 클라이언트 결과 확정 차단
+		return tSession.tModeState.serverInputStarted == false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HandlesFinishedFeedback()
+		-- 완료 응답은 커맨드 피드백에서 처리
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleInputReady(any tSession)
+		-- 준비 완료 세션의 서버 타이머 시작
+		tSession.status = _MiniGameSessionService.SESSION_STATUS_RUNNING
+		tSession.tModeState.serverInputStarted = true
+		tSession.elapsed = 0
+		tSession.prepareElapsed = 0
+		_MiniGameManager:DeliverSessionActivation(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleCommandInput(any tSession, integer inputSequence, string keyName, string inputHistoryPayload)
+		-- 검증된 소유 세션의 누적 커맨드 판정
+		local sessionId = tSession.id
+		if self:IsValidCommandKey(keyName) == false then
+			log_warning("[MiniGameCommandServerHandler] 허용되지 않은 커맨드 입력 session=" .. sessionId .. " key=" .. tostring(keyName))
+			return
+		end
+
+		if tSession.duration > 0 and tSession.elapsed >= tSession.duration then
+			self:FinishCommandTimeout(tSession)
+			return
+		end
+
+		if inputSequence <= tSession.tModeState.lastInputSequence then
+			return
+		end
+
+		local inputHistory = self:SplitCommandInputHistory(inputHistoryPayload)
+		if #inputHistory < inputSequence or inputHistory[inputSequence] ~= keyName then
+			log_warning("[MiniGameCommandServerHandler] 커맨드 입력 이력 불일치 session=" .. sessionId ..
+				" sequence=" .. tostring(inputSequence) ..
+				" historyCount=" .. tostring(#inputHistory))
+			return
+		end
+
+		for sequenceIndex = tSession.tModeState.lastInputSequence + 1, inputSequence do
+			if self:IsValidCommandKey(inputHistory[sequenceIndex]) == false then
+				log_warning("[MiniGameCommandServerHandler] 누적 이력의 허용되지 않은 입력 session=" .. sessionId ..
+					" sequence=" .. tostring(sequenceIndex))
+				return
+			end
+		end
+
+		if tSession.tModeState.serverInputStarted == false then
+			tSession.elapsed = 0
+			tSession.tModeState.serverInputStarted = true
+		end
+
+		for sequenceIndex = tSession.tModeState.lastInputSequence + 1, inputSequence do
+			local recoveredKeyName = inputHistory[sequenceIndex]
+			tSession.tModeState.lastInputSequence = sequenceIndex
+
+			local expectedKey = tSession.tModeState.commandSequence[tSession.tModeState.commandIndex + 1]
+			if recoveredKeyName == expectedKey then
+				tSession.tModeState.commandIndex = tSession.tModeState.commandIndex + 1
+				local progress = self:GetCommandProgress(tSession)
+				if tSession.tModeState.commandIndex >= #tSession.tModeState.commandSequence then
+					self:DeliverCommandFeedback(tSession, sequenceIndex, self.COMMAND_FEEDBACK_COMPLETE, progress)
+					local tResult = MiniGameResultData()
+					tResult.success = true
+					tResult.score = 100
+					tResult.progress = 1
+					tResult.accuracy = self.COMMAND_FEEDBACK_HIT
+					tResult.reason = _MiniGameSessionService.SESSION_REASON_OBJECTIVE
+					_MiniGameSessionService:ConfirmSessionResult(tSession, tResult)
+					return
+				end
+				self:DeliverCommandFeedback(tSession, sequenceIndex, self.COMMAND_FEEDBACK_HIT, progress)
+			else
+				tSession.tModeState.missCount = tSession.tModeState.missCount + 1
+				if tSession.tModeState.resetOnError == true then
+					tSession.tModeState.commandIndex = 0
+				end
+				self:DeliverCommandFeedback(tSession, sequenceIndex, self.COMMAND_FEEDBACK_MISS, self:GetCommandProgress(tSession))
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateSession(any tSession, number delta)
+		-- 커맨드 제한 시간 및 준비 시간 초과 처리
+		local service = _MiniGameSessionService
+		if tSession.status == service.SESSION_STATUS_RUNNING then
+			if tSession.tModeState.serverInputStarted == true then
+				tSession.elapsed = tSession.elapsed + delta
+				if tSession.duration > 0 and tSession.elapsed >= tSession.duration then
+					self:FinishCommandTimeout(tSession)
+				end
+			end
+		elseif tSession.status == service.SESSION_STATUS_PREPARING then
+			tSession.prepareElapsed = tSession.prepareElapsed + delta
+			if tSession.prepareElapsed >= service.SESSION_PREPARE_TIMEOUT_SECONDS then
+				service:AbortSession(tSession, service.SESSION_REASON_TIMEOUT)
+			end
+		end
+	end
+
+end

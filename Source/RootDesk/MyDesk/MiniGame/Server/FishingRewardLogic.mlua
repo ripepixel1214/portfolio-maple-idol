@@ -1,0 +1,148 @@
+---@description "낚시 보상 캐시, 뱃지 기본 능력치 효과와 쿠키 사용 연결"
+@Logic
+script FishingRewardLogic extends Logic
+	property any dataByUser = {}
+	property any busyByUser = {}
+	property any tClientData = nil
+	property any userEnterHandler = nil
+	property boolean cookiePending = false
+	property string cookieRequestId = ""
+	property string cookieTargetId = ""
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, function(event) self:Load(event.UserId) end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean Load(string userId)
+		if userId == nil or userId == "" then return false end
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		local read = _FishingRewardStorage:LoadOrCreate(storage)
+		if read == nil then return false end
+		_FishingRewardStorage:Finalize(storage, read)
+		self.dataByUser[userId] = read.tData
+		if read.tData.pendingResult ~= nil then
+			local pending = read.tData.pendingResult
+			if self:GrantResult(userId, pending.id, pending.score) == nil then return false end
+		end
+		self:Push(userId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GrantResult(string userId, string operationId, integer score)
+		if self.busyByUser[userId] then return nil end
+		local tPrevious = self.dataByUser[userId]
+		local hadBadge = tPrevious ~= nil and tPrevious.badgeGranted
+		self.busyByUser[userId] = true
+		local ok, result = pcall(function()
+			if not _FishingRewardStorage:QueueResult(userId, operationId, score) then return nil end
+			return _FishingRewardStorage:Apply(userId, operationId, _FishingRewardStorage.KIND_REWARD, score, "")
+		end)
+		self.busyByUser[userId] = nil
+		if not ok or result == nil then return nil end
+		self.dataByUser[userId] = result.tData
+		if not hadBadge and result.receipt.itemId == _MiniGameFishingRule.BADGE_ID then
+			_ItemManager:RegisterAlbumItemAsNewContent(_MiniGameFishingRule.BADGE_ID, userId)
+		end
+		self:Push(userId)
+		return result.receipt
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ProjectCharacter(string userId, any plain)
+		-- 원본 육성값을 저장한 채 뱃지 기본값 가산과 쿠키 친밀도를 조회 시 합성
+		local tData = self.dataByUser[userId]
+		if tData == nil or type(plain) ~= "table" then return plain end
+		local extra = tData.intimacyByCharacter[plain.id] or 0
+		plain.intimacy = (plain.intimacy or 0) + extra
+		plain.maxIntimacyReached = math.max(plain.intimacy, (plain.maxIntimacyReached or 0) + extra)
+		if tData.badgeGranted then
+			local base = _CharacterBaseStatMaster:GetCharacterBaseStat(plain.id)
+			if base ~= nil then
+				plain.vocal = plain.vocal + base.vocal * 0.05
+				plain.dance = plain.dance + base.dance * 0.05
+				plain.visual = plain.visual + base.visual * 0.05
+			end
+		end
+		return plain
+	end
+
+	@ExecSpace("Server")
+	method void RequestUseCookie(string requestId, string characterId)
+		-- 요청자 소유 캐릭터 재검증, 같은 소비 요청 ID는 재차 차감하지 않음
+		local userId = senderUserId
+		if self.busyByUser[userId] then
+			self:PushCookieResult(false, userId)
+			return
+		end
+		local tCharacter = _CharacterManager:ServerGetCharacterById(characterId)
+		if not _CharacterManager:CanUseCharacters(userId) or tCharacter == nil or not tCharacter.isDiscovered then
+			self:PushCookieResult(false, userId)
+			return
+		end
+		self.busyByUser[userId] = true
+		local ok, result = pcall(function()
+			return _FishingRewardStorage:Apply(userId, requestId, _FishingRewardStorage.KIND_COOKIE, 0, characterId)
+		end)
+		self.busyByUser[userId] = nil
+		if ok and result ~= nil then
+			self.dataByUser[userId] = result.tData
+			local current = _CharacterManager:ServerGetCharacterById(characterId)
+			_CharacterManager:QueueNewIntimacyEpisodes(characterId, tCharacter.maxIntimacyReached, current.maxIntimacyReached)
+			_CharacterManager:FlushPendingNewIntimacyEpisodes()
+			self:Push(userId)
+			self:PushCookieResult(true, userId)
+		else
+			self:PushCookieResult(false, userId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UseCookie(string characterId)
+		if self.cookiePending or self.tClientData == nil or (self.tClientData.cookies < 1 and self.cookieRequestId == "") then return end
+		-- 실패한 소비 요청은 같은 ID로 재시도하여 시간 초과 중복 차감 방지
+		if self.cookieRequestId ~= "" and self.cookieTargetId ~= characterId then return end
+		if self.cookieRequestId == "" then
+			self.cookieRequestId = _UtilLogic:NewGuid()
+			self.cookieTargetId = characterId
+		end
+		self.cookiePending = true
+		self:RequestUseCookie(self.cookieRequestId, characterId)
+		_SmartPhoneIdolAppLogic:RefreshCookie()
+	end
+
+	@ExecSpace("Client")
+	method void PushCookieResult(boolean success)
+		self.cookiePending = false
+		if success then self.cookieRequestId = "" self.cookieTargetId = "" end
+		_SmartPhoneIdolAppLogic:Refresh()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Push(string userId)
+		local tData = self.dataByUser[userId]
+		if tData == nil then return end
+		self:SyncData(tData:ToPlainTable(), userId)
+		if _CharacterManager:CanUseCharacters(userId) then _CharacterManager:PushCharactersToClient(userId) end
+		if _ItemManager:CanUseItems(userId) then _ItemManager:PushItemsToClient(userId) end
+	end
+
+	@ExecSpace("Client")
+	method void SyncData(table plain)
+		local tData = FishingRewardData()
+		if not tData:FromPlainTable(plain) then return end
+		if self.tClientData ~= nil and self.tClientData.revision > tData.revision then return end
+		self.tClientData = tData
+		_SmartPhoneIdolAppLogic:Refresh()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		if self.userEnterHandler ~= nil then _UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler) end
+		self.userEnterHandler = nil
+		self.dataByUser = {}
+		self.busyByUser = {}
+	end
+end

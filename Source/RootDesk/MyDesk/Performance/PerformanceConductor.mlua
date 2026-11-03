@@ -6,6 +6,12 @@ script PerformanceConductor extends Logic
 
 	property string currentPerformanceId = ""
 
+	-- 서버 시작 승인 대기 및 현재 공연 시도의 식별자
+	property boolean isRequestingStart = false
+	property string pendingStartRequestId = ""
+	property string currentAttemptId = ""
+	property boolean isSubmittingResult = false
+
 	-- 진입 후 공연 재생(BGM+큐) 시작까지의 딜레이(초). 이 동안 무대는 준비된 채 함성만 재생
 	property number startDelaySeconds = 5
 
@@ -99,7 +105,7 @@ script PerformanceConductor extends Logic
 			return
 		end
 		local map = player.CurrentMap
-		if isvalid(map) == false then
+		if isvalid(map) == false or map.Name ~= self.performanceMapName then
 			return
 		end
 		-- 무대 댄서(DancerCenter)가 맵에 나타났는지로 맵 준비 완료를 판정
@@ -128,9 +134,13 @@ script PerformanceConductor extends Logic
 			return
 		end
 
+		self:StopPerformance()
 		self.header = tHeader
 		self.cues = _PerformanceMaster:GetCues(performanceId)
 		self.currentPerformanceId = performanceId
+		self.currentAttemptId = ""
+		self.pendingStartRequestId = ""
+		self.isRequestingStart = false
 		self.elapsed = 0
 		self.nextCueIndex = 1
 		self.pendingHides = {}
@@ -163,7 +173,30 @@ script PerformanceConductor extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void BeginPerformancePlayback()
-		-- 시작 딜레이 종료 후 실제 재생 시작: BGM 재생 + 큐 시계 진행
+		-- 시작 딜레이 종료 후 서버에 현재 스테이지 공연 시도 승인 요청
+		if self.isRequestingStart or self.isPlaying then return end
+		self.isRequestingStart = true
+		self.pendingStartRequestId = _UtilLogic:NewGuid()
+		local tAssignmentPlain = {}
+		if self.tRoleAssignment ~= nil then tAssignmentPlain = self.tRoleAssignment:ToPlainTable() end
+		_PerformanceResultManager:RequestBeginPerformance(self.currentPerformanceId, tAssignmentPlain, self.pendingStartRequestId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPerformanceStartResponse(string requestId, string performanceId, string attemptId, table tAssignmentPlain)
+		-- 현재 시작 요청의 서버 승인 이후에만 재생 시작, 취소된 요청의 응답 무시
+		if self.isRequestingStart == false or requestId ~= self.pendingStartRequestId
+			or performanceId ~= self.currentPerformanceId then return end
+		if attemptId == nil or attemptId == "" then
+			log_warning("[Conductor] 서버 공연 시작 승인 거부 id=" .. tostring(performanceId))
+			self:StopPerformance()
+			_StepEntryLogic:RequestEnterStudio()
+			return
+		end
+		self.currentAttemptId = attemptId
+		self.tRoleAssignment = PerformanceRoleAssignment():FromPlainTable(tAssignmentPlain)
+		self.pendingStartRequestId = ""
+		self.isRequestingStart = false
 		self.isWaitingToStart = false
 		self.startDelayRemaining = 0
 		self.elapsed = 0
@@ -172,6 +205,10 @@ script PerformanceConductor extends Logic
 
 		if self.header ~= nil and self.header.bgmRuid ~= nil and self.header.bgmRuid ~= "" then
 			_SoundManager:PlayBGM(self.header.bgmRuid, self.header.bgmVolume)
+		end
+
+		if _PerformanceEffectLogic ~= nil then
+			_PerformanceEffectLogic:BeginCheering()
 		end
 
 		log("[Conductor] 공연 재생 시작 id=" .. tostring(self.currentPerformanceId))
@@ -185,6 +222,7 @@ script PerformanceConductor extends Logic
 		end
 
 		local pid = self.currentPerformanceId
+		local attemptId = self.currentAttemptId
 		---@type PerformanceRoleAssignment
 		local assignment = self.tRoleAssignment
 		local tAssignmentPlain = {}
@@ -193,21 +231,32 @@ script PerformanceConductor extends Logic
 		end
 
 		-- 무대/카메라/플레이어 정리 (currentPerformanceId 등은 여기서 초기화됨)
+		self.isSubmittingResult = true
 		self:StopPerformance()
+		self.isSubmittingResult = false
 
 		-- 서버 권위 결과 산출 요청 (결과는 SyncPerformanceResult로 되돌아와 점수 UI 표시)
 		if _PerformanceResultManager ~= nil then
-			_PerformanceResultManager:RequestFinishPerformance(pid, tAssignmentPlain)
+			_PerformanceResultManager:RequestFinishPerformance(pid, tAssignmentPlain, attemptId)
 		end
 	end
 
 	@ExecSpace("ClientOnly")
 	method void StopPerformance()
 		-- 공연 중지 및 상태 초기화 (시작 딜레이 대기 중에 중단되는 경우도 무대 셋업을 정리해야 하므로 함께 처리)
-		if self.isPlaying == false and self.isWaitingToStart == false then
+		if self.isPlaying == false and self.isWaitingToStart == false and self.isRequestingStart == false
+			and self.pendingPerformanceId == "" then
 			return
 		end
 
+		if self.isSubmittingResult == false and (self.currentAttemptId ~= "" or self.pendingStartRequestId ~= "") then
+			_PerformanceResultManager:RequestCancelPerformance(self.pendingStartRequestId, self.currentPerformanceId, self.currentAttemptId)
+		end
+		self.pendingPerformanceId = ""
+		self.pendingRoleAssignment = nil
+		self.isRequestingStart = false
+		self.pendingStartRequestId = ""
+		self.currentAttemptId = ""
 		self.isWaitingToStart = false
 		self.startDelayRemaining = 0
 		self.isPlaying = false
@@ -245,6 +294,16 @@ script PerformanceConductor extends Logic
 			self:TryBeginPendingPerformance()
 		end
 
+		-- 공연 맵 이탈 시 응원 입력과 무대 상태를 함께 정리
+		if self.isPlaying or self.isWaitingToStart or self.isRequestingStart then
+			local player = _UserService.LocalPlayer
+			if isvalid(player) == false or isvalid(player.CurrentMap) == false
+				or player.CurrentMap.Name ~= self.performanceMapName then
+				self:StopPerformance()
+				return
+			end
+		end
+
 		-- 시작 딜레이 대기 중이면 카운트다운 후 재생 시작 (이 동안 큐 시계는 진행하지 않음)
 		if self.isWaitingToStart == true then
 			self.startDelayRemaining = self.startDelayRemaining - delta
@@ -260,6 +319,10 @@ script PerformanceConductor extends Logic
 		end
 
 		self.elapsed = self.elapsed + delta
+		-- 긴 프레임에서도 종료 시각 이후의 보존된 연출 큐 실행 방지
+		if self.header ~= nil and self.header.length > 0 then
+			self.elapsed = math.min(self.elapsed, self.header.length)
+		end
 
 		while self.nextCueIndex <= #self.cues do
 			local tCue = self.cues[self.nextCueIndex]
@@ -305,7 +368,8 @@ script PerformanceConductor extends Logic
 		elseif cueType == _EPerformanceCueType.BgmVolume then
 			self:HandleBgmVolume(tCue)
 		elseif cueType == _EPerformanceCueType.MiniGame then
-			self:HandleMiniGame(tCue)
+			-- 기존 큐 데이터 호환을 위해 폐기된 미니게임 큐 건너뛰기
+			log("[Conductor] 폐기된 미니게임 큐 건너뛰기 target=" .. tostring(tCue.targetId))
 		elseif cueType == _EPerformanceCueType.CameraZoom then
 			self:HandleCameraZoom(tCue)
 		elseif cueType == _EPerformanceCueType.CameraShake then
@@ -338,23 +402,6 @@ script PerformanceConductor extends Logic
 	method void HandleBgmVolume(any tCue)
 		-- BGM 볼륨 조정 (즉시 적용, 페이드는 추후) — 유저 설정 볼륨이 곱해지도록 SoundManager 경유
 		_SoundManager:SetBgmBaseVolume(tCue.num1)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void HandleMiniGame(any tCue)
-		-- 공연 큐에 맞춰 서버 세션 시작 요청
-		if _MiniGameManager == nil then
-			log_warning("[Conductor] MiniGameManager 없음")
-			return
-		end
-
-		local perfId = self.currentPerformanceId or ""
-		if _MiniGamePlayLogic == nil then
-			log_warning("[Conductor] MiniGamePlayLogic 없음")
-			return
-		end
-
-		_MiniGameManager:RequestStartMiniGame(tCue.targetId, _EMiniGameContextType.Performance, perfId)
 	end
 
 	@ExecSpace("ClientOnly")

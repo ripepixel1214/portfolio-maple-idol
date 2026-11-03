@@ -1,0 +1,51 @@
+@Struct
+script DiamondWalletData
+
+	property number saveVersion = 1
+	property number balance = 0
+	property number revision = 0
+	property boolean migrationCompleted = false
+	property number migratedLegacyBalance = 0
+	property string initializationId = ""
+	property any tPendingOperation = nil
+
+	method table ToPlainTable()
+		-- 잔액과 미완료 거래를 하나의 조건부 저장 값으로 구성
+		local tData = { saveVersion = self.saveVersion, balance = self.balance,
+			revision = self.revision, migrationCompleted = self.migrationCompleted,
+			migratedLegacyBalance = self.migratedLegacyBalance, initializationId = self.initializationId }
+		if self.tPendingOperation ~= nil then
+			tData.pendingOperation = self.tPendingOperation:ToPlainTable()
+		end
+		return tData
+	end
+
+	method boolean FromPlainTable(any tPlainData)
+		-- 유료 잔액 손상 시 기본값 대입 없이 로드 실패 처리
+		if type(tPlainData) ~= "table" or tPlainData.saveVersion ~= 1
+			or tPlainData.migrationCompleted ~= true
+			or type(tPlainData.initializationId) ~= "string" or tPlainData.initializationId == ""
+			or _DiamondWalletStorage:IsValidAmount(tPlainData.balance) == false
+			or _DiamondWalletStorage:IsValidAmount(tPlainData.revision) == false
+			or _DiamondWalletStorage:IsValidAmount(tPlainData.migratedLegacyBalance) == false then
+			return false
+		end
+		self.balance = tPlainData.balance
+		self.revision = tPlainData.revision
+		self.migrationCompleted = true
+		self.migratedLegacyBalance = tPlainData.migratedLegacyBalance
+		self.initializationId = tPlainData.initializationId
+		self.tPendingOperation = nil
+		if self.revision == 0 and self.balance ~= self.migratedLegacyBalance then return false end
+		if tPlainData.pendingOperation ~= nil then
+			local tOperation = DiamondWalletOperationData()
+			if tOperation:FromPlainTable(tPlainData.pendingOperation) == false
+				or tOperation.revision ~= self.revision or tOperation.afterBalance ~= self.balance then
+				return false
+			end
+			self.tPendingOperation = tOperation
+		end
+		return true
+	end
+
+end

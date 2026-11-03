@@ -1,0 +1,284 @@
+@Logic
+script UITween extends Logic
+
+	property string EFFECT_SHAKE_ROTATION = "shake_rotation"
+	property string EFFECT_SHAKE_POSITION = "shake_position"
+	property string EFFECT_POP_IN = "pop_in"
+	property string EFFECT_POP_OUT = "pop_out"
+	property string EFFECT_FLOAT_FADE = "float_fade"
+	property string EFFECT_BLINK_COLOR = "blink_color"
+	property table activeEffects = {}
+	property integer nextEffectId = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 이전 실행의 효과 정리
+		self:StopAllEffects()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 기존 키 삭제만 수행하므로 별도 취소 목록 없이 순회
+		for effectId, tState in pairs(self.activeEffects) do
+			if not isvalid(tState.target) or not tState.target.EnabledInHierarchy then self:Stop(effectId) end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 네이티브 트윈 제거와 원본 값 복원
+		self:StopAllEffects()
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer ShakeRotation(Entity target, number duration, number amplitude, number frequency, boolean dampen)
+		-- UI를 빠르게 좌우로 반복하며 기울여 흔드는 효과(실패, 경고 시 사용)
+		-- duration초 동안 최대 +-amplitude도, 초당 frequency회 왕복하며 dampen=true이면 점차 약화
+		if not self:CanStart(target, duration) or frequency <= 0 then return 0 end
+		local tState = self:CreateState(target, self.EFFECT_SHAKE_ROTATION, duration)
+		local transform = target.UITransformComponent
+		local rotation = transform.UIRotation
+		local originalRotation = Vector3(rotation.x, rotation.y, rotation.z)
+		local angleRange = math.abs(amplitude)
+		tState.apply = function(progress)
+			local weight = dampen and (1 - progress) or 1
+			local angle = math.sin(progress * duration * frequency * math.pi * 2) * angleRange * weight
+			transform.UIRotation = Vector3(originalRotation.x, originalRotation.y, originalRotation.z + angle)
+		end
+		tState.restore = function()
+			if isvalid(transform) then transform.UIRotation = originalRotation end
+		end
+		return self:StartEffect(tState)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer ShakePosition(Entity target, number duration, Vector2 amplitude, number frequency, boolean dampen)
+		-- 원래 위치를 중심으로 UI를 반복 이동하는 피격·충격 효과
+		-- amplitude는 축별 UI 픽셀 진폭, frequency는 초당 왕복 횟수, dampen=true이면 점차 약화
+		if not self:CanStart(target, duration) or frequency <= 0 or amplitude == nil then return 0 end
+		local tState = self:CreateState(target, self.EFFECT_SHAKE_POSITION, duration)
+		local transform = target.UITransformComponent
+		local position = transform.anchoredPosition
+		local originalPosition = Vector2(position.x, position.y)
+		local distance = Vector2(amplitude.x, amplitude.y)
+		tState.apply = function(progress)
+			local weight = dampen and (1 - progress) or 1
+			local offset = math.sin(progress * duration * frequency * math.pi * 2) * weight
+			transform.anchoredPosition = Vector2(originalPosition.x + distance.x * offset, originalPosition.y + distance.y * offset)
+		end
+		tState.restore = function()
+			if isvalid(transform) then transform.anchoredPosition = originalPosition end
+		end
+		return self:StartEffect(tState)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer PopIn(Entity target, number duration, number startScaleRatio)
+		-- 작은 크기에서 105%까지 커진 뒤 원래 크기로 안착하는 팝업 등장 효과
+		if not self:CanStart(target, duration) or startScaleRatio < 0 or startScaleRatio >= 1 then return 0 end
+		self:StopEffect(target, self.EFFECT_POP_OUT)
+		local tState = self:CreateState(target, self.EFFECT_POP_IN, duration)
+		local transform = target.UITransformComponent
+		local scale = transform.UIScale
+		local originalScale = Vector3(scale.x, scale.y, scale.z)
+		tState.apply = function(progress)
+			local ratio = 1
+			if progress < 0.7 then
+				ratio = _TweenLogic:Ease(startScaleRatio, 1.05, 1, EaseType.CubicEaseOut, progress / 0.7)
+			else
+				ratio = _TweenLogic:Ease(1.05, 1, 1, EaseType.SineEaseInOut, (progress - 0.7) / 0.3)
+			end
+			transform.UIScale = Vector3(originalScale.x * ratio, originalScale.y * ratio, originalScale.z)
+		end
+		tState.restore = function()
+			if isvalid(transform) then transform.UIScale = originalScale end
+		end
+		return self:StartEffect(tState)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer PopOut(Entity target, number duration, number endScaleRatio, any onComplete)
+		-- 원래 크기에서 축소 후 숨김, 취소 시 숨김과 완료 콜백 없이 원본 크기 복원
+		if not self:CanStart(target, duration) or endScaleRatio < 0 or endScaleRatio >= 1 then return 0 end
+		self:StopEffect(target, self.EFFECT_POP_IN)
+		local tState = self:CreateState(target, self.EFFECT_POP_OUT, duration)
+		local transform = target.UITransformComponent
+		local scale = transform.UIScale
+		local originalScale = Vector3(scale.x, scale.y, scale.z)
+		tState.apply = function(progress)
+			local ratio = _TweenLogic:Ease(1, endScaleRatio, 1, EaseType.CubicEaseIn, progress)
+			transform.UIScale = Vector3(originalScale.x * ratio, originalScale.y * ratio, originalScale.z)
+		end
+		tState.restore = function()
+			if isvalid(transform) then transform.UIScale = originalScale end
+		end
+		tState.onComplete = function()
+			target.Enable = false
+			if type(onComplete) == "function" then onComplete() end
+		end
+		return self:StartEffect(tState)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer FloatFade(Entity target, number duration, number riseDistance, number fadeStartRatio, any onComplete)
+		-- 위로 움직이며 사라지게 할 때 사용, CanvasGroupComponent 필요
+		-- duration초 동안 riseDistance만큼 상승, fadeStartRatio(0~1)부터 페이드 후 숨김
+		if not self:CanStart(target, duration) then return 0 end
+		local group = target.CanvasGroupComponent
+		if group == nil then
+			log_warning("UITween.FloatFade: 대상에 CanvasGroupComponent 필요")
+			return 0
+		end
+		local tState = self:CreateState(target, self.EFFECT_FLOAT_FADE, duration)
+		local transform = target.UITransformComponent
+		local position = transform.anchoredPosition
+		local originalPosition = Vector2(position.x, position.y)
+		local originalAlpha = group.GroupAlpha
+		local fadeStart = math.max(0, math.min(fadeStartRatio, 1))
+		tState.apply = function(progress)
+			transform.anchoredPosition = Vector2(originalPosition.x, originalPosition.y + riseDistance * progress)
+			local fadeRatio = 0
+			if progress >= 1 then
+				fadeRatio = 1
+			elseif progress > fadeStart then
+				fadeRatio = (progress - fadeStart) / (1 - fadeStart)
+			end
+			if isvalid(group) then group.GroupAlpha = originalAlpha * (1 - fadeRatio) end
+		end
+		tState.restore = function()
+			if isvalid(transform) then transform.anchoredPosition = originalPosition end
+			if isvalid(group) then group.GroupAlpha = originalAlpha end
+		end
+		tState.onComplete = function()
+			target.Enable = false
+			if type(onComplete) == "function" then onComplete() end
+		end
+		return self:StartEffect(tState)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer BlinkColor(Entity target, Color blinkColor, number duration, number period)
+		-- 피격, 주의 상태를 일정 시간 강조할 때 원래 색상과 지정 색상을 번갈아 표시
+		-- duration초 동안 period초마다 1회 깜빡임, 원래 알파 유지
+		if not self:CanStart(target, duration) or period <= 0 or blinkColor == nil then return 0 end
+		local sprite = target.SpriteGUIRendererComponent
+		local text = target.TextGUIRendererComponent
+		if sprite == nil and text == nil then return 0 end
+		local tState = self:CreateState(target, self.EFFECT_BLINK_COLOR, duration)
+		local spriteColor, textColor, spriteBlink, textBlink = nil, nil, nil, nil
+		if sprite ~= nil then
+			local color = sprite.Color
+			spriteColor = Color(color.r, color.g, color.b, color.a)
+			spriteBlink = Color(blinkColor.r, blinkColor.g, blinkColor.b, color.a)
+		end
+		if text ~= nil then
+			local color = text.FontColor
+			textColor = Color(color.r, color.g, color.b, color.a)
+			textBlink = Color(blinkColor.r, blinkColor.g, blinkColor.b, color.a)
+		end
+		tState.apply = function(progress)
+			local useBlink = (progress * duration / period) % 1 < 0.5
+			if isvalid(sprite) then sprite.Color = useBlink and spriteBlink or spriteColor end
+			if isvalid(text) then text.FontColor = useBlink and textBlink or textColor end
+		end
+		tState.restore = function()
+			if isvalid(sprite) then sprite.Color = spriteColor end
+			if isvalid(text) then text.FontColor = textColor end
+		end
+		return self:StartEffect(tState)
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer BlinkColorByCount(Entity target, Color blinkColor, integer count, number period)
+		-- 정해진 횟수만큼 UI 색상을 깜빡여 강조할 때 사용
+		-- 지정 색상과 원래 색상 한 쌍을 1회로 계산해 period초 주기로 count회 반복
+		if count <= 0 or period <= 0 then return 0 end
+		return self:BlinkColor(target, blinkColor, count * period, period)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsPlaying(integer effectId)
+		-- 교체되거나 종료된 핸들은 false 반환
+		return self.activeEffects[effectId] ~= nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Stop(integer effectId)
+		-- 완료 콜백과 숨김 처리 없이 취소
+		self:FinishEffect(self.activeEffects[effectId], false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopEffect(Entity target, string effectKind)
+		-- 같은 대상의 같은 효과만 취소
+		for effectId, tState in pairs(self.activeEffects) do
+			if tState.target == target and tState.kind == effectKind then self:Stop(effectId) end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopAll(Entity target)
+		-- 대상의 모든 효과 정리, nil은 전체 대상
+		for effectId, tState in pairs(self.activeEffects) do
+			if target == nil or tState.target == target then self:Stop(effectId) end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopAllEffects()
+		-- 전체 실행 종료용 편의 호출
+		self:StopAll(nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanStart(Entity target, number duration)
+		-- 잘못된 요청은 기존 효과를 취소하지 않고 거부
+		return isvalid(target) and target.EnabledInHierarchy and target.UITransformComponent ~= nil and duration > 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method UITweenState CreateState(Entity target, string effectKind, number duration)
+		-- 이전 효과를 복원한 뒤 새 원본 값을 캡처하도록 재호출 처리 집중
+		self:StopEffect(target, effectKind)
+		self.nextEffectId += 1
+		local tState = UITweenState()
+		tState.id = self.nextEffectId
+		tState.target = target
+		tState.kind = effectKind
+		tState.duration = duration
+		return tState
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer StartEffect(UITweenState tState)
+		-- 네이티브 진행률을 효과의 적용 콜백으로 전달
+		self.activeEffects[tState.id] = tState
+		tState.tweener = _TweenLogic:MakeTween(0, 1, tState.duration, EaseType.Linear, function(progress)
+			if self.activeEffects[tState.id] ~= tState then return end
+			if not self:CanStart(tState.target, tState.duration) then
+				self:Stop(tState.id)
+				return
+			end
+			tState.apply(math.max(0, math.min(progress, 1)))
+		end)
+		tState.tweener.AutoDestroy = false
+		tState.tweener:SetOnEndCallback(function() self:FinishEffect(tState, true) end)
+		tState.apply(0)
+		tState.tweener:Play()
+		return tState.id
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishEffect(UITweenState tState, boolean completed)
+		-- 등록 해제 후 트윈 제거와 복원, 자연 종료에만 완료 콜백 실행
+		if tState == nil or self.activeEffects[tState.id] ~= tState then return end
+		local canComplete = completed and self:CanStart(tState.target, tState.duration)
+		local tweener, restore, onComplete = tState.tweener, tState.restore, tState.onComplete
+		self.activeEffects[tState.id] = nil
+		tState.tweener, tState.apply, tState.restore, tState.onComplete = nil, nil, nil, nil
+		if tweener ~= nil then tweener:Destroy() end
+		if isvalid(tState.target) then restore() end
+		if canComplete and onComplete ~= nil then onComplete() end
+	end
+
+end

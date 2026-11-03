@@ -1,0 +1,4 @@
+---@description "낚시 복제 UI의 표시 영역 식별 컴포넌트"
+@Component
+script MiniGameFishingVisualPart extends Component
+end

@@ -1,176 +1,91 @@
+---@description "클라이언트 측 미니게임 진행 관리 로직"
 @Logic
-@ExecSpace("ClientOnly")
 script MiniGamePlayLogic extends Logic
 
-	-- 커맨드 프로토콜 키
+	-- 기존 RPC 진입점을 유지하는 클라이언트 Presenter
+	property any tModel = nil
+	property any tBehavior = nil
+	property any tRetainedBehavior = nil
+	property any activeInputConfig = {}
 	property string COMMAND_KEY_UP = "Up"
 	property string COMMAND_KEY_DOWN = "Down"
 	property string COMMAND_KEY_LEFT = "Left"
 	property string COMMAND_KEY_RIGHT = "Right"
-	property string LAUNCH_FIELD_SEPARATOR = "|"
-	-- 결과 처리 사유
 	property string RESULT_REASON_OBJECTIVE = "objective"
 	property string RESULT_REASON_COMPLETE = "complete"
-	property string RESULT_REASON_TIMEOUT = "timeout"
 	property string RESULT_REASON_CANCEL = "cancel"
 	property string RESULT_REASON_MAP_CHANGE = "mapChange"
 	property string RESULT_REASON_RESTART = "restart"
-	-- 상호작용 잠금 식별자
+	property string RESULT_REASON_TIMEOUT = "timeout"
+	property number RESULT_RESPONSE_TIMEOUT_SECONDS = 15
 	property string INTERACTION_GATE_HOLDER = "minigame"
-
-	-- 현재 미니게임 진행 중 여부
 	property boolean isPlaying = false
-	-- UI 구성과 입력 구독 완료 여부
 	property boolean inputReady = false
-
-	-- 현재 세션 식별자
 	property string sessionId = ""
-
-	-- 이미 시작 처리한 마지막 서버 실행 통지 sessionId
 	property string lastLaunchedSessionId = ""
-	-- 현재 미니게임 프리셋 id
-
 	property string miniGameId = ""
-
-	-- 실행 문맥 (EMiniGameContextType)
 	property integer contextType = -1
-
-	-- 실행 문맥 식별자
 	property string contextId = ""
-
-	-- 미니게임을 진행하는 캐릭터 id (요구 2/4: 아바타/ID 표시용). 없으면 빈 문자열.
 	property string presentationActorId = ""
-
-	-- 베팅형 세션의 서버 검증 판돈과 시작 잔액
 	property integer betAmount = 0
 	property integer balance = 0
-
-	-- 세션 시작 맵 이름
 	property string startMapName = ""
-
-	-- 현재 프리셋 데이터
-	property any preset = nil
-
-	-- 현재 UI 프레젠테이션 id
+	property string presentationMapName = ""
+	property boolean cancelOnMapChange = true
 	property string presentationId = ""
-
-	-- 통합 규칙 엔진이 관리하는 현재 세션 상태
-	property any ruleState = nil
-
-	-- 현재 목표 정의 배열
-	property any objectives = {}
-
-	-- 현재 입력 타입 (EMiniGameInputType)
-	property integer inputType = -1
-
-	-- 입력 이벤트 구독 핸들러
 	property any inputEventHandler = nil
-
-	-- 미니게임 진행 동안 이동 잠금(게이트)을 점유 중인지 여부
 	property boolean gateHeld = false
-
-	-- 시간 모듈 상태
-	property integer timeMode = -1
-	property number timeRemaining = 0
-	property number elapsed = 0
-
-	-- 게이지 상태 (GaugeFill 목표 / GaugeDrain 시간)
-	property boolean useGauge = false
-	property number gauge = 0
-	property number gaugePerInput = 0
-	property number gaugeDrainPerSecond = 0
-	property number gaugeFailAt = 0
-	-- GaugeFill 목표 기준값 (게이지 표시 비율 계산용)
-	property number gaugeTarget = 100
-	-- Countdown 총 시간(초). 타이밍 커서 위치 계산용
-	property number timeDuration = 0
-
-	-- 드래그 도형 일치 판정용 (시각 가이드와 동일한 정규화 좌표를 로컬로 변환해 사용)
-	-- 정규화 좌표(0~1) -> DragArea 로컬 좌표 스케일. (±0.5 -> ±60px, DragArea 150 기준). 좌표계가 DragArea 중심 원점이라 오프셋 불필요.
-	property number dotAreaScale = 120
-	property number dragTolerance = 18
-	property any checkpoints = {}
-	property any checkpointHit = {}
-	property integer coveredSectorCount = 0
-	property number shapeMatchTarget = 0.8
-
-	-- 진행 추적값
-	property integer successCount = 0
-	property integer hitCount = 0
-	property integer missCount = 0
-	-- 커맨드 진행 인덱스 (오답 리셋 반영, 이미지 표시용)
-	property integer commandIndex = 0
-	-- 현재 커맨드 시퀀스
-	property any commandSequence = {}
-	property number shapeRatio = 0
-	property number lastProgress = 0
-	property string lastAccuracy = ""
-
-	-- 커맨드 서버 동기화 상태
-	property any commandFlowState = nil
-
-	-- 실행 통지에서 파싱한 커맨드 전용 데이터
-	property any pendingCommandLaunch = nil
-
-	-- 화살표 리소스 준비 완료를 기다리는 세션
 	property string pendingPresentationSessionId = ""
-	
-	-- 화살표 리소스 준비 대기 세션의 입력 구성
-	property any pendingPresentationInputConfig = {}
+	property boolean awaitingResult = false
+	property number resultWaitElapsed = 0
+
+	-- Public API
 
 	@ExecSpace("ClientOnly")
-	method void HandleSessionLaunch(string launch)
-		-- 패킹된 실행 정보("sessionId|miniGameId|contextType|contextId|presentationActorId")를 분해해 세션을 시작
-		if launch == nil or launch == "" then
-			return
-		end
-
-		local parts = self:SplitParts(launch)
-		if parts == nil or #parts < 4 then
-			log_warning("[MiniGamePlay] 잘못된 실행 정보 launch=" .. launch)
-			return
-		end
-
-		local tLaunchContext = MiniGameLaunchContext()
-		tLaunchContext.sessionId = parts[1] or ""
-		tLaunchContext.miniGameId = parts[2] or ""
-		tLaunchContext.contextType = tonumber(parts[3]) or _EMiniGameContextType.Standalone
-		tLaunchContext.contextId = parts[4] or ""
-		tLaunchContext.presentationActorId = parts[5] or ""
-		tLaunchContext.commandPayload = parts[6] or ""
-		tLaunchContext.duration = tonumber(parts[7]) or 0
-		tLaunchContext.betAmount = math.floor(tonumber(parts[8]) or 0)
-		tLaunchContext.balance = math.floor(tonumber(parts[9]) or 0)
-
-		-- 동일한 활성 세션의 중복 서버 통지 무시
-		if tLaunchContext.sessionId == self.sessionId and self.isPlaying == true then
-			return
-		end
-
-		if self.isPlaying == true then
-			self:StopSession(self.RESULT_REASON_RESTART)
-		end
-
-		self:BeginSession(tLaunchContext)
+	method boolean OpenLobby(string miniGameId)
+		-- 공통 프리셋과 capability 검증 후 승인된 실제 로비 표시
+		if _MiniGameManager:IsNightMarketMiniGameUiBusy() then return false end
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil then return false end
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(preset.gameKind)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if tBehavior == nil or type(tBehavior.openLobby) ~= "function"
+			or not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then return false end
+		tBehavior.openLobby()
+		return true
 	end
 
 	@ExecSpace("ClientOnly")
-	method any SplitParts(string text)
-		-- 구분자 "|"로 문자열을 분해한다.
-		local parts = {}
-		local separator = self.LAUNCH_FIELD_SEPARATOR
-		local pattern = "([^" .. separator .. "]*)" .. separator
-		for value in string.gmatch(text .. separator, pattern) do
-			parts[#parts + 1] = value
+	method boolean OpenDebugLobby(string miniGameId, integer testMesoBalance)
+		-- Maker 전용 공통 진입점에서 프리셋과 View 계약 검증 후 로비 초기화
+		if not Environment:IsMakerPlay() or _MiniGameDebugLogic == nil or not _MiniGameDebugLogic.isDebugMode then return false end
+		if self.isPlaying then
+			log_warning("[MiniGamePlay] 진행 중에는 디버그 로비 전환 불가")
+			return false
 		end
-
-		return parts
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil then
+			log_warning("[MiniGamePlay] 디버그 프리셋 누락 game=" .. tostring(miniGameId))
+			return false
+		end
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(preset.gameKind)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if tBehavior == nil or type(tBehavior.openDebugLobby) ~= "function" then
+			log_warning("[MiniGamePlay] 디버그 로비 처리기 누락 game=" .. miniGameId)
+			return false
+		end
+		if not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then
+			log_warning("[MiniGamePlay] 디버그 UI 연결 실패 game=" .. miniGameId .. " presentation=" .. presentationId)
+			return false
+		end
+		tBehavior.openDebugLobby(math.max(0, testMesoBalance))
+		return true
 	end
 
 	@ExecSpace("ClientOnly")
 	method void BeginSession(any tLaunchContext)
-		-- 프리셋을 조회하고 입력 모듈을 시작해 미니게임을 진행한다.
-		if tLaunchContext == nil then
+		-- 서버 시작 정보로 Model 생성 후 표시 Context를 선택한 View에 전달
+		if tLaunchContext == nil or tLaunchContext.sessionId == "" or tLaunchContext.miniGameId == "" then
 			return
 		end
 		-- 이미 처리한 서버 실행 통지의 중복 시작 방지
@@ -191,6 +106,16 @@ script MiniGamePlayLogic extends Logic
 			return
 		end
 
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(foundPreset.gameKind)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(foundPreset.presentations)
+		if tBehavior == nil or _MiniGameUIRouter:CanPresent(presentationId, foundPreset.gameKind) == false then
+			log_warning("[MiniGamePresenter] 처리기 또는 필수 View 기능 누락")
+			_MiniGameManager:RequestCancelMiniGame(tLaunchContext.sessionId)
+			return
+		end
+		self:RetainPresentationBehavior(nil)
+		self.tBehavior = tBehavior
+		if tBehavior.reset ~= nil then tBehavior.reset() end
 		self.sessionId = tLaunchContext.sessionId
 		self.miniGameId = tLaunchContext.miniGameId
 		self.contextType = tLaunchContext.contextType
@@ -199,156 +124,83 @@ script MiniGamePlayLogic extends Logic
 		self.betAmount = tLaunchContext.betAmount or 0
 		self.balance = tLaunchContext.balance or 0
 		self.startMapName = self:GetCurrentMapName()
-		self.preset = foundPreset
-		self.presentationId = _MiniGameUIRouter:ResolvePresentationId(foundPreset.presentations, self.contextType)
-		self.inputType = foundPreset.inputType
+		self.presentationMapName = self.startMapName
+		self.cancelOnMapChange = tLaunchContext.cancelOnMapChange ~= false
+		self.presentationId = presentationId
+		self.tModel = MiniGameClientModel()
+		self.tModel:Initialize(foundPreset, tLaunchContext)
 		self.inputReady = false
-		self.pendingCommandLaunch = _MiniGameCommandFlow:ParseLaunchPayload(
-			tLaunchContext.commandPayload,
-			tLaunchContext.duration)
-		self.commandFlowState = _MiniGameCommandFlow:CreateState(
-			self.inputType,
-			tLaunchContext.contextType,
-			self.pendingCommandLaunch,
-			foundPreset.objectives
-		)
-		self.commandSequence = self.commandFlowState.sequence
-		self.objectives = self.commandFlowState.objectives
-
-		self:ResetTrackers()
-		self.ruleState = _MiniGameRuleEngine:CreateState(foundPreset)
-		if self.inputType == _EMiniGameInputType.Command and #self.commandSequence > 0 then
-			_MiniGameRuleEngine:SetObjectiveTargetOverride(self.ruleState, "Sequence", #self.commandSequence)
-		end
-		self:SetupTimeAndGauge(foundPreset)
-		if self.commandFlowState.duration > 0 then
-			_MiniGameRuleEngine:SetCountdownDuration(self.ruleState, self.commandFlowState.duration)
-			self.timeDuration = self.commandFlowState.duration
-			self.timeRemaining = self.commandFlowState.duration
-		end
-
-		self.inputEventHandler = _MiniGameInputHubLogic:ConnectEvent(MiniGameInputEvent, self.OnInputEvent)
 		self.isPlaying = true
-		-- 미니게임 진행 동안 플레이어 이동을 잠근다. (대화/상호작용 잠금이 먼저 풀려도 세션이 끝날 때까지 유지)
+		if tBehavior.usesInputHub then
+			self.inputEventHandler = _MiniGameInputHubLogic:ConnectEvent(MiniGameInputEvent, self.OnInputEvent)
+		end
 		self:HoldMovementGate()
 
 		local config = self:BuildInputConfig(foundPreset)
-		if self.inputType == _EMiniGameInputType.Command then
-			-- 랜덤 생성된 시퀀스로 입력 모듈 설정을 덮어쓴다.
-			config.sequenceNames = self.commandSequence
-			config.sequence = self:ResolveKeySequence(self.commandSequence)
-		elseif self.inputType == _EMiniGameInputType.Timing then
-			-- 최대 시도(스페이스 입력) 횟수 = 클리어 목표(명중 횟수)의 2배
-			local timingGoal = self:GetGoalCount()
-			if timingGoal > 0 then
-				config.maxAttempts = timingGoal * 2
-			end
-		end
+		if tBehavior.configureInput ~= nil then tBehavior.configureInput(self, config) end
+		self.activeInputConfig = config
 		local skin = foundPreset.skin or {}
-		local instruction = skin.instruction or ""
-		if self.inputType == _EMiniGameInputType.Drag then
-			-- 드래그 목표 일치율을 안내 문구에 함께 표시한다.
-			local targetPercent = math.floor(self:GetObjectiveTarget(_EMiniGameObjectiveType.ShapeMatch) * 100)
-			if targetPercent > 0 then
-				instruction = instruction .. " (목표 " .. tostring(targetPercent) .. "% 이상 일치)"
-			end
-		elseif self.inputType == _EMiniGameInputType.Timing then
-			-- 타이밍 목표 명중 횟수를 안내 문구에 함께 표시한다.
-			local goalHits = self:GetGoalCount()
-			if goalHits > 0 then
-				instruction = instruction .. " (목표 " .. tostring(goalHits) .. "회 명중)"
-			end
-		end
-		-- 프리셋이 선택한 프레젠테이션을 지정하고 숨김 상태로 초기화
+		local instruction = _LocaleTextUtil:GetText(skin.instructionKey or "")
+		if tBehavior.buildInstruction ~= nil then instruction = tBehavior.buildInstruction(self, instruction) end
 		_MiniGameUIRouter:SetPresentation(self.presentationId)
-		_MiniGameUIRouter:OpenForSession(skin.title or tLaunchContext.miniGameId, instruction, self.presentationActorId)
-
-		-- 입력 타입별 시각 가이드 스테이지를 구성한다. (Mash는 게이지 사용 여부로 연타/게이지 스테이지 분기)
-		local inputConfig = foundPreset.inputConfig or {}
-		local commandVisualReady = true
-		if self.inputType == _EMiniGameInputType.Timing then
-			_MiniGameUIRouter:SetupTiming(inputConfig.timings, self.timeDuration)
-			-- 시도 횟수 초기 표시 [max / max] (컨텍스트/스테이지 셋업이 끝난 뒤라 올바른 스킨으로 전달됨)
-			local timingMaxAttempts = self:GetGoalCount() * 2
-			if timingMaxAttempts > 0 then
-				_MiniGameUIRouter:UpdateTimingAttempts(timingMaxAttempts, timingMaxAttempts)
-			end
-		elseif self.inputType == _EMiniGameInputType.Command then
-			commandVisualReady = _MiniGameUIRouter:SetupCommand(self.commandSequence)
-		elseif self.inputType == _EMiniGameInputType.Drag then
-			self:SetupDragShape()
+		local tViewContext = MiniGameViewContext()
+		tViewContext.sessionId = self.sessionId
+		tViewContext.gameKind = foundPreset.gameKind
+		tViewContext.inputType = self.tModel.inputType
+		tViewContext.title = _LocaleTextUtil:GetText(skin.titleKey or "")
+		tViewContext.instruction = instruction
+		tViewContext.presentationActorId = self.presentationActorId
+		tViewContext.betAmount = self.betAmount
+		tViewContext.balance = self.balance
+		tViewContext.mesoBalance = tLaunchContext.mesoBalance
+		tViewContext.coinBalance = tLaunchContext.coinBalance
+		tViewContext.isDebug = tLaunchContext.isDebug
+		tViewContext.entryCurrency = tLaunchContext.entryCurrency
+		tViewContext.entryAmount = tLaunchContext.entryAmount
+		_MiniGameUIRouter:OpenForSession(tViewContext)
+		if tBehavior.prepareView ~= nil then tBehavior.prepareView(self, tViewContext) end
+		if tBehavior.isViewReady ~= nil and tBehavior.isViewReady(self) == false then
+			self.pendingPresentationSessionId = self.sessionId
+		else
+			self:StartSessionPresentation(self.sessionId, config)
 		end
-
-		-- UI 구성이 끝난 뒤 입력 구독 시작
-		if self.inputType ~= _EMiniGameInputType.Command or #self.commandSequence > 0 then
-			if self.inputType == _EMiniGameInputType.Command and commandVisualReady == false then
-				self.pendingPresentationSessionId = tLaunchContext.sessionId
-				self.pendingPresentationInputConfig = config
-			else
-				self:StartSessionPresentation(tLaunchContext.sessionId, config)
-			end
-		end
-
-		self.pendingCommandLaunch = nil
-
+		log("[MiniGamePresenter] 시작 kind=" .. foundPreset.gameKind .. " view=" .. self.presentationId)
 	end
 
 	@ExecSpace("ClientOnly")
 	method void CompletePendingPresentation()
-		-- 화살표 리소스 준비 완료 뒤 대기 세션 활성화
-		if self.pendingPresentationSessionId == "" then
-			return
-		end
-
-		if _MiniGameUIRouter:IsCommandVisualReady() == false then
-			return
-		end
-
+		-- 선택한 처리기의 View 준비 완료 후 세션 활성화
+		if self.pendingPresentationSessionId == "" then return end
+		if self.tBehavior.isViewReady ~= nil and self.tBehavior.isViewReady(self) == false then return end
 		local targetSessionId = self.pendingPresentationSessionId
-		local inputConfig = self.pendingPresentationInputConfig
 		self.pendingPresentationSessionId = ""
-		self.pendingPresentationInputConfig = {}
-		self:StartSessionPresentation(targetSessionId, inputConfig)
+		self:StartSessionPresentation(targetSessionId, self.activeInputConfig)
 	end
 
 	@ExecSpace("ClientOnly")
 	method void StartSessionPresentation(string targetSessionId, any inputConfig)
-		-- 아이콘 구성 완료 후 스테이지·입력·세션 활성화를 한 번에 처리
-		if self.isPlaying == false or self.sessionId ~= targetSessionId then
+		-- 처리기별 활성화 절차 후 공통 입력과 화면 표시
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.startPresentation ~= nil and self.tBehavior.startPresentation(self, targetSessionId, inputConfig) == true then
 			return
 		end
-
-		if self.inputType == _EMiniGameInputType.Selection then
-			_MiniGameUIRouter:SelectStage(self.inputType, false)
-			self.inputReady = true
-			_MiniGameUIRouter:ShowActiveSession()
-			return
-		end
-
-		if _MiniGameCommandFlow:IsAwaitingActivation(self.commandFlowState) == true then
-			if _MiniGameCommandFlow:TryMarkInputReadyRequested(self.commandFlowState) == true then
+		self:GetViewCapability(_MiniGameViewRegistry.CAP_STAGE):SelectStage(self.tModel.inputType, self.tModel.useGauge)
+		if self.tBehavior.usesInputHub then
+			if _MiniGameInputHubLogic:IsRunning() == false then
 				_MiniGameInputHubLogic:StartInputs(targetSessionId, self:BuildInputChannelConfigs(inputConfig))
-				_MiniGameManager:RequestInputReady(targetSessionId)
 			end
-			return
+			_MiniGameInputHubLogic:EnableInputs()
 		end
-
-		_MiniGameUIRouter:SelectStage(self.inputType, self.useGauge)
-		if _MiniGameInputHubLogic:IsRunning() == false then
-			_MiniGameInputHubLogic:StartInputs(targetSessionId, self:BuildInputChannelConfigs(inputConfig))
-		end
-		_MiniGameInputHubLogic:EnableInputs()
 		self:CompleteInputReady(targetSessionId)
 	end
 
 	@ExecSpace("ClientOnly")
 	method void HandleSessionActivated(string targetSessionId)
-		if self.isPlaying == false or self.sessionId ~= targetSessionId then
-			return
-		end
-
-		_MiniGameCommandFlow:Activate(self.commandFlowState)
-		self:StartSessionPresentation(targetSessionId, self.pendingPresentationInputConfig)
+		-- 활성 세션의 서버 승인만 처리기에 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.activate == nil then return end
+		self.tBehavior.activate(self)
+		self:StartSessionPresentation(targetSessionId, self.activeInputConfig)
 	end
 
 	@ExecSpace("ClientOnly")
@@ -364,107 +216,15 @@ script MiniGamePlayLogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method void ResetTrackers()
-		-- 진행 추적값을 초기화한다.
-		self.successCount = 0
-		self.hitCount = 0
-		self.missCount = 0
-		self.commandIndex = 0
-		self.shapeRatio = 0
-		self.lastProgress = 0
-		self.lastAccuracy = ""
-		self.elapsed = 0
-	end
-
-	@ExecSpace("ClientOnly")
 	method void ApplyCommandFeedback(string targetSessionId, any tFeedback)
-		-- 서버 피드백 처리 결과를 화면과 세션 종료에 반영
-		if self.isPlaying == false or self.sessionId ~= targetSessionId or tFeedback == nil then
-			return
-		end
-		tFeedback.localInputSequence = _CommandInputLogic.inputSequence
-		local feedback = _MiniGameCommandFlow:ApplyFeedback(
-			self.commandFlowState,
-			tFeedback
-		)
-		if feedback.accepted ~= true then
-			return
-		end
-
-		self.commandIndex = feedback.commandIndex
-		self.lastProgress = feedback.progress
-		if feedback.terminal == true then
-			self:FinishSessionFromServer(feedback.success, feedback.reason)
-			return
-		end
-
-		_MiniGameUIRouter:UpdateCommandProgress(self.commandIndex)
-		if feedback.showError == true then
-			_MiniGameUIRouter:ShowCommandError()
-			self:PushHud()
-			return
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method void SetupTimeAndGauge(any presetData)
-		-- RuleEngine 시간 상태를 기존 HUD·입력 호환 프로퍼티에 반영
-		self.timeMode = presetData.timeMode or _EMiniGameTimeMode.None
-		self.timeRemaining = 0
-		self.timeDuration = 0
-		self.useGauge = false
-		self.gauge = 0
-		self.gaugePerInput = 0
-		self.gaugeDrainPerSecond = 0
-		self.gaugeFailAt = 0
-
-		local inputConfig = presetData.inputConfig or {}
-		local timeState = self.ruleState ~= nil and self.ruleState.timeState or nil
-		if timeState ~= nil then
-			self.timeRemaining = timeState.timeRemaining or 0
-			self.timeDuration = timeState.duration or 0
-			self.gauge = timeState.gauge or 0
-			self.gaugeDrainPerSecond = timeState.drainPerSecond or 0
-			self.gaugeFailAt = timeState.failAt or 0
-			self.useGauge = timeState.mode == "GaugeDrain"
-		end
-
-		-- GaugeFill 목표가 있으면 입력으로 게이지를 채운다.
-		self.gaugeTarget = 100
-		if self:HasObjective(_EMiniGameObjectiveType.GaugeFill) == true then
-			self.useGauge = true
-			self.gaugePerInput = inputConfig.gaugePerInput or 0
-			self.gaugeTarget = self:GetObjectiveTarget(_EMiniGameObjectiveType.GaugeFill)
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method number GetObjectiveTarget(integer objectiveType)
-		-- 특정 목표 타입의 target 값을 반환한다. (없으면 0)
-		for _, objective in ipairs(self.objectives) do
-			if objective.type == objectiveType then
-				return objective.target or 0
-			end
-		end
-
-		return 0
-	end
-
-	@ExecSpace("ClientOnly")
-	method boolean HasObjective(integer objectiveType)
-		-- 특정 목표 타입이 포함되어 있는지 반환한다.
-		for _, objective in ipairs(self.objectives) do
-			if objective.type == objectiveType then
-				return true
-			end
-		end
-
-		return false
+		-- 기존 RPC 진입점을 유지하고 처리기에 서버 피드백 위임
+		if self.isPlaying == false or self.sessionId ~= targetSessionId or tFeedback == nil then return end
+		if self.tBehavior.commandFeedback ~= nil then self.tBehavior.commandFeedback(self, tFeedback) end
 	end
 
 	@ExecSpace("ClientOnly")
 	method any BuildInputConfig(any presetData)
-		-- 프리셋 입력 설정을 런타임 입력 모듈용 설정으로 변환한다. (키 이름 -> KeyboardKey 해석)
+		-- 프리셋을 런타임 입력 설정으로 변환, 키 이름 [->] KeyboardKey 해석
 		local source = presetData.inputConfig or {}
 		local config = {}
 
@@ -505,7 +265,7 @@ script MiniGamePlayLogic extends Logic
 	method any BuildInputChannelConfigs(any primaryRuntimeConfig)
 		-- 프리셋 채널 설정에 현재 게임의 동적 입력값을 병합
 		local channels = {}
-		local sourceChannels = self.preset ~= nil and self.preset.inputChannels or nil
+		local sourceChannels = self.tModel.preset ~= nil and self.tModel.preset.inputChannels or nil
 		if sourceChannels == nil then
 			return channels
 		end
@@ -532,7 +292,7 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method any ResolveKey(string keyName)
-		-- 키 이름 문자열을 KeyboardKey 값으로 변환한다.
+		-- 키 이름을 KeyboardKey 값으로 변환
 		if keyName == "Space" then
 			return KeyboardKey.Space
 		elseif keyName == self.COMMAND_KEY_UP then
@@ -552,7 +312,7 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method any ResolveKeySequence(any keyNames)
-		-- 키 이름 배열을 KeyboardKey 배열로 변환한다.
+		-- 키 이름 배열을 KeyboardKey 배열로 변환
 		local result = {}
 		for i = 1, #keyNames do
 			result[i] = self:ResolveKey(keyNames[i])
@@ -563,97 +323,29 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void OnInputEvent(any event)
-		-- 입력 모듈이 발행한 이벤트로 진행 상황을 갱신하고 종료 조건을 판정한다.
-		if self.isPlaying == false then
-			return
-		end
-
-		if event.sessionId ~= self.sessionId then
-			return
-		end
-
-		-- 드래그: 화면 좌표를 영역 로컬로 변환해 일치율을 누적하고 잉크 궤적을 표시한다.
-		if self.inputType == _EMiniGameInputType.Drag and event.action == _EMiniGameInputAction.Input then
-			local localPos = _MiniGameUIRouter:ScreenToDragLocal(event.pointX, event.pointY)
-			if localPos ~= nil then
-				self:RegisterDragPoint(localPos.x, localPos.y)
-				_MiniGameUIRouter:AddInkLocalPoint(localPos.x, localPos.y)
+		-- 게임별 전후 처리 사이에서 공통 Model 입력 적용
+		if self.isPlaying == false or self.inputReady == false or event.sessionId ~= self.sessionId then return end
+		if self.tModel.gameKind == _EMiniGameKind.RAPID_PRESS_COUNT
+			or self.tModel.gameKind == _EMiniGameKind.GAUGE_MAINTENANCE then
+			if event.action == _EMiniGameInputAction.Input then
+				self.tModel.tInputProof:AddSample(self.tModel.elapsed, 0, 0)
+			end
+		elseif self.tModel.gameKind == _EMiniGameKind.TIMING_ACCURACY then
+			if (event.action == _EMiniGameInputAction.Hit or event.action == _EMiniGameInputAction.Miss)
+				and event.keyName ~= nil and event.keyName ~= "" then
+				self.tModel.tInputProof:AddSample(_TimingInputLogic.elapsed, 0, 0)
 			end
 		end
-
-		-- 누적 성공/실패 수치를 단조 증가로 반영한다.
-		if event.successCount > self.successCount then
-			self.successCount = event.successCount
-		end
-		if event.missCount > self.missCount then
-			self.missCount = event.missCount
-		end
-		if event.action == _EMiniGameInputAction.Hit then
-			self.hitCount = self.hitCount + 1
-		end
-
-		-- 커맨드: 정답이면 진행 인덱스 갱신 + 정답 강조 이펙트, 오답이면 리셋 + 오답 이펙트 (요구3)
-		if self.inputType == _EMiniGameInputType.Command then
-			if event.action == _EMiniGameInputAction.Hit then
-				self.commandIndex = event.successCount
-				self.lastProgress = event.progress
-				_MiniGameUIRouter:PlayCommandHit(self.commandIndex)
-			elseif event.action == _EMiniGameInputAction.Miss then
-				self.commandIndex = 0
-				self.lastProgress = event.progress
-				_MiniGameUIRouter:ShowCommandError()
-			elseif event.action == _EMiniGameInputAction.Progress then
-				self.commandIndex = event.successCount
-				self.lastProgress = event.progress
-			end
-		end
-
-		-- 타이밍: 정답(타이밍 일치) 입력 시 커서 위치에 작은 성공 이펙트를 띄운다.
-		if self.inputType == _EMiniGameInputType.Timing and event.action == _EMiniGameInputAction.Hit then
-			_MiniGameUIRouter:PlayTimingHit()
-		end
-
-		-- 타이밍: 헛입력(miss) 시 커서 위치에 작은 실패 이펙트를 띄운다.
-		if self.inputType == _EMiniGameInputType.Timing and event.action == _EMiniGameInputAction.Miss then
-			_MiniGameUIRouter:PlayTimingMiss()
-		end
-
-		-- 타이밍: 남은 시도 횟수 표시를 갱신한다. (Hit/Miss/Complete 이벤트가 attempt 정보를 실어 보냄)
-		if self.inputType == _EMiniGameInputType.Timing and event.maxAttempts > 0 then
-			_MiniGameUIRouter:UpdateTimingAttempts(event.attemptsRemaining, event.maxAttempts)
-		end
-
-		-- 연타(Mash): 입력마다 내 아바타를 기본↔엎드리기로 토글 (요구2)
-		if self.inputType == _EMiniGameInputType.Mash and event.action == _EMiniGameInputAction.Input then
-			_MiniGameUIRouter:PlayMashPose()
-			-- 게이지 스테이지: 입력마다 응원봉을 흔든다(연타 포즈와 분리된 게이지 전용 연출)
-			if self.useGauge == true then
-				_MiniGameUIRouter:PlayGaugeSway()
-			end
-		end
-		if event.accuracy ~= nil and event.accuracy ~= "" then
-			self.lastAccuracy = event.accuracy
-		end
-
-		-- 게이지 채우기: 마름모 입력마다 게이지를 증가시킨다.
-		if self.useGauge == true and self.gaugePerInput > 0 and event.action == _EMiniGameInputAction.Input then
-			self.gauge = self.gauge + self.gaugePerInput
-		end
-
+		if self.tBehavior.beforeInput ~= nil then self.tBehavior.beforeInput(self, event) end
+		self.tModel:ApplyInput(event)
+		if self.tBehavior.afterInput ~= nil then self.tBehavior.afterInput(self, event) end
 		if event.isTerminal == true then
-			-- 입력 모듈이 스스로 종료한 경우: 목표 충족 여부로 성공을 판정한다.
-			local met = self:CheckObjectives()
-			self:FinishSessionLocally(met, self.RESULT_REASON_COMPLETE)
+			self:FinishSessionLocally(self.tModel:CheckObjectives(), self.RESULT_REASON_COMPLETE)
 			return
 		end
-
-		-- 진행 중 목표가 모두 충족되면 즉시 성공 처리한다.
-		-- 단, 드래그는 그리기가 끝날 때(터치 종료/시간초과) 판정하므로 즉시 종료하지 않는다.
-		local met = self:CheckObjectives()
+		local met = self.tModel:CheckObjectives()
 		self:PushHud()
-		if met == true
-			and self.inputType ~= _EMiniGameInputType.Drag
-			and self.inputType ~= _EMiniGameInputType.Command then
+		if met and self.tModel:CanFinishOnObjectives() then
 			self:FinishSessionLocally(true, self.RESULT_REASON_OBJECTIVE)
 		end
 	end
@@ -662,13 +354,19 @@ script MiniGamePlayLogic extends Logic
 	method void OnUpdate(number delta)
 		-- RuleEngine 시간 상태를 진행하고 종료 조건을 판정
 		if self.isPlaying == false then
+			local mapName = self:GetCurrentMapName()
+			if self.presentationMapName ~= "" and mapName ~= "" and mapName ~= self.presentationMapName then
+				self:RetainPresentationBehavior(nil)
+				_MiniGameUIRouter:CloseActive()
+			end
 			return
 		end
 
 		self:CompletePendingPresentation()
+		if not self.isPlaying or self.tModel == nil then return end
 
 		local currentMapName = self:GetCurrentMapName()
-		if self.startMapName ~= ""
+		if self.cancelOnMapChange and self.startMapName ~= ""
 			and currentMapName ~= ""
 			and currentMapName ~= self.startMapName then
 			local leavingSessionId = self.sessionId
@@ -677,84 +375,49 @@ script MiniGamePlayLogic extends Logic
 			return
 		end
 
+		if self.awaitingResult then
+			self.resultWaitElapsed += delta
+			if self.resultWaitElapsed >= self.RESULT_RESPONSE_TIMEOUT_SECONDS then
+				_MiniGameManager:RequestCancelMiniGame(self.sessionId)
+				self:StopSession(self.RESULT_REASON_TIMEOUT)
+			end
+			return
+		end
+
 		if self.inputReady == false then
 			return
 		end
 
-		self:SyncRuleStateFromRuntime()
-		_MiniGameRuleEngine:Update(self.preset, self.ruleState, delta)
-		self:ApplyRuleStateToRuntime()
-		local isTimeExpired = _MiniGameRuleEngine:IsTimeExpired(self.ruleState)
-
-		if self.timeMode == _EMiniGameTimeMode.Countdown then
-			if isTimeExpired == true then
-				if self.inputType == _EMiniGameInputType.Command then
-					self.timeRemaining = 0
-					self:PushHud()
-					return
-				end
-				local met = self:CheckObjectives()
-				if met == true then
-					self:FinishSessionLocally(true, self.RESULT_REASON_COMPLETE)
-				else
-					self:FinishSessionLocally(false, self.RESULT_REASON_TIMEOUT)
-				end
-				return
-			end
-		elseif self.timeMode == _EMiniGameTimeMode.GaugeDrain then
-			if isTimeExpired == true then
-				self.gauge = self.gaugeFailAt
-				self:FinishSessionLocally(false, "drain")
-				return
-			end
+		local tResult = self.tModel:Update(delta)
+		if tResult ~= nil then
+			self:FinishWithResult(tResult)
+			return
 		end
-
-		-- 게이지 채우기 등 시간 외 충족 조건을 매 프레임 점검한다.
-		-- 드래그는 그리기가 끝날 때 판정하므로 진행 중 즉시 종료하지 않는다.
-		local met = self:CheckObjectives()
 		self:PushHud()
-		if met == true
-			and self.inputType ~= _EMiniGameInputType.Drag
-			and self.inputType ~= _EMiniGameInputType.Command then
-			self:FinishSessionLocally(true, self.RESULT_REASON_OBJECTIVE)
-		end
 	end
 
 	@ExecSpace("ClientOnly")
 	method void PushHud()
-		-- 현재 진행 상태를 UI에 전달한다. (UI 미구성 시 안전하게 무시됨)
-		-- 게이지 스테이지(useGauge)에서는 타이머 표시를 끈다.
-		local tHudState = MiniGameHudState()
-		tHudState.progress = self.lastProgress
-		tHudState.timeRemaining = self.timeRemaining
-		tHudState.showTimer = (self.timeMode == _EMiniGameTimeMode.Countdown) and (self.useGauge == false)
-		tHudState.gaugeRatio = self:GetGaugeRatio()
-		tHudState.useGauge = self.useGauge
-		tHudState.displayText = self:GetHeadlineText()
-		_MiniGameUIRouter:UpdateHud(tHudState)
-
-		if self.inputType == _EMiniGameInputType.Timing then
-			_MiniGameUIRouter:UpdateTimingCursor(self.elapsed, self.timeDuration)
-		elseif self.inputType == _EMiniGameInputType.Command then
-			_MiniGameUIRouter:UpdateCommandProgress(self.commandIndex)
+		-- 공통 상태 표시와 게임별 추가 연출 갱신
+		local view = self:GetViewCapability(_MiniGameViewRegistry.CAP_HUD)
+		if view ~= nil then
+			local tHudState = MiniGameHudState()
+			tHudState.progress = self.tModel.lastProgress
+			tHudState.timeRemaining = self.tModel.timeRemaining
+			tHudState.showTimer = self.tModel.timeMode == _EMiniGameTimeMode.Countdown and self.tModel.useGauge == false
+			tHudState.gaugeRatio = self.tModel:GetGaugeRatio()
+			tHudState.useGauge = self.tModel.useGauge
+			tHudState.displayText = self.tModel:GetHeadlineText()
+			view:UpdateHud(tHudState)
 		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method number GetGaugeRatio()
-		-- 게이지 표시 비율(0~1)을 반환한다.
-		if self.gaugeTarget <= 0 then
-			return 0
-		end
-
-		return self.gauge / self.gaugeTarget
+		if self.tBehavior.updateView ~= nil then self.tBehavior.updateView(self) end
 	end
 
 	@ExecSpace("ClientOnly")
 	method void FinishSelectionSessionFromServer(string targetSessionId)
 		-- 서버 추첨 결과 표시를 유지한 채 로컬 세션과 이동 잠금 정리
 		if self.isPlaying == false
-			or self.inputType ~= _EMiniGameInputType.Selection
+			or self.tBehavior.acceptsSelection == false
 			or self.sessionId ~= targetSessionId then
 			return
 		end
@@ -765,246 +428,10 @@ script MiniGamePlayLogic extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method boolean CheckObjectives()
-		-- 통합 RuleEngine을 통한 필수 Objective와 평균 진행률 계산
-		self:SyncRuleStateFromRuntime()
-		local summary = _MiniGameRuleEngine:EvaluateObjectives(self.preset, self.ruleState)
-		self.lastProgress = summary ~= nil and summary.progress or 0
-		return summary ~= nil and summary.allRequiredMet == true
-	end
-
-	method void SyncRuleStateFromRuntime()
-		-- 기존 입력·화면 호환 프로퍼티를 통합 규칙 상태에 동기화
-		if self.ruleState == nil then
-			return
-		end
-
-		_MiniGameRuleEngine:SyncRuntimeState(self.ruleState, {
-			successCount = self.successCount,
-			hitCount = self.hitCount,
-			missCount = self.missCount,
-			gauge = self.gauge,
-			shapeRatio = self.shapeRatio,
-			accuracyScore = self.shapeRatio,
-			lastAccuracy = self.lastAccuracy
-		})
-	end
-
-	method void ApplyRuleStateToRuntime()
-		-- 통합 규칙 상태를 기존 HUD·입력 호환 프로퍼티에 동기화
-		if self.ruleState == nil or self.ruleState.timeState == nil then
-			return
-		end
-
-		local timeState = self.ruleState.timeState
-		self.elapsed = timeState.elapsed or 0
-		self.timeRemaining = timeState.timeRemaining or 0
-		self.gauge = timeState.gauge or self.gauge
-	end
-
-	@ExecSpace("ClientOnly")
-	method number GetObjectiveCurrent(integer objectiveType)
-		-- 목표 타입별 현재 수치를 반환한다.
-		if objectiveType == _EMiniGameObjectiveType.Count then
-			return self.successCount
-		elseif objectiveType == _EMiniGameObjectiveType.TimingHit then
-			return self.hitCount
-		elseif objectiveType == _EMiniGameObjectiveType.Sequence then
-			return self.successCount
-		elseif objectiveType == _EMiniGameObjectiveType.GaugeFill then
-			return self.gauge
-		elseif objectiveType == _EMiniGameObjectiveType.ShapeMatch then
-			return self.shapeRatio
-		end
-
-		return 0
-	end
-
-	@ExecSpace("ClientOnly")
-	method void SetupDragShape()
-		-- MiniGameTable의 정규화 좌표(shapePoints)를 드래그 영역 로컬 좌표로 변환해
-		-- 판정 체크포인트로 쓰고, 동일 좌표로 가이드 점을 동적 생성한다. (시각 = 판정)
-		self.shapeMatchTarget = 0.8
-		self.dragTolerance = 18
-		local shapePoints = nil
-		for _, objective in ipairs(self.objectives) do
-			if objective.type == _EMiniGameObjectiveType.ShapeMatch then
-				self.shapeMatchTarget = objective.target or 0.8
-				self.dragTolerance = objective.tolerance or 18
-				shapePoints = objective.shapePoints
-			end
-		end
-
-		self.checkpoints = {}
-		self.checkpointHit = {}
-		if shapePoints ~= nil then
-			for i = 1, #shapePoints do
-				local p = shapePoints[i]
-				-- 정규화(0~1, 중심 0.5) -> DragArea 로컬 좌표 (DragArea 중심이 원점)
-				self.checkpoints[i] = { x = (p.x - 0.5) * self.dotAreaScale, y = (p.y - 0.5) * self.dotAreaScale }
-				self.checkpointHit[i] = false
-			end
-		end
-
-		self.coveredSectorCount = 0
-		self.shapeRatio = 0
-
-		-- 같은 좌표로 가이드 점을 그린다. (잉크/이전 점은 모두 초기화)
-		_MiniGameUIRouter:BuildDragGuide(self.checkpoints)
-	end
-
-	@ExecSpace("ClientOnly")
-	method void RegisterDragPoint(number x, number y)
-		-- 그린 점에서 가장 가까운 체크포인트가 허용 거리(tolerance) 안일 때만 그 1개를 충족 처리한다.
-		-- → 선에서 벗어난(안쪽/바깥/가운데) 입력은 무효, 이웃 번짐 없음. 시각 가이드와 동일 좌표 사용.
-		if self.checkpoints == nil then
-			return
-		end
-
-		local bestIdx = 0
-		local bestSq = 0
-		for i = 1, #self.checkpoints do
-			local cp = self.checkpoints[i]
-			local dx = x - cp.x
-			local dy = y - cp.y
-			local sq = dx * dx + dy * dy
-			if bestIdx == 0 or sq < bestSq then
-				bestIdx = i
-				bestSq = sq
-			end
-		end
-
-		-- 가장 가까운 체크포인트도 허용 거리 밖이면 선 위가 아니므로 무시
-		if bestIdx > 0 and bestSq > (self.dragTolerance * self.dragTolerance) then
-			return
-		end
-
-		if bestIdx > 0 and self.checkpointHit[bestIdx] == false then
-			self.checkpointHit[bestIdx] = true
-			self.coveredSectorCount = self.coveredSectorCount + 1
-		end
-
-		if #self.checkpoints > 0 then
-			self.shapeRatio = self.coveredSectorCount / #self.checkpoints
-		end
-	end
-
-	@ExecSpace("ClientOnly")
-	method integer GetMatchPercent()
-		-- 결과/HUD에 표시할 핵심 달성률(%)을 반환한다.
-		if self.inputType == _EMiniGameInputType.Drag then
-			return math.floor(self.shapeRatio * 100)
-		end
-
-		return math.floor(self.lastProgress * 100)
-	end
-
-	@ExecSpace("ClientOnly")
-	method integer GetGoalCount()
-		-- 카운트형 목표(횟수)면 목표 횟수를, 아니면 0을 반환한다.
-		for _, objective in ipairs(self.objectives) do
-			if objective.type == _EMiniGameObjectiveType.Count
-				or objective.type == _EMiniGameObjectiveType.TimingHit
-				or objective.type == _EMiniGameObjectiveType.Sequence then
-				return objective.target or 0
-			end
-		end
-
-		return 0
-	end
-
-	@ExecSpace("ClientOnly")
-	method integer GetCurrentCount()
-		-- 카운트형 목표의 현재 달성 횟수를 반환한다.
-		for _, objective in ipairs(self.objectives) do
-			if objective.type == _EMiniGameObjectiveType.Count
-				or objective.type == _EMiniGameObjectiveType.TimingHit
-				or objective.type == _EMiniGameObjectiveType.Sequence then
-				return math.floor(self:GetObjectiveCurrent(objective.type))
-			end
-		end
-
-		return 0
-	end
-
-	@ExecSpace("ClientOnly")
-	method string GetHeadlineText()
-		-- HUD 진행 표시 문자열. 카운트형은 "현재 / 목표", 그 외는 "%".
-		if self.inputType == _EMiniGameInputType.Drag then
-			return tostring(self:GetMatchPercent()) .. "%"
-		end
-
-		local goal = self:GetGoalCount()
-		if goal > 0 then
-			local current = self:GetCurrentCount()
-			if current > goal then
-				current = goal
-			end
-			return tostring(current) .. " / " .. tostring(goal)
-		end
-
-		return tostring(self:GetMatchPercent()) .. "%"
-	end
-
-	@ExecSpace("ClientOnly")
-	method string GetResultDetail()
-		-- 결과 표시 상세. 드래그는 일치율%, 카운트형은 "현재 / 목표".
-		if self.inputType == _EMiniGameInputType.Drag then
-			return "일치율 " .. tostring(self:GetMatchPercent()) .. "%"
-		end
-
-		return self:GetHeadlineText()
-	end
-
-	@ExecSpace("ClientOnly")
 	method void FinishSessionLocally(boolean success, string reason)
-		-- 진행을 종료하고 입력을 정리한 뒤 서버에 결과를 제출한다.
-		if self.isPlaying == false then
-			return
-		end
-
-		self.isPlaying = false
-		self:DisconnectInput()
-
-		-- 입력 모듈이 아직 실행 중이면 정리한다. (자체 종료한 경우는 이미 멈춰 있음)
-		_MiniGameInputHubLogic:StopInputs(reason)
-
-		self:SyncRuleStateFromRuntime()
-		if self.ruleState ~= nil then
-			self.ruleState.requestedSuccess = success
-		end
-		local resolvedResult = _MiniGameRuleEngine:BuildResult(self.preset, self.ruleState, reason)
-		local score = self:GetMatchPercent()
-		if resolvedResult ~= nil then
-			success = resolvedResult.isSuccess
-			score = resolvedResult.score
-			self.lastProgress = resolvedResult.progress
-			self.lastAccuracy = resolvedResult.accuracy
-		end
-		local submittedSessionId = self.sessionId
-
-		-- UI에 결과를 표시한다. (서버의 activeLaunch 해제는 isPlaying=false라 UI를 닫지 않음)
-		_MiniGameUIRouter:ShowResult(success, reason, self:GetResultDetail())
-
-		log("[MiniGamePlay] 결과 제출 session=" .. submittedSessionId ..
-			" success=" .. tostring(success) ..
-			" score=" .. tostring(score) ..
-			" progress=" .. tostring(self.lastProgress) ..
-			" reason=" .. reason)
-
-		if reason == self.RESULT_REASON_CANCEL then
-			_MiniGameManager:RequestCancelMiniGame(submittedSessionId)
-		else
-			local tResult = MiniGameResultData()
-			tResult.success = success
-			tResult.score = score
-			tResult.progress = self.lastProgress
-			tResult.accuracy = self.lastAccuracy
-			tResult.reason = reason
-			_MiniGameManager:RequestSubmitMiniGameResult(submittedSessionId, tResult:ToPlainTable())
-		end
-
-		self:ClearState()
+		-- 로컬 Model 판정 결과로 종료 요청
+		if self.isPlaying == false or self.tModel == nil then return end
+		self:FinishWithResult(self.tModel:BuildResult(success, reason))
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1017,14 +444,14 @@ script MiniGamePlayLogic extends Logic
 		self.isPlaying = false
 		self:DisconnectInput()
 		_MiniGameInputHubLogic:StopInputs(reason)
-		_MiniGameUIRouter:ShowResult(success, reason, self:GetResultDetail())
+		self:ShowResult(success, reason, self.tModel:GetResultDetail())
 
 		self:ClearState()
 	end
 
 	@ExecSpace("ClientOnly")
 	method void StopSession(string reason)
-		-- 서버가 세션을 종료/취소했을 때 결과 제출 없이 클라이언트 상태만 정리한다.
+		-- 서버 종료, 취소 시 결과 제출 없이 클라이언트 상태 정리
 		if self.isPlaying == false then
 			return
 		end
@@ -1032,6 +459,7 @@ script MiniGamePlayLogic extends Logic
 		self.isPlaying = false
 		self:DisconnectInput()
 		_MiniGameInputHubLogic:StopInputs(reason)
+		_MiniGameUIRouter:CloseActive()
 		self:ClearState()
 
 		log("[MiniGamePlay] 세션 정리 reason=" .. reason)
@@ -1051,7 +479,7 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void DisconnectInput()
-		-- 입력 이벤트 구독을 해제한다.
+		-- 입력 이벤트 구독 해제
 		if self.inputEventHandler ~= nil then
 			_MiniGameInputHubLogic:DisconnectEvent(MiniGameInputEvent, self.inputEventHandler)
 			self.inputEventHandler = nil
@@ -1060,7 +488,7 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void HoldMovementGate()
-		-- 미니게임 진행 동안 로컬 플레이어 이동을 잠근다. (공연은 별도 holder라 중첩돼도 안전)
+		-- 미니게임 진행 중 전용 점유자로 플레이어 이동 잠금
 		if self.gateHeld == true then
 			return
 		end
@@ -1074,7 +502,7 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void ReleaseMovementGate()
-		-- 미니게임이 걸어둔 이동 잠금을 해제한다. (점유 중일 때만 동작해 다른 holder를 건드리지 않음)
+		-- 미니게임이 점유한 이동 잠금만 해제
 		if self.gateHeld == false then
 			return
 		end
@@ -1100,7 +528,11 @@ script MiniGamePlayLogic extends Logic
 
 	@ExecSpace("ClientOnly")
 	method void ClearState()
-		-- 세션 상태를 초기화한다.
+		-- 세션별 Model 참조와 Presenter 수명 상태 정리
+		if self.tBehavior ~= nil and self.tBehavior.endSession ~= nil then self.tBehavior.endSession(self) end
+		self.tRetainedBehavior = self.tBehavior
+		self.tBehavior = nil
+		self.activeInputConfig = {}
 		self:ReleaseMovementGate()
 		self.inputReady = false
 		self.sessionId = ""
@@ -1111,17 +543,11 @@ script MiniGamePlayLogic extends Logic
 		self.betAmount = 0
 		self.balance = 0
 		self.startMapName = ""
-		self.preset = nil
 		self.presentationId = ""
-		self.ruleState = nil
-		self.objectives = {}
-		self.inputType = _EMiniGameInputType.None
-		self.timeMode = _EMiniGameTimeMode.None
-		self.useGauge = false
-		self.commandFlowState = nil
-		self.pendingCommandLaunch = nil
+		self.tModel = nil
 		self.pendingPresentationSessionId = ""
-		self.pendingPresentationInputConfig = {}
+		self.awaitingResult = false
+		self.resultWaitElapsed = 0
 	end
 
 	@ExecSpace("ClientOnly")
@@ -1132,6 +558,133 @@ script MiniGamePlayLogic extends Logic
 		end
 		self:DisconnectInput()
 		self:ReleaseMovementGate()
+		self:RetainPresentationBehavior(nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishWithResult(any tResult)
+		-- 입력 수명 정리 후 View와 서버에 결과 전달
+		if self.isPlaying == false or self.awaitingResult or tResult == nil then return end
+		if self.tModel.tInputProof:SupportsGameKind(self.tModel.gameKind) and tResult.reason ~= self.RESULT_REASON_CANCEL then
+			self.awaitingResult = true
+			self.resultWaitElapsed = 0
+			self.inputReady = false
+			self:DisconnectInput()
+			_MiniGameInputHubLogic:StopInputs(tResult.reason)
+			local tProof = self.tModel.tInputProof
+			tProof.elapsed = self.tModel.elapsed
+			if self.tModel.gameKind == _EMiniGameKind.TIMING_ACCURACY then
+				tProof.elapsed = math.max(tProof.elapsed, _TimingInputLogic.elapsed)
+			end
+			local tPlainResult = tResult:ToPlainTable()
+			tPlainResult.inputProof = tProof:ToPlainTable()
+			_MiniGameManager:RequestSubmitMiniGameResult(self.sessionId, tPlainResult)
+			log("[VRF] 미니게임 서버 결과 대기 session=" .. self.sessionId .. " samples=" .. tostring(#tProof.samples))
+			return
+		end
+		self.isPlaying = false
+		self:DisconnectInput()
+		_MiniGameInputHubLogic:StopInputs(tResult.reason)
+		self:ShowResult(tResult.success, tResult.reason, self.tModel:GetResultDetail())
+		local submittedSessionId = self.sessionId
+		if tResult.reason == self.RESULT_REASON_CANCEL then
+			_MiniGameManager:RequestCancelMiniGame(submittedSessionId)
+		else
+			_MiniGameManager:RequestSubmitMiniGameResult(submittedSessionId, tResult:ToPlainTable())
+		end
+		log("[MiniGamePresenter] 결과 제출 session=" .. submittedSessionId .. " score=" .. tostring(tResult.score))
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleValidatedResult(string targetSessionId, any tResult)
+		-- 일치하는 세션의 서버 수치로 결과 화면 확정
+		if not self.isPlaying or not self.awaitingResult or self.sessionId ~= targetSessionId or tResult == nil then return end
+		self.tModel.successCount = tResult.successCount
+		self.tModel.hitCount = tResult.hitCount
+		self.tModel.shapeRatio = tResult.shapeRatio
+		self.tModel.lastProgress = tResult.progress
+		self.tModel.lastAccuracy = tResult.accuracy
+		log("[VRF] 미니게임 서버 결과 수신 session=" .. targetSessionId .. " score=" .. tostring(tResult.score))
+		self:FinishSessionFromServer(tResult.success, tResult.reason)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleSelectionAccepted(string targetSessionId)
+		-- 현재 세션의 선택 승인만 등록된 처리기로 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.selectionAccepted ~= nil then self.tBehavior.selectionAccepted(self, targetSessionId) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleDrawResult(string targetSessionId, any tDrawResult)
+		-- 현재 세션의 추첨 결과만 등록된 처리기로 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.drawResult ~= nil then self.tBehavior.drawResult(self, targetSessionId, tDrawResult) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleDalgonaRejected(string miniGameId, string reason)
+		-- 시작 전 거절 응답도 프리셋의 처리기로 전달
+		if self.isPlaying and self.miniGameId ~= miniGameId then return end
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil then return end
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(preset.gameKind)
+		if tBehavior ~= nil and tBehavior.requestRejected ~= nil then tBehavior.requestRejected(miniGameId, reason) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestBettingSession(string miniGameId, integer betAmount)
+		-- View의 시작 의도를 기존 서버 RPC로 전달
+		_MiniGameManager:RequestStartBettingMiniGame(miniGameId, betAmount)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestDebugBettingSession(string miniGameId, integer betAmount)
+		-- 가상 잔액 세션 시작 의도를 디버그 서버 RPC로 전달
+		_MiniGameManager:RequestStartDebugBettingMiniGame(miniGameId, betAmount)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SubmitSelection(string targetSessionId, string payload)
+		-- 선택 제출을 지원하는 현재 세션의 배치 의도 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.acceptsSelection == false then return end
+		_MiniGameManager:RequestSubmitSelection(targetSessionId, payload)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestDraw(string targetSessionId)
+		-- 선택 제출을 지원하는 현재 세션의 추첨 의도 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.acceptsSelection == false then return end
+		_MiniGameManager:RequestBlockDraw(targetSessionId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetViewCapability(string capabilityId)
+		-- 현재 View의 기능별 계약 반환
+		return _MiniGameUIRouter:GetCapability(capabilityId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowResult(boolean success, string reason, string detailText)
+		-- 일반 결과 화면을 제공하는 View에 결과 전달
+		local view = self:GetViewCapability(_MiniGameViewRegistry.CAP_RESULT)
+		if view ~= nil then view:ShowResult(success, reason, detailText) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RetainPresentationBehavior(any tBehavior)
+		-- 로비, 결과 화면의 처리기를 다음 세션 또는 월드 종료까지 보관
+		if self.isPlaying then return end
+		local tPreviousBehavior = self.tRetainedBehavior
+		self.tRetainedBehavior = tBehavior
+		self.presentationMapName = tBehavior ~= nil and self:GetCurrentMapName() or ""
+		-- 화면 해제 중 프레임 재진입 전에 보관 참조부터 분리
+		if tPreviousBehavior ~= nil and tPreviousBehavior.reset ~= nil then
+			tPreviousBehavior.reset()
+		end
 	end
 
 end

@@ -1,0 +1,10 @@
+@Struct
+script DiamondWalletResultData
+
+	property boolean success = false
+	property boolean alreadyApplied = false
+	property string reason = ""
+	property string rawData = ""
+	property any tWallet = nil
+
+end

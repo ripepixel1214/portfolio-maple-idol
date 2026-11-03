@@ -83,12 +83,17 @@ script PerformanceMaster extends Logic
 			local performanceId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "performanceId", "")
 			if performanceId ~= "" then
 				local tCue = self:CreateCueRow(dataSet, rowIndex, performanceId)
-				local list = self.tCuesByPerformanceId[performanceId]
-				if list == nil then
-					list = {}
-					self.tCuesByPerformanceId[performanceId] = list
+				-- 이전 데이터가 남아 있어도 공연 미니게임 큐는 로드 대상에서 제외
+				if tCue.cueType ~= _EPerformanceCueType.MiniGame then
+					local list = self.tCuesByPerformanceId[performanceId]
+					if list == nil then
+						list = {}
+						self.tCuesByPerformanceId[performanceId] = list
+					end
+					table.insert(list, tCue)
+				else
+					log("[PerformanceMaster] 폐기된 미니게임 큐 제외 row=" .. tostring(rowIndex))
 				end
-				table.insert(list, tCue)
 			end
 		end
 

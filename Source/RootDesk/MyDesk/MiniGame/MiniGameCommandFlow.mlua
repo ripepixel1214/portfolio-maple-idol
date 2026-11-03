@@ -1,4 +1,4 @@
----@description "미니게임의 커맨드 입력 흐름을 관리하는 로직"
+---@description "미니게임 커맨드 입력 흐름 관리 로직"
 @Logic
 @ExecSpace("ClientOnly")
 script MiniGameCommandFlow extends Logic
@@ -26,7 +26,7 @@ script MiniGameCommandFlow extends Logic
 	end
 
 	@ExecSpace("ClientOnly")
-	method any CreateState(integer inputType, integer contextType, any launchPayload, any sourceObjectives)
+	method any CreateState(integer inputType, any launchPayload, any sourceObjectives)
 		-- 커맨드 세션의 서버 동기화 상태 생성
 		local isCommand = inputType == _EMiniGameInputType.Command
 		local sequence = {}
@@ -36,7 +36,7 @@ script MiniGameCommandFlow extends Logic
 			duration = launchPayload.duration or 0
 		end
 
-		if isCommand == true and #sequence == 0 and contextType ~= _EMiniGameContextType.Performance then
+		if isCommand == true and #sequence == 0 then
 			sequence = self:GenerateSequence()
 		end
 

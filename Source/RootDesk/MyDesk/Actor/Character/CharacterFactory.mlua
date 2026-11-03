@@ -74,6 +74,8 @@ script CharacterFactory extends Logic
 		tCharacter.maxIntimacyReached = self:ResolveMaxIntimacyReached(tCharacterPlainRow.maxIntimacyReached, tCharacter.intimacy)
 		tCharacter.isDiscovered = self:ResolvePlainTableBoolean(tCharacterPlainRow.isDiscovered, false)
 		tCharacter.hasPlayed = self:ResolvePlainTableBoolean(tCharacterPlainRow.hasPlayed, false)
+		tCharacter.tags = tCharacterPlainRow.tags or ""
+		tCharacter.tagCapacity = math.max(5, math.min(8, tonumber(tCharacterPlainRow.tagCapacity) or 5))
 
 		return tCharacter
 	end

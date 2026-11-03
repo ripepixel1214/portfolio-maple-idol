@@ -1,4 +1,4 @@
----@description "테스트용 디버그 로직. F8=공연 주간 이동, F9=임시 배정으로 공연 진입+자동 시작, F10=현재 맵에서 즉시 재생, F11=중지."
+---@description "메이커 공연 테스트. F8=공연 주차, F9=공연 진입, F10=현재 맵 재생, F11=중지, F12=현재 스테이지 종료, Ctrl+6/7=즉시 성공/실패 종료."
 @Logic
 script PerformanceDebugLogic extends Logic
 
@@ -8,66 +8,145 @@ script PerformanceDebugLogic extends Logic
 	-- 키 입력 구독 핸들러
 	property any keyDownHandler = nil
 
-	method void OnBeginPlay()
-		-- 클라이언트에서 테스트용 키 입력을 구독
-		if self:IsClient() == true then
-			self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- 메이커에서만 공연 테스트 키를 처리합니다.
+		if Environment:IsMakerPlay() == false or event == nil then return end
+		local isControlPressed = _InputService:IsKeyPressed(KeyboardKey.LeftControl) or _InputService:IsKeyPressed(KeyboardKey.RightControl)
+		if isControlPressed and event.key == KeyboardKey.Alpha6 then self:DebugFinishPerformance(true); return end
+		if isControlPressed and event.key == KeyboardKey.Alpha7 then self:DebugFinishPerformance(false); return end
+
+		if event.key == KeyboardKey.F8 then
+			-- 현재 선택한 편성을 유지한 채 공연 주차로 이동합니다.
+			if self:CanStartPerformance() == false then return end
+			_ProgressManager:RequestDebugMoveToPerformanceWeek(self.testPerformanceId)
+		elseif event.key == KeyboardKey.F9 then
+			self:StartPerformanceFlowWithTempRoster()
+		elseif event.key == KeyboardKey.F10 then
+			local player = _UserService.LocalPlayer
+			if player == nil or isvalid(player.CurrentMap) == false or player.CurrentMap.Name ~= _PerformanceConductor.performanceMapName then
+				_UIToast:ShowMessage("공연 맵에서는 F10, 다른 맵에서는 F9로 시작해주세요.")
+				return
+			end
+			if self:CanStartPerformance() == false then return end
+			_PerformanceConductor.tRoleAssignment = self:BuildTempAssignment()
+			_PerformanceConductor:StartPerformance(self.testPerformanceId)
+		elseif event.key == KeyboardKey.F11 then
+			-- 중단은 결과 산출이나 보상 지급을 하지 않습니다.
+			_PerformanceConductor.pendingPerformanceId = ""
+			_PerformanceConductor.pendingRoleAssignment = nil
+			_PerformanceConductor:StopPerformance()
+			_PerformanceConductor:SetHudHidden(false)
+		elseif event.key == KeyboardKey.F12 then
+			self:DebugCompleteStage()
 		end
 	end
 
+	@ExecSpace("Server")
+	method void RequestDebugCompleteStage()
+		-- 메이커에서 현재 스테이지를 보상 없이 종료하고 실제 StageSelect 전환 이벤트를 발생시킵니다.
+		if Environment:IsMakerPlay() == false or _ProgressManager:CanUseProgress(senderUserId) == false then return end
+		local progress = _ProgressManager.tCurrentProgress
+		if progress == nil or progress.eCurrentStage == "" or progress.eCurrentStep == _EProgressStep.StageSelect then return end
+
+		progress.eCurrentStage = ""
+		progress.eCurrentStep = _EProgressStep.StageSelect
+		_ProgressManager:ClearProgressLocation()
+		_PerformanceResultManager:ClearStageAttempt()
+		_TagTrainingManager:ClearState()
+		_CharacterManager:ResetAllCharacterTags()
+		_CharacterManager:PushCharactersToClient(senderUserId)
+		_UserDataManager:SaveCoreData()
+		_ProgressManager:PushProgressToClient(senderUserId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 메이커 플레이에서만 테스트용 키 입력을 구독합니다.
+		if Environment:IsMakerPlay() == false then return end
+		self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+	end
+
+	@ExecSpace("ClientOnly")
 	method void OnEndPlay()
-		-- 키 입력 구독 해제
+		-- 키 입력 구독을 해제합니다.
 		if self.keyDownHandler ~= nil then
 			_InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
 			self.keyDownHandler = nil
 		end
 	end
 
-	@ExecSpace("ClientOnly")
-	method void OnKeyDown(KeyDownEvent event)
-		-- if true then return end
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
 
-		if event == nil then
+	@ExecSpace("ClientOnly")
+	method void DebugFinishPerformance(boolean isClear)
+		-- 공연 주차에서 현재 편성으로 실제 결과·보상 흐름을 즉시 테스트합니다.
+		if Environment:IsMakerPlay() == false then return end
+		if _ProgressManager:ClientGetCurrentStep() ~= _EProgressStep.Performance then
+			_UIToast:ShowMessage("먼저 스테이지를 편성하고 F8로 공연 주차에 이동해주세요.")
+			return
+		end
+		if _PerformanceConductor.pendingPerformanceId ~= "" then
+			_UIToast:ShowMessage("공연 맵 진입이 끝난 뒤 다시 눌러주세요.")
 			return
 		end
 
-		if event.key == KeyboardKey.F8 then
-			-- 서버 진행도를 공연 주간으로 변경하고 스튜디오로 이동
-			if _ProgressManager ~= nil then
-				_ProgressManager:RequestDebugMoveToPerformanceWeek(self.testPerformanceId)
-			else
-				log_warning("[PerformanceDebug] ProgressManager 없음")
-			end
-		elseif event.key == KeyboardKey.F9 then
-			-- 단일 진입점: 임시 배정으로 공연 맵 진입 + 자동 시작 (실제 흐름 테스트)
-			self:StartPerformanceFlowWithTempRoster()
-		elseif event.key == KeyboardKey.F10 then
-			-- 이미 공연 맵에 있을 때 임시 배정으로 즉시 재생
-			if _PerformanceConductor ~= nil then
-				_PerformanceConductor.tRoleAssignment = self:BuildTempAssignment()
-				_PerformanceConductor:StartPerformance(self.testPerformanceId)
-			end
-		elseif event.key == KeyboardKey.F11 then
-			-- 공연 중지 (중단 — 점수 산출 없음)
-			if _PerformanceConductor ~= nil then
-				_PerformanceConductor:StopPerformance()
-			end
+		local stage = _StageMaster:GetStage(_ProgressManager:ClientGetCurrentStage())
+		if stage == nil then return end
+		local assignment = _PerformanceConductor.tRoleAssignment
+		if _PerformanceConductor.currentPerformanceId == "" or assignment == nil then assignment = self:BuildTempAssignment() end
+		_PerformanceConductor.tRoleAssignment = assignment
+		_PerformanceConductor:StopPerformance()
+		_PerformanceResultManager:RequestDebugFinishPerformance(stage.performanceId, assignment:ToPlainTable(), isClear)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DebugCompleteStage()
+		-- 현재 스테이지의 보상·결과 화면을 건너뛰고 종료 상태와 스튜디오 복귀를 테스트합니다.
+		if _ProgressManager:ClientGetCurrentStage() == "" then
+			_UIToast:ShowMessage("현재 진행 중인 스테이지가 없습니다.")
+			return
+		end
+
+		_PerformanceConductor.pendingPerformanceId = ""
+		_PerformanceConductor.pendingRoleAssignment = nil
+		_PerformanceConductor:StopPerformance()
+		_PerformanceConductor:SetHudHidden(false)
+		self:RequestDebugCompleteStage()
+
+		local player = _UserService.LocalPlayer
+		if isvalid(player) and isvalid(player.CurrentMap) and player.CurrentMap.Name == _PerformanceConductor.performanceMapName then
+			_PerformancePostFlowLogic:GoToStudio()
 		end
 	end
 
 	@ExecSpace("ClientOnly")
 	method void StartPerformanceFlowWithTempRoster()
 		-- 임시 배정 데이터로 공연 단일 진입점 호출 (실제 시작 UI가 붙기 전까지의 테스트 경로)
-		if _PerformanceConductor == nil then
-			log_warning("[PerformanceDebug] PerformanceConductor 없음")
-			return
-		end
+		if self:CanStartPerformance() == false then return end
 		_PerformanceConductor:StartPerformanceFlow(self.testPerformanceId, self:BuildTempAssignment())
 	end
 
 	@ExecSpace("ClientOnly")
+	method boolean CanStartPerformance()
+		-- 메이커에서 진행·진입 중인 공연을 중복 시작하지 않게 합니다.
+		if Environment:IsMakerPlay() == false then return false end
+		if _PerformanceConductor.isPlaying or _PerformanceConductor.isWaitingToStart or _PerformanceConductor.pendingPerformanceId ~= "" then
+			_UIToast:ShowMessage("공연이 진행 중이에요. 중단하려면 F11을 눌러주세요.")
+			return false
+		end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
 	method PerformanceRoleAssignment BuildTempAssignment()
-		-- (임시) 편성 3인(activeCharacterIds)을 센터/서브L/서브R 슬롯에 순서대로 배정한 구조체를 반환
+		-- 임시 편성은 activeCharacterIds를 센터/서브L/서브R 슬롯에 순서대로 배정합니다.
 		local assignment = PerformanceRoleAssignment()
 		if _CharacterManager == nil then
 			log_warning("[PerformanceDebug] CharacterManager 없음")

@@ -1,0 +1,194 @@
+@Logic
+script NewContentStorage extends Logic
+
+	property string storageKey = "newContentData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedString = ""
+
+	property boolean canSave = false
+
+	property boolean isSaveInProgress = false
+
+	property string pendingUserId = ""
+
+	property string pendingString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadNewContent(string userId)
+		-- 지정한 유저의 읽지 않은 신규 콘텐츠 키를 스토리지에서 불러옵니다.
+		if userId == nil or userId == "" then
+			self.canSave = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedString = userStorage:GetAndWait(self.storageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedString = ""
+			self.canSave = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.canSave = false
+			return nil
+		end
+
+		if storedString == nil or storedString == "" then
+			self.loadedString = ""
+			self.canSave = true
+			return {}
+		end
+
+		local unreadKeys = self:CreateKeysFromString(storedString)
+		if unreadKeys == nil then
+			log_warning("[NewContentStorage] invalid save string userId=" .. tostring(userId))
+			self.loadedString = storedString
+			self.canSave = false
+			return nil
+		end
+
+		self.loadedString = storedString
+		self.canSave = true
+		return unreadKeys
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveNewContentAsync(string userId, any unreadKeys)
+		-- 읽지 않은 신규 콘텐츠 키 목록의 비동기 저장을 요청합니다.
+		if self.canSave == false or userId == nil or userId == "" then
+			return
+		end
+
+		local newString = self:CreateStringFromKeys(unreadKeys)
+		if newString == "" or newString == self.loadedString then
+			return
+		end
+
+		if self.isSaveInProgress then
+			self.pendingUserId = userId
+			self.pendingString = newString
+			return
+		end
+
+		self:SaveStringAsync(userId, newString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveStringAsync(string userId, string newString)
+		-- 직렬화된 신규 콘텐츠 문자열을 유저 스토리지에 비동기로 저장합니다.
+		self.isSaveInProgress = true
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		userStorage:SetAsync(self.storageKey, newString, function(errorCode, key)
+			self:OnSaveCompleted(userId, newString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnSaveCompleted(string userId, string newString, integer errorCode)
+		-- 저장 결과를 반영한 뒤 대기 중인 다음 저장 요청을 확인합니다.
+		if _DataStorageErrorUtil:IsOk(errorCode) then
+			self.loadedString = newString
+		else
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		end
+
+		self.isSaveInProgress = false
+		self:CheckPendingSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingSave()
+		-- 저장 중 누적된 최신 요청이 있으면 이어서 저장합니다.
+		if self.pendingString == "" then
+			return
+		end
+
+		local userId = self.pendingUserId
+		local newString = self.pendingString
+		self.pendingUserId = ""
+		self.pendingString = ""
+		if newString ~= self.loadedString then
+			self:SaveStringAsync(userId, newString)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateKeysFromString(string source)
+		-- 저장 문자열을 검증하여 읽지 않은 신규 콘텐츠 키 목록으로 복원합니다.
+		local ok, tFlat = pcall(function()
+			return _UtilLogic:StringToTable(source)
+		end)
+		if ok == false or tFlat == nil then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlat.saveVersion, 0, 0)
+		if saveVersion ~= 0 and saveVersion ~= 1 then
+			return nil
+		end
+
+		local keyCount = self:NormalizeInteger(tFlat.keyCount, 0, 0)
+		local keys = {}
+		for index = 1, keyCount do
+			self:AddKeyIfValid(keys, self:NormalizeString(tFlat["key" .. tostring(index)], ""))
+		end
+		return keys
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateStringFromKeys(any unreadKeys)
+		-- 읽지 않은 신규 콘텐츠 키 목록을 현재 버전의 저장 문자열로 변환합니다.
+		if unreadKeys == nil or type(unreadKeys) ~= "table" then
+			return ""
+		end
+
+		local keys = {}
+		for _, key in ipairs(unreadKeys) do
+			self:AddKeyIfValid(keys, key)
+		end
+
+		local tFlat = { saveVersion = self.currentSaveVersion, keyCount = #keys }
+		for index, key in ipairs(keys) do
+			tFlat["key" .. tostring(index)] = key
+		end
+		return _UtilLogic:TableToString(tFlat)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddKeyIfValid(any keys, string key)
+		-- 유효한 신규 콘텐츠 키를 대상 목록에 중복 없이 추가합니다.
+		if keys == nil or key == nil or key == "" then
+			return
+		end
+		for _, existingKey in ipairs(keys) do
+			if existingKey == key then
+				return
+			end
+		end
+		table.insert(keys, key)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환하고 나머지는 문자열로 변환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값을 최소 범위 이상의 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

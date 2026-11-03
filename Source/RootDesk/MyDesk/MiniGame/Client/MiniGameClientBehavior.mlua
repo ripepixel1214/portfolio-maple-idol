@@ -1,0 +1,30 @@
+---@description "미니게임별 클라이언트 처리 설정"
+@Struct
+script MiniGameClientBehavior
+
+	-- 클라이언트 전용 처리 정책과 선택적 콜백, RPC 전송 금지
+	property any requiredCapabilities = {}
+	property boolean usesInputHub = true
+	property boolean acceptsSelection = false
+	property any configureInput = nil
+	property any buildInstruction = nil
+	property any prepareView = nil
+	-- 승인된 NPC 이벤트에서 호출할 게임별 실제 로비 초기화
+	property any openLobby = nil
+	-- 공통 디버그 진입점에서 호출할 게임별 로비 초기화
+	property any openDebugLobby = nil
+	property any isViewReady = nil
+	-- true 반환 시 공통 활성화 보류, 서버 승인 대기 등에 사용
+	property any startPresentation = nil
+	property any activate = nil
+	property any beforeInput = nil
+	property any afterInput = nil
+	property any updateView = nil
+	property any commandFeedback = nil
+	property any selectionAccepted = nil
+	property any drawResult = nil
+	property any requestRejected = nil
+	property any endSession = nil
+	property any reset = nil
+
+end

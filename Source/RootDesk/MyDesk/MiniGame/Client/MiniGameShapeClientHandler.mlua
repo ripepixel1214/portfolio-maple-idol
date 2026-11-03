@@ -1,0 +1,33 @@
+---@description "클라이언트 측 그리기 미니게임 처리 로직"
+@Logic
+script MiniGameShapeClientHandler extends Logic
+	property string TEXT_UI_MINIGAME_SHAPE_GOAL = "ui.minigame.shape_goal"
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method any CreateBehavior()
+		-- 게임별 클라이언트 처리와 필수 View 기능 구성
+		local tBehavior = MiniGameClientBehavior()
+		local caps = _MiniGameViewRegistry
+		tBehavior.requiredCapabilities = {caps.CAP_STAGE, caps.CAP_HUD, caps.CAP_RESULT, caps.CAP_SHAPE}
+		tBehavior.buildInstruction = function(presenter, instruction)
+			local target = math.floor(presenter.tModel:GetObjectiveTarget(_EMiniGameObjectiveType.ShapeMatch) * 100)
+			if target > 0 then return _LocaleTextUtil:Format(self.TEXT_UI_MINIGAME_SHAPE_GOAL, instruction, target, nil, "") end
+			return instruction
+		end
+		tBehavior.prepareView = function(presenter, tContext)
+			presenter:GetViewCapability(caps.CAP_SHAPE):BuildDragGuide(presenter.tModel.checkpoints)
+		end
+		tBehavior.beforeInput = function(presenter, event)
+			if event.action ~= _EMiniGameInputAction.Input then return end
+			local view = presenter:GetViewCapability(caps.CAP_SHAPE)
+			local localPos = view:ScreenToDragLocal(event.pointX, event.pointY)
+			if localPos == nil then return end
+			presenter.tModel:RegisterDragPoint(localPos.x, localPos.y)
+			view:AddInkLocalPoint(localPos.x, localPos.y)
+		end
+		return tBehavior
+	end
+
+end

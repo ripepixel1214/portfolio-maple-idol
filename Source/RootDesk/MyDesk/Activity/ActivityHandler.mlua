@@ -2,6 +2,10 @@
 @Logic
 script ActivityHandler extends Logic
 
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
 	@ExecSpace("Server")
 	method void RequestApplyActivity(string requestId, string characterId, string activityId)
 		-- 활동 결과 한 건 적용을 서버에 요청합니다.
@@ -42,6 +46,16 @@ script ActivityHandler extends Logic
 
 	@ExecSpace("ServerOnly")
 	method any ApplyActivity(string requestId, string characterId, string activityId)
+		-- 기존 스케줄과 NPC 활동은 태그 육성 보정 없이 적용합니다.
+		return self:ApplyActivityInternal(requestId, characterId, activityId)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
+	method any ApplyActivityInternal(string requestId, string characterId, string activityId)
 		-- 검증된 활동 결과 한 건을 서버 권위 데이터에 적용합니다.
 		local result = ActivityApplyResult()
 		result.requestId = requestId or ""
@@ -79,10 +93,6 @@ script ActivityHandler extends Logic
 			failureChance = _ConditionMaster:GetFailureChanceByFatigue(currentFatigue)
 			isFailed = self:IsTrainingFailed(failureChance)
 			if isFailed == true then
-				log("[ActivityHandler] training failed characterId=" .. tostring(safeCharacterId)
-					.. " activityId=" .. tostring(safeActivityId)
-					.. " startFatigue=" .. tostring(currentFatigue)
-					.. " failureChance=" .. tostring(failureChance))
 				vocalGain = 0
 				danceGain = 0
 				visualGain = 0
@@ -100,10 +110,10 @@ script ActivityHandler extends Logic
 		end
 
 		if tCharacter ~= nil then
-			vocalGain = self:GetClampAppliedDelta(tCharacter.vocal, vocalGain, 0, 999)
-			danceGain = self:GetClampAppliedDelta(tCharacter.dance, danceGain, 0, 999)
-			visualGain = self:GetClampAppliedDelta(tCharacter.visual, visualGain, 0, 999)
-			fatigueDelta = self:GetClampAppliedDelta(currentFatigue, fatigueDelta, 0, 100)
+			vocalGain = self:GetClampMinAppliedDelta(tCharacter.vocal, vocalGain)
+			danceGain = self:GetClampMinAppliedDelta(tCharacter.dance, danceGain)
+			visualGain = self:GetClampMinAppliedDelta(tCharacter.visual, visualGain)
+			fatigueDelta = self:GetClampMinAppliedDelta(currentFatigue, fatigueDelta)
 		end
 
 		local progressRequested = fandomDelta ~= 0
@@ -188,15 +198,6 @@ script ActivityHandler extends Logic
 		local current = currentValue or 0
 		local delta = requestedDelta or 0
 		local nextValue = _MathUtil:ClampMin(current + delta, 0)
-		return nextValue - current
-	end
-
-	@ExecSpace("ServerOnly")
-	method number GetClampAppliedDelta(number currentValue, number requestedDelta, number minValue, number maxValue)
-		-- 상하한 클램프가 있는 스탯의 실제 적용 델타를 계산합니다.
-		local current = currentValue or 0
-		local delta = requestedDelta or 0
-		local nextValue = _MathUtil:Clamp(current + delta, minValue, maxValue)
 		return nextValue - current
 	end
 

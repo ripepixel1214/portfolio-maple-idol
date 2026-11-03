@@ -1,0 +1,39 @@
+-- 실제 화면 경계를 지정한 UI 로컬 좌표로 변환하는 공용 유틸입니다.
+@Logic
+script UIScreenUtil extends Logic
+
+	@ExecSpace("ClientOnly")
+	method any GetScreenBoundsInLocal(UITransformComponent targetTransform)
+		-- 실제 화면의 네 꼭짓점을 대상 UITransform의 로컬 좌표로 변환해 경계를 반환합니다.
+		if _UILogic == nil or targetTransform == nil then
+			return nil
+		end
+
+		local screenWidth = _UILogic.ScreenWidth
+		local screenHeight = _UILogic.ScreenHeight
+		if screenWidth == nil or screenHeight == nil or screenWidth <= 0 or screenHeight <= 0 then
+			return nil
+		end
+
+		local corners = {Vector2(0, 0), Vector2(screenWidth, 0), Vector2(0, screenHeight), Vector2(screenWidth, screenHeight) }
+		local left = nil
+		local right = nil
+		local bottom = nil
+		local top = nil
+
+		for i = 1, #corners do
+			local point = _UILogic:ScreenToLocalUIPosition(corners[i], targetTransform)
+			if left == nil or point.x < left then left = point.x end
+			if right == nil or point.x > right then right = point.x end
+			if bottom == nil or point.y < bottom then bottom = point.y end
+			if top == nil or point.y > top then top = point.y end
+		end
+
+		if left == nil then
+			return nil
+		end
+
+		return { left = left, right = right, bottom = bottom, top = top }
+	end
+
+end

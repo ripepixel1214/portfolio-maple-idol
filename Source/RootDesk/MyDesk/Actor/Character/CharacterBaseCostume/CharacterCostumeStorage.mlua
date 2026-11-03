@@ -1,0 +1,272 @@
+-- CharacterCostumeManager의 캐릭터별 치장 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script CharacterCostumeStorage extends Logic
+
+	property string costumeStorageKey = "characterCostumeData"
+
+	property integer currentSaveVersion = 1
+
+	property string loadedCostumesString = ""
+
+	property boolean canSaveCostumes = false
+
+	property boolean isCostumesSaveInProgress = false
+
+	property string pendingCostumesUserId = ""
+
+	property string pendingCostumesString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadCostumes(string userId)
+		-- UserDataStorage에서 캐릭터별 치장 문자열을 읽고, 저장이 없으면 빈 캐시를 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[CharacterCostumeStorage] userId is required")
+			self.loadedCostumesString = ""
+			self.canSaveCostumes = false
+			return nil
+		end
+
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local errorCode, storedCostumesString = userStorage:GetAndWait(self.costumeStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedCostumesString = ""
+			self.canSaveCostumes = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedCostumesString = ""
+			self.canSaveCostumes = false
+			return nil
+		end
+
+		if storedCostumesString == nil or storedCostumesString == "" then
+			self.loadedCostumesString = ""
+			self.canSaveCostumes = true
+			return {}
+		end
+
+		local tCostumePlainByCharacterId = self:CreateCostumesFromString(storedCostumesString)
+		if tCostumePlainByCharacterId == nil then
+			log_warning("[CharacterCostumeStorage] costume load failed invalid save string userId=" .. tostring(userId))
+			self.loadedCostumesString = storedCostumesString
+			self.canSaveCostumes = false
+			return nil
+		end
+
+		self.loadedCostumesString = storedCostumesString
+		self.canSaveCostumes = true
+		return tCostumePlainByCharacterId
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCostumesAsync(string userId, any tCostumePlainByCharacterId)
+		-- 캐릭터별 치장 plain table을 v1 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveCostumes == false then
+			log_warning("[CharacterCostumeStorage] costume save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[CharacterCostumeStorage] userId is required")
+			return
+		end
+
+		local costumesString = self:CreateCostumesString(tCostumePlainByCharacterId)
+		if costumesString == "" then
+			log_warning("[CharacterCostumeStorage] costume data is invalid")
+			return
+		end
+
+		-- 저장 중 원래 값으로 되돌린 요청도 최신 스냅샷으로 보존
+		self.pendingCostumesUserId = userId
+		self.pendingCostumesString = costumesString
+		if self.isCostumesSaveInProgress then return end
+		self:CheckPendingCostumesSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveCostumesStringAsync(string userId, string costumesString)
+		-- 직렬화된 캐릭터별 치장 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isCostumesSaveInProgress = true
+
+		local ok, errorMessage = pcall(function()
+			local userStorage = _DataStorageService:GetUserDataStorage(userId)
+			userStorage:SetAsync(self.costumeStorageKey, costumesString, function(errorCode, key)
+				self:OnCostumesSaveCompleted(userId, costumesString, errorCode)
+			end)
+		end)
+		if not ok then
+			log_error("[CharacterCostumeStorage] save exception userId=" .. tostring(userId) .. " error=" .. tostring(errorMessage))
+			self:OnCostumesSaveCompleted(userId, costumesString, -1)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnCostumesSaveCompleted(string userId, string costumesString, integer errorCode)
+		-- 저장 결과를 반영하고 저장 중 들어온 최신 요청을 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.isCostumesSaveInProgress = false
+			-- 자동 반복 재시도 없이 최신 실패 데이터를 다음 저장 요청까지 유지
+			if self.pendingCostumesString == "" then
+				self.pendingCostumesUserId = userId
+				self.pendingCostumesString = costumesString
+			end
+			return
+		else
+			self.loadedCostumesString = costumesString
+		end
+
+		self.isCostumesSaveInProgress = false
+		self:CheckPendingCostumesSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingCostumesSave()
+		-- 대기 중인 최신 치장 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if not self.canSaveCostumes or self.isCostumesSaveInProgress or self.pendingCostumesString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingCostumesUserId
+		local pendingCostumesString = self.pendingCostumesString
+		self.pendingCostumesUserId = ""
+		self.pendingCostumesString = ""
+
+		if pendingCostumesString == self.loadedCostumesString then
+			return
+		end
+
+		self:SaveCostumesStringAsync(pendingUserId, pendingCostumesString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCostumesFromString(string costumesString)
+		-- 저장 문자열을 캐릭터별 치장 plain table로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(costumesString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[CharacterCostumeStorage] costume save string parse failed")
+			return nil
+		end
+
+		return self:CreateCostumesFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateCostumesString(any tCostumePlainByCharacterId)
+		-- 캐릭터별 치장 plain table을 DataStorage에 넣을 v1 문자열로 만듭니다.
+		if tCostumePlainByCharacterId == nil or type(tCostumePlainByCharacterId) ~= "table" then
+			return ""
+		end
+
+		local characterIds = {}
+		for characterId, tCostumeData in pairs(tCostumePlainByCharacterId) do
+			if characterId ~= nil and characterId ~= "" and tCostumeData ~= nil then
+				table.insert(characterIds, tostring(characterId))
+			end
+		end
+		table.sort(characterIds)
+
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.costumeCount = #characterIds
+
+		for index, characterId in ipairs(characterIds) do
+			local suffix = tostring(index)
+			local tCostumeData = tCostumePlainByCharacterId[characterId]
+			tFlatPlainTable["characterId" .. suffix] = characterId
+			tFlatPlainTable["body" .. suffix] = tCostumeData.body or ""
+			tFlatPlainTable["hair" .. suffix] = tCostumeData.hair or ""
+			tFlatPlainTable["face" .. suffix] = tCostumeData.face or ""
+			tFlatPlainTable["cap" .. suffix] = tCostumeData.cap or ""
+			tFlatPlainTable["cape" .. suffix] = tCostumeData.cape or ""
+			tFlatPlainTable["coat" .. suffix] = tCostumeData.coat or ""
+			tFlatPlainTable["longcoat" .. suffix] = tCostumeData.longcoat or ""
+			tFlatPlainTable["pants" .. suffix] = tCostumeData.pants or ""
+			tFlatPlainTable["glove" .. suffix] = tCostumeData.glove or ""
+			tFlatPlainTable["shoes" .. suffix] = tCostumeData.shoes or ""
+			tFlatPlainTable["oneHandedWeapon" .. suffix] = tCostumeData.oneHandedWeapon or ""
+			tFlatPlainTable["twoHandedWeapon" .. suffix] = tCostumeData.twoHandedWeapon or ""
+			tFlatPlainTable["subWeapon" .. suffix] = tCostumeData.subWeapon or ""
+			tFlatPlainTable["faceAccessory" .. suffix] = tCostumeData.faceAccessory or ""
+			tFlatPlainTable["eyeAccessory" .. suffix] = tCostumeData.eyeAccessory or ""
+			tFlatPlainTable["earAccessory" .. suffix] = tCostumeData.earAccessory or ""
+			tFlatPlainTable["ear" .. suffix] = tCostumeData.ear or ""
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateCostumesFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 복원한 flat table의 버전을 확인해 캐릭터별 치장 map으로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion ~= 1 then
+			log_warning("[CharacterCostumeStorage] unsupported saveVersion=" .. tostring(saveVersion))
+			return nil
+		end
+
+		local costumeCount = self:NormalizeInteger(tFlatPlainTable.costumeCount, 0, 0)
+		local tCostumePlainByCharacterId = {}
+
+		for index = 1, costumeCount do
+			local suffix = tostring(index)
+			local characterId = self:NormalizeString(tFlatPlainTable["characterId" .. suffix], "")
+			if characterId ~= "" then
+				local tCostumeData = {}
+				tCostumeData.body = self:NormalizeString(tFlatPlainTable["body" .. suffix], "")
+				tCostumeData.hair = self:NormalizeString(tFlatPlainTable["hair" .. suffix], "")
+				tCostumeData.face = self:NormalizeString(tFlatPlainTable["face" .. suffix], "")
+				tCostumeData.cap = self:NormalizeString(tFlatPlainTable["cap" .. suffix], "")
+				tCostumeData.cape = self:NormalizeString(tFlatPlainTable["cape" .. suffix], "")
+				tCostumeData.coat = self:NormalizeString(tFlatPlainTable["coat" .. suffix], "")
+				tCostumeData.longcoat = self:NormalizeString(tFlatPlainTable["longcoat" .. suffix], "")
+				tCostumeData.pants = self:NormalizeString(tFlatPlainTable["pants" .. suffix], "")
+				tCostumeData.glove = self:NormalizeString(tFlatPlainTable["glove" .. suffix], "")
+				tCostumeData.shoes = self:NormalizeString(tFlatPlainTable["shoes" .. suffix], "")
+				tCostumeData.oneHandedWeapon = self:NormalizeString(tFlatPlainTable["oneHandedWeapon" .. suffix], "")
+				tCostumeData.twoHandedWeapon = self:NormalizeString(tFlatPlainTable["twoHandedWeapon" .. suffix], "")
+				tCostumeData.subWeapon = self:NormalizeString(tFlatPlainTable["subWeapon" .. suffix], "")
+				tCostumeData.faceAccessory = self:NormalizeString(tFlatPlainTable["faceAccessory" .. suffix], "")
+				tCostumeData.eyeAccessory = self:NormalizeString(tFlatPlainTable["eyeAccessory" .. suffix], "")
+				tCostumeData.earAccessory = self:NormalizeString(tFlatPlainTable["earAccessory" .. suffix], "")
+				tCostumeData.ear = self:NormalizeString(tFlatPlainTable["ear" .. suffix], "")
+				tCostumePlainByCharacterId[characterId] = tCostumeData
+			end
+		end
+
+		return tCostumePlainByCharacterId
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

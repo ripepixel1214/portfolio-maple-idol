@@ -172,7 +172,7 @@ script NpcEventManager extends Logic
 			return
 		end
 
-		if self:CanUseOutdoorProgress(userId) == false then
+		if _OutdoorMapTransitionLogic == nil or _OutdoorMapTransitionLogic:CanUseOutdoorProgress(userId) == false then
 			self:PushNpcContextRejected(requestId, self.REJECT_INVALID_PROGRESS, userId)
 			return
 		end
@@ -418,6 +418,12 @@ script NpcEventManager extends Logic
 		self.preparedUserId = userId or ""
 		self.preparedMapName = mapName or ""
 
+		local progress = _ProgressManager ~= nil and _ProgressManager:ServerGetProgress() or nil
+		if self:CanUseOutdoorProgress(userId) == false or progress == nil or (progress.actionPoint or 0) <= 0 then
+			log("[NpcEventSession] daily only userId=" .. tostring(userId) .. " mapName=" .. tostring(mapName))
+			return contexts
+		end
+
 		if _EventTriggerManager == nil then
 			return contexts
 		end
@@ -470,7 +476,8 @@ script NpcEventManager extends Logic
 	@ExecSpace("ServerOnly")
 	method boolean ExecuteAuthorizedNpcEvent(string sessionId)
 		-- 서버 세션에 저장된 현재 이벤트만 EventExecutor 내부 실행 경로로 전달
-		if self:IsSessionOwner(sessionId, self.activeUserId) == false then
+		if self:IsSessionOwner(sessionId, self.activeUserId) == false
+			or self:CanUseOutdoorProgress(self.activeUserId) == false then
 			return false
 		end
 
@@ -520,13 +527,17 @@ script NpcEventManager extends Logic
 
 	@ExecSpace("ServerOnly")
 	method boolean CanUseOutdoorProgress(string userId)
-		-- 요청자의 서버 진행 데이터가 외출 단계인지 확인
+		-- 스테이지 진행 중 외출 단계만 NPC 이벤트 허용, 단순 외출 접근 권한과 분리
 		if _ProgressManager == nil or _ProgressManager:CanUseProgress(userId) == false then
 			return false
 		end
-
 		local progress = _ProgressManager:ServerGetProgress()
-		return progress ~= nil and progress.eCurrentStep == _EProgressStep.Step_Weekend
+		if progress == nil or progress.eCurrentStep ~= _EProgressStep.Outdoor
+			or progress.eCurrentStage == nil or progress.eCurrentStage == "" then
+			return false
+		end
+		return _OutdoorMapTransitionLogic ~= nil
+			and _OutdoorMapTransitionLogic:CanUseOutdoorProgress(userId) == true
 	end
 
 	@ExecSpace("ServerOnly")
@@ -545,16 +556,13 @@ script NpcEventManager extends Logic
 
 	@ExecSpace("ServerOnly")
 	method boolean IsValidOutdoorMap(Entity user, string mapName)
-		-- 요청자 현재 맵과 허용된 외출 맵 이름 일치 여부 확인
-		if user == nil or isvalid(user) == false or user.CurrentMap == nil then
+		-- 현재 맵 일치와 공통 외출 해금 조건 확인
+		if isvalid(user) == false or isvalid(user.CurrentMap) == false or user.PlayerComponent == nil
+			or _OutdoorMapTransitionLogic == nil then
 			return false
 		end
-
-		if mapName ~= self.MAP_DOWNTOWN and mapName ~= self.MAP_NIGHT_MARKET then
-			return false
-		end
-
 		return user.CurrentMap.Name == mapName
+			and _OutdoorMapTransitionLogic:CanAccessOutdoorMap(user.PlayerComponent.UserId, mapName) == true
 	end
 
 	@ExecSpace("ServerOnly")
@@ -637,9 +645,7 @@ script NpcEventManager extends Logic
 		local sessionId = self.activeSessionId
 		local userId = self.activeUserId
 		local npcId = self.activeNpcId
-		if _ProgressManager ~= nil then
-			_ProgressManager:SaveAllStorageData()
-		end
+		_UserDataManager:SaveCoreData()
 
 		log("[NpcEventSession] interaction completed userId=" .. tostring(userId)
 			.. " requestId=" .. tostring(self.activeRequestId)

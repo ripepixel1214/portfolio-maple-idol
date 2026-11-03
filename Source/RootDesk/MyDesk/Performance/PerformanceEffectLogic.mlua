@@ -23,9 +23,99 @@ script PerformanceEffectLogic extends Logic
 	-- 스포트라이트 오버레이 루트 (EffectSpotlight)
 	property Entity spotlightRoot = "199cf93d-0b3c-48dd-87ff-a498e8b61d9e"
 
+	-- 공연 중에만 연결하는 응원 입력 핸들러
+	property any cheerKeyDownHandler = nil
+	property any cheerTouchHandler = nil
+	property boolean hasLoggedCheerInput = false
+
+	property string LIGHT_STICK_COMPONENT = "script.LightStickSwayComponent"
+	property string CHEER_DIRECTION_UP = "Up"
+	property string CHEER_DIRECTION_DOWN = "Down"
+	property string CHEER_DIRECTION_LEFT = "Left"
+	property string CHEER_DIRECTION_RIGHT = "Right"
+
 	@ExecSpace("ClientOnly")
 	method void OnBeginPlay()
 		-- 시작 시 모든 오버레이를 숨긴 상태로 초기화
+		self:HideAll()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginCheering()
+		-- 점수·미니게임 세션과 독립된 공연 응원 입력 연결
+		self:EndCheering()
+		self.hasLoggedCheerInput = false
+		self:ShowPreset(_EPerformanceUIPreset.Otage)
+		self.cheerKeyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnCheerKeyDown)
+		self.cheerTouchHandler = _InputService:ConnectEvent(ScreenTouchEvent, self.OnCheerScreenTouch)
+		log("[PerformanceEffect][VRF] 응원 시작 scoreContribution=0")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndCheering()
+		-- 종료·중단·재시작 시 입력 구독 해제
+		if self.cheerKeyDownHandler ~= nil or self.cheerTouchHandler ~= nil then
+			log("[PerformanceEffect][VRF] 응원 입력 해제")
+		end
+		if self.cheerKeyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.cheerKeyDownHandler)
+			self.cheerKeyDownHandler = nil
+		end
+		if self.cheerTouchHandler ~= nil then
+			_InputService:DisconnectEvent(ScreenTouchEvent, self.cheerTouchHandler)
+			self.cheerTouchHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanCheer()
+		-- 공연 재생 중이며 응원 오버레이가 표시된 현재 맵에서만 입력 허용
+		if _PerformanceConductor.isPlaying == false or isvalid(self.otageRoot) == false
+			or self.otageRoot.Enable == false then
+			return false
+		end
+		local player = _UserService.LocalPlayer
+		return isvalid(player) and isvalid(player.CurrentMap)
+			and player.CurrentMap.Name == _PerformanceConductor.performanceMapName
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCheerKeyDown(KeyDownEvent event)
+		-- 방향키와 스페이스 입력을 응원봉 연출로만 전달
+		if self:CanCheer() == false then return end
+		local direction = ""
+		if event.key == KeyboardKey.UpArrow or event.key == KeyboardKey.Space then
+			direction = self.CHEER_DIRECTION_UP
+		elseif event.key == KeyboardKey.DownArrow then
+			direction = self.CHEER_DIRECTION_DOWN
+		elseif event.key == KeyboardKey.LeftArrow then
+			direction = self.CHEER_DIRECTION_LEFT
+		elseif event.key == KeyboardKey.RightArrow then
+			direction = self.CHEER_DIRECTION_RIGHT
+		end
+		if direction ~= "" then self:PlayCheer(direction) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCheerScreenTouch(ScreenTouchEvent event)
+		-- PC 왼쪽 클릭과 모바일 첫 터치를 응원으로 처리
+		if event.TouchId ~= 1 or self:CanCheer() == false then return end
+		self:PlayCheer(self.CHEER_DIRECTION_UP)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PlayCheer(string direction)
+		-- 응원봉만 흔들고 점수·서버 결과 요청은 발생시키지 않음
+		self:SwayLightStickDirection(direction)
+		if self.hasLoggedCheerInput == false then
+			self.hasLoggedCheerInput = true
+			log("[PerformanceEffect][VRF] 응원 입력 direction=" .. direction .. " scoreContribution=0")
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 응원 입력 및 오버레이 정리
 		self:HideAll()
 	end
 
@@ -70,7 +160,8 @@ script PerformanceEffectLogic extends Logic
 		if isvalid(self.otageRoot) == false then
 			return
 		end
-		local sway = self.otageRoot.LightStickSwayComponent
+		---@type LightStickSwayComponent
+		local sway = self.otageRoot:GetComponent(self.LIGHT_STICK_COMPONENT)
 		if isvalid(sway) then
 			sway.autoSway = on
 		end
@@ -102,7 +193,8 @@ script PerformanceEffectLogic extends Logic
 		if isvalid(self.otageRoot) == false then
 			return
 		end
-		local sway = self.otageRoot.LightStickSwayComponent
+		---@type LightStickSwayComponent
+		local sway = self.otageRoot:GetComponent(self.LIGHT_STICK_COMPONENT)
 		if isvalid(sway) then
 			sway:SwayOnce()
 		end
@@ -115,7 +207,8 @@ script PerformanceEffectLogic extends Logic
 		if isvalid(self.otageRoot) == false then
 			return
 		end
-		local sway = self.otageRoot.LightStickSwayComponent
+		---@type LightStickSwayComponent
+		local sway = self.otageRoot:GetComponent(self.LIGHT_STICK_COMPONENT)
 		if isvalid(sway) then
 			sway:SwayDirection(direction)
 		end
@@ -124,6 +217,7 @@ script PerformanceEffectLogic extends Logic
 	@ExecSpace("ClientOnly")
 	method void HideAll()
 		-- 모든 오버레이 루트를 숨기고 비네트 카메라 머티리얼도 복구 (공연 종료·초기화 시)
+		self:EndCheering()
 		if isvalid(self.otageRoot) then self.otageRoot.Enable = false end
 		if isvalid(self.circleBurstRoot) then self.circleBurstRoot.Enable = false end
 		if isvalid(self.fireworkRoot) then self.fireworkRoot.Enable = false end

@@ -1,0 +1,486 @@
+@Logic
+script StageSelectUILogic extends Logic
+
+	property Entity root = "0f2d8302-6d8e-4751-bca9-46571832ab8e"
+
+	property ButtonComponent stageTabButton = "377352c0-1791-45cd-9952-f3dceecc163f"
+
+	property SpriteGUIRendererComponent stageTabBackground = "377352c0-1791-45cd-9952-f3dceecc163f"
+
+	property ButtonComponent outdoorTabButton = "dacf0d77-2e4e-4493-a5ae-c775bdfb85ef"
+
+	property SpriteGUIRendererComponent outdoorTabBackground = "dacf0d77-2e4e-4493-a5ae-c775bdfb85ef"
+
+	property Entity cardTemplate = "2b381551-1022-4bcb-a39e-af0767da00ef"
+
+	property GridViewComponent cardList = "65764552-4826-460b-9410-410ac51c9706"
+
+	property SpriteGUIRendererComponent previewImage = "5c5ddc0f-c244-4c81-9e9a-7f9c2608c393"
+
+	property string defaultCardImageRuid = ""
+
+	property string defaultPreviewImageRuid = ""
+
+	property any tCardBindings = {}
+
+	property TextGUIRendererComponent mainTitleText = "3348b096-e90a-4aed-b1fa-70d7b0adc35c"
+
+	property TextGUIRendererComponent headlineText = "242019a9-a9e5-41a0-9ad4-29043f714590"
+
+	property TextGUIRendererComponent detailHeaderText = "981421a4-1d3c-438a-9b61-9267bd74967f"
+
+	property TextGUIRendererComponent detailNameText = "6df6fb4a-2414-4330-a31f-d0d5861ebe2e"
+
+	property TextGUIRendererComponent detailDescriptionText = "8af9e923-8b2c-46bf-81bd-7090cb85c993"
+
+	property ButtonComponent confirmButton = "635046c0-08a2-440d-b1b4-2d62a6919ef0"
+
+	property string defaultConfirmButtonImageRuid = ""
+
+	property ButtonComponent closeButton = "d0ea487f-b59e-43ce-9eea-aed3400d016c"
+
+	property string selectedCategory = "stage"
+
+	property integer selectedIndex = 1
+
+	property any tOutdoorDestinations = {}
+
+	property any tStageEntries = {}
+
+	property any stageTabClickHandler = nil
+
+	property any outdoorTabClickHandler = nil
+
+	property any confirmClickHandler = nil
+
+	property any confirmStateChangedHandler = nil
+
+	property any closeClickHandler = nil
+
+	property any progressChangedHandler = nil
+
+
+	property string CATEGORY_STAGE = "stage"
+
+	property string CATEGORY_OUTDOOR = "outdoor"
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		-- StageSelect 스텝에서 스테이지 및 외출 맵 선택 UI를 엽니다.
+		if self:GetCurrentStep() ~= _EProgressStep.StageSelect then
+			return
+		end
+
+		self.root.Enable = true
+		self:LoadSelectionData()
+		self:SelectCategory(self.CATEGORY_STAGE)
+		_UIVisibilityNotifierLogic:SendFrom(self, "stageSelect", true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 스테이지 선택 UI를 닫고 DefaultUI의 진행 버튼을 다시 표시합니다.
+		if self.root.Enable == false then
+			return
+		end
+
+		self.confirmButton.Entity.SpriteGUIRendererComponent.ImageRUID = DataRef(self.defaultConfirmButtonImageRuid)
+		self.root.Enable = false
+		_UIVisibilityNotifierLogic:SendFrom(self, "stageSelect", false)
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Event Handlers
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnStageTabClicked(ButtonClickEvent event)
+		-- 스테이지 선택 카테고리로 전환합니다.
+		self:SelectCategory(self.CATEGORY_STAGE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnOutdoorTabClicked(ButtonClickEvent event)
+		-- 외출 맵 선택 카테고리로 전환합니다.
+		self:SelectCategory(self.CATEGORY_OUTDOOR)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCardRefresh(integer itemIndex, Entity card)
+		-- GridView의 0 기반 인덱스를 목록 인덱스로 바꾸고 재사용 카드의 데이터와 클릭을 연결합니다.
+		local index = itemIndex + 1
+		local binding = self.tCardBindings[card.Id]
+		if binding == nil then
+			binding = { entity = card, index = index }
+			binding.clickHandler = card:ConnectEvent(ButtonClickEvent, function()
+				self:SelectCard(binding.index)
+			end)
+			self.tCardBindings[card.Id] = binding
+		end
+		binding.index = index
+		local entry = self.selectedCategory == self.CATEGORY_STAGE and self.tStageEntries[index] or self.tOutdoorDestinations[index]
+		card:GetChildByName("Name").TextGUIRendererComponent.Text = self:GetCardDisplayName(index)
+		if self.selectedCategory == self.CATEGORY_STAGE then
+			card:GetChildByName("Target").TextGUIRendererComponent.Text = self:FormatTargetScoreText(tostring(entry.targetScore))
+			card:GetChildByName("Version").TextGUIRendererComponent.Text = entry.version
+			self:SetImage(card.SpriteGUIRendererComponent, entry.cardImageId, self.defaultCardImageRuid)
+		else
+			card:GetChildByName("Target").TextGUIRendererComponent.Text = entry.targetText or _LocaleTextUtil:GetText("ui.stage_select.category.outdoor")
+			card:GetChildByName("Version").TextGUIRendererComponent.Text = entry.versionText or ""
+			self:SetImage(card.SpriteGUIRendererComponent, "", self.defaultCardImageRuid)
+		end
+		self:SetSpriteColor(card.SpriteGUIRendererComponent, index == self.selectedIndex)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirmClicked(ButtonClickEvent event)
+		-- 현재 카테고리의 선택을 확정해 스테이지 시작 또는 외출 맵 이동을 요청합니다.
+		if self.selectedCategory == self.CATEGORY_STAGE then
+			local stageEntry = self:GetSelectedStageEntry()
+			if stageEntry == nil or _ProgressManager == nil then
+				return
+			end
+
+			if _PerformanceMaster:HasPerformance(stageEntry.performanceId) == false then
+				return
+			end
+
+			if _CharacterSelectUILogic:Open(stageEntry.stageId) then self:Close() end
+			return
+		end
+
+		local destination = self:GetSelectedOutdoorDestination()
+		if destination == nil or destination.mapName == nil or destination.mapName == "" or _OutdoorMapTransitionLogic == nil then
+			return
+		end
+
+		_OutdoorMapTransitionLogic:MoveToMap(destination.mapName)
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirmButtonStateChanged(ButtonStateChangeEvent event)
+		-- SpriteSwap 사용 시 가로 크기가 축소되는 현상을 우회하기 위해 같은 렌더러의 ImageRUID를 직접 교체합니다.
+		local renderer = self.confirmButton.Entity.SpriteGUIRendererComponent
+		if event.state == ButtonState.Hover then
+			renderer.ImageRUID = self.confirmButton.ImageRUIDs.HighlightedSprite
+		elseif event.state == ButtonState.Pressed then
+			renderer.ImageRUID = self.confirmButton.ImageRUIDs.PressedSprite
+		else
+			renderer.ImageRUID = DataRef(self.defaultConfirmButtonImageRuid)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCloseClicked(ButtonClickEvent event)
+		-- 현재 선택을 유지하지 않고 UI를 닫습니다.
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- StageSelect 스텝이 종료되면 열려 있는 선택 UI를 닫습니다.
+		if self:GetCurrentStep() ~= _EProgressStep.StageSelect then
+			self:Close()
+		end
+	end
+
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- LifeCycle
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 버튼, Progress 및 언어 변경 이벤트를 연결하고 선택 UI를 닫힌 상태로 초기화합니다.
+		self.defaultCardImageRuid = self.cardTemplate.SpriteGUIRendererComponent.ImageRUID.DataId
+		self.defaultPreviewImageRuid = self.previewImage.ImageRUID.DataId
+		self.defaultConfirmButtonImageRuid = self.confirmButton.Entity.SpriteGUIRendererComponent.ImageRUID.DataId
+		self.tCardBindings = {}
+		self.cardList.ItemEntity = self.cardTemplate
+		self.cardList.OnRefresh = function(index, entity)
+			self:OnCardRefresh(index, entity)
+		end
+		self:LoadSelectionData()
+		self:ConnectButtons()
+		if _ProgressManager ~= nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+		if _LocaleTextUtil ~= nil then
+		end
+		self.root.Enable = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 연결한 버튼, Progress 및 언어 변경 이벤트를 해제합니다.
+		self.cardList.OnRefresh = nil
+		for _, binding in pairs(self.tCardBindings) do
+			if isvalid(binding.entity) then
+				binding.entity:DisconnectEvent(ButtonClickEvent, binding.clickHandler)
+			end
+		end
+		self.tCardBindings = {}
+		self:DisconnectButtons()
+		self.confirmButton.Entity.SpriteGUIRendererComponent.ImageRUID = DataRef(self.defaultConfirmButtonImageRuid)
+		if self.progressChangedHandler ~= nil and _ProgressManager ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+		end
+		self.progressChangedHandler = nil
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void ConnectButtons()
+		-- 포스트잇 탭, 선택 카드, 확인 및 닫기 버튼 이벤트를 연결합니다.
+		if self.stageTabButton ~= nil then
+			self.stageTabClickHandler = self.stageTabButton.Entity:ConnectEvent(ButtonClickEvent, self.OnStageTabClicked)
+		end
+		if self.outdoorTabButton ~= nil then
+			self.outdoorTabClickHandler = self.outdoorTabButton.Entity:ConnectEvent(ButtonClickEvent, self.OnOutdoorTabClicked)
+		end
+		if self.confirmButton ~= nil then
+			self.confirmClickHandler = self.confirmButton.Entity:ConnectEvent(ButtonClickEvent, self.OnConfirmClicked)
+			self.confirmStateChangedHandler = self.confirmButton.Entity:ConnectEvent(ButtonStateChangeEvent, self.OnConfirmButtonStateChanged)
+		end
+		if self.closeButton ~= nil then
+			self.closeClickHandler = self.closeButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCloseClicked)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectButtons()
+		-- 연결한 모든 정적 버튼 이벤트를 해제합니다.
+		if self.stageTabButton ~= nil and self.stageTabClickHandler ~= nil then
+			self.stageTabButton.Entity:DisconnectEvent(ButtonClickEvent, self.stageTabClickHandler)
+		end
+		if self.outdoorTabButton ~= nil and self.outdoorTabClickHandler ~= nil then
+			self.outdoorTabButton.Entity:DisconnectEvent(ButtonClickEvent, self.outdoorTabClickHandler)
+		end
+		if self.confirmButton ~= nil and self.confirmClickHandler ~= nil then
+			self.confirmButton.Entity:DisconnectEvent(ButtonClickEvent, self.confirmClickHandler)
+		end
+		if self.confirmButton ~= nil and self.confirmStateChangedHandler ~= nil then
+			self.confirmButton.Entity:DisconnectEvent(ButtonStateChangeEvent, self.confirmStateChangedHandler)
+		end
+		if self.closeButton ~= nil and self.closeClickHandler ~= nil then
+			self.closeButton.Entity:DisconnectEvent(ButtonClickEvent, self.closeClickHandler)
+		end
+
+		self.stageTabClickHandler = nil
+		self.outdoorTabClickHandler = nil
+		self.confirmClickHandler = nil
+		self.confirmStateChangedHandler = nil
+		self.closeClickHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectCategory(string category)
+		-- 선택 카테고리를 바꾸고 카드 및 상세 정보를 갱신합니다.
+		self.selectedCategory = category
+		self.selectedIndex = 1
+		if category == self.CATEGORY_OUTDOOR then
+			self:RefreshOutdoorDestinations()
+		end
+
+		self:RefreshTabVisuals()
+		self:RefreshCards()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectCard(integer index)
+		-- 현재 카테고리에서 유효한 카드를 선택하고 상세 정보를 갱신합니다.
+		local cardCount = self:GetCurrentCardCount()
+		if index <= 0 or index > cardCount then
+			return
+		end
+
+		local previousIndex = self.selectedIndex
+		self.selectedIndex = index
+		self:RefreshCardVisuals(previousIndex)
+		self:RefreshDetail()
+		self:RefreshConfirmButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void LoadSelectionData()
+		-- StageTable에 등록된 스테이지 목록을 읽습니다.
+		self.tStageEntries = _StageMaster:GetStages()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshOutdoorDestinations()
+		-- 현재 맵을 제외한 실제 외출 목적지 목록을 읽습니다.
+		self.tOutdoorDestinations = {}
+		if _OutdoorMapTransitionLogic ~= nil then
+			self.tOutdoorDestinations = _OutdoorMapTransitionLogic:GetDestinations(self:GetCurrentMapName())
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCards()
+		-- 전체 목록을 카드 템플릿으로 표시하고 현재 선택의 상세 정보를 갱신합니다.
+		local cardCount = self:GetCurrentCardCount()
+		if cardCount == 0 then
+			self.selectedIndex = 0
+		elseif self.selectedIndex <= 0 or self.selectedIndex > cardCount then
+			self.selectedIndex = 1
+		end
+		self.cardList.TotalCount = cardCount
+		self.cardList:Refresh(true, true)
+		self:RefreshDetail()
+		self:RefreshConfirmButton()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshTabVisuals()
+		-- 활성 포스트잇은 원색, 비활성 포스트잇은 어둡게 표시합니다.
+		self:SetSpriteColor(self.stageTabBackground, self.selectedCategory == self.CATEGORY_STAGE)
+		self:SetSpriteColor(self.outdoorTabBackground, self.selectedCategory == self.CATEGORY_OUTDOOR)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshCardVisuals(integer previousIndex)
+		-- 목록을 다시 갱신하지 않고 이전 카드와 현재 선택 카드의 색상만 변경합니다.
+		for _, binding in pairs(self.tCardBindings) do
+			if (binding.index == previousIndex or binding.index == self.selectedIndex) and isvalid(binding.entity) then
+				self:SetSpriteColor(binding.entity.SpriteGUIRendererComponent, binding.index == self.selectedIndex)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshDetail()
+		-- 선택된 스테이지 또는 외출 맵의 상세 문구를 표시하고 제목 뒤에 리치텍스트 별을 붙입니다.
+		if self.selectedCategory == self.CATEGORY_STAGE then
+			local stageEntry = self:GetSelectedStageEntry()
+			self:SetText(self.mainTitleText, _LocaleTextUtil:GetText("ui.stage_select.title.stage") .. " <voffset=-3><sprite name=\"Star\"></voffset>")
+			self:SetText(self.headlineText, stageEntry ~= nil and stageEntry.headline or "")
+			self:SetText(self.detailHeaderText, _LocaleTextUtil:GetText("ui.stage_select.category.stage"))
+			self:SetText(self.detailNameText, stageEntry ~= nil and stageEntry.preview or "")
+			self:SetText(self.detailDescriptionText, stageEntry ~= nil and stageEntry.description or "")
+			self:SetImage(self.previewImage, stageEntry ~= nil and stageEntry.previewImageId or "", self.defaultPreviewImageRuid)
+			return
+		end
+
+		self:SetImage(self.previewImage, "", self.defaultPreviewImageRuid)
+		self:SetText(self.mainTitleText, _LocaleTextUtil:GetText("ui.stage_select.title.outdoor") .. " <voffset=-3><sprite name=\"Star\"></voffset>")
+		self:SetText(self.headlineText, _LocaleTextUtil:GetText("ui.stage_select.headline.outdoor"))
+		self:SetText(self.detailHeaderText, _LocaleTextUtil:GetText("ui.stage_select.category.outdoor"))
+		local destination = self:GetSelectedOutdoorDestination()
+		if destination == nil then
+			self:SetText(self.detailNameText, _LocaleTextUtil:GetText("ui.stage_select.empty_outdoor"))
+			self:SetText(self.detailDescriptionText, "")
+			return
+		end
+
+		self:SetText(self.detailNameText, self:GetCardDisplayName(self.selectedIndex))
+		self:SetText(self.detailDescriptionText, destination.description or _LocaleTextUtil:GetText("ui.stage_select.outdoor_description"))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshConfirmButton()
+		-- 실제로 요청할 수 있는 스테이지 또는 외출 맵을 선택했을 때만 확인 버튼을 활성화합니다.
+		if self.selectedCategory == self.CATEGORY_STAGE then
+			self.confirmButton.Enable = self:GetSelectedStageEntry() ~= nil
+			return
+		end
+
+		local destination = self:GetSelectedOutdoorDestination()
+		self.confirmButton.Enable = destination ~= nil and destination.mapName ~= nil and destination.mapName ~= ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCurrentCardCount()
+		-- 현재 카테고리의 전체 카드 수를 반환합니다.
+		return self.selectedCategory == self.CATEGORY_STAGE and #self.tStageEntries or #self.tOutdoorDestinations
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCardDisplayName(integer index)
+		-- 현재 카테고리의 카드 표시 이름을 반환합니다.
+		if self.selectedCategory == self.CATEGORY_STAGE then
+			local stageEntry = self.tStageEntries[index]
+			return stageEntry ~= nil and stageEntry.name or ""
+		end
+
+		local destination = self.tOutdoorDestinations[index]
+		if destination == nil then
+			return ""
+		end
+
+		local displayName = destination.displayName or destination.mapName or ""
+		if destination.mapName ~= nil and destination.mapName ~= "" then
+			return _LocaleTextUtil:GetText("ui.stage_select.outdoor." .. string.lower(destination.mapName) .. ".name")
+		end
+
+		return displayName
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetSelectedStageEntry()
+		-- 현재 선택된 스테이지 행을 반환합니다.
+		return self.tStageEntries[self.selectedIndex]
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetSelectedOutdoorDestination()
+		-- 현재 선택된 외출 맵 정보를 반환합니다.
+		return self.tOutdoorDestinations[self.selectedIndex]
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentMapName()
+		-- 로컬 플레이어가 현재 머무는 맵 이름을 반환합니다.
+		local player = _UserService.LocalPlayer
+		if player == nil or player.CurrentMap == nil then
+			return ""
+		end
+
+		return player.CurrentMap.Name
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer GetCurrentStep()
+		-- 클라이언트 Progress 캐시의 현재 Step을 반환합니다.
+		local progress = _ProgressManager ~= nil and _ProgressManager:ClientGetProgress() or nil
+		if progress == nil or progress.eCurrentStep == nil then
+			return 0
+		end
+
+		return progress.eCurrentStep
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetImage(SpriteGUIRendererComponent renderer, string imageId, string defaultRuid)
+		-- 테이블의 이미지 ID를 ResourceMaster에서 조회하고, 비어 있으면 에디터에 설정한 이미지를 유지합니다.
+		local ruid = imageId ~= "" and _ResourceMaster:ResolveResourceId(imageId) or defaultRuid
+		renderer.ImageRUID = DataRef(ruid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSpriteColor(SpriteGUIRendererComponent renderer, boolean isSelected)
+		-- 선택 상태에 맞춰 스프라이트 색상을 설정합니다.
+		renderer.Color = isSelected and Color(1, 1, 1, 1) or Color(0.72, 0.72, 0.72, 1)
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatTargetScoreText(string scoreText)
+		-- 목표 점수를 현재 언어의 템플릿에 반영합니다.
+		return _LocaleTextUtil:Format("ui.stage_select.target_score", scoreText, nil, nil, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(TextGUIRendererComponent textComponent, string text)
+		-- 연결된 텍스트 컴포넌트에 문구를 적용합니다.
+		textComponent.Text = text
+	end
+
+end

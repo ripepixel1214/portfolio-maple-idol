@@ -1,0 +1,21 @@
+@Logic
+script YSortLayerLogic extends Logic
+
+	property string SORT_MAP_LAYER_NAME = "오브젝트"
+	property string SORTING_LAYER_PREFIX = "MapLayer"
+
+	method string ResolveSortingLayer(Entity map)
+		-- 현재 맵의 오브젝트 레이어 순서로 Y 정렬 공통 레이어 결정
+		if not isvalid(map) then return "" end
+
+		for _, layerEntity in ipairs(map.Children:ToTable()) do
+			local layer = layerEntity.MapLayerComponent
+			if isvalid(layer) and layer.MapLayerName == self.SORT_MAP_LAYER_NAME then
+				return self.SORTING_LAYER_PREFIX .. tostring(layer.LayerSortOrder)
+			end
+		end
+
+		return ""
+	end
+
+end

@@ -1,3 +1,4 @@
+---@description "클라이언트에 전달할 미니게임 실행 정보"
 @Struct
 script MiniGameLaunchContext
 
@@ -10,5 +11,53 @@ script MiniGameLaunchContext
 	property number duration = 0
 	property integer betAmount = 0
 	property integer balance = 0
+	property integer mesoBalance = 0
+	property integer coinBalance = 0
+	property boolean isDebug = false
+	property string entryCurrency = ""
+	property integer entryAmount = 0
+	property boolean cancelOnMapChange = true
+
+	method any ToPlainTable()
+		-- 런타임 참조 없는 RPC 실행 정보 복사
+		return {
+			sessionId = self.sessionId,
+			miniGameId = self.miniGameId,
+			contextType = self.contextType,
+			contextId = self.contextId,
+			presentationActorId = self.presentationActorId,
+			commandPayload = self.commandPayload,
+			duration = self.duration,
+			betAmount = self.betAmount,
+			balance = self.balance,
+			mesoBalance = self.mesoBalance,
+			coinBalance = self.coinBalance,
+			isDebug = self.isDebug,
+			entryCurrency = self.entryCurrency,
+			entryAmount = self.entryAmount,
+			cancelOnMapChange = self.cancelOnMapChange
+		}
+	end
+
+	method any FromPlainTable(any tPlainData)
+		-- 수신 필드 타입과 기본값 정규화
+		if type(tPlainData) ~= "table" then return self end
+		self.cancelOnMapChange = tPlainData.cancelOnMapChange ~= false
+		self.sessionId = type(tPlainData.sessionId) == "string" and tPlainData.sessionId or ""
+		self.miniGameId = type(tPlainData.miniGameId) == "string" and tPlainData.miniGameId or ""
+		self.contextType = type(tPlainData.contextType) == "number" and math.floor(tPlainData.contextType) or 0
+		self.contextId = type(tPlainData.contextId) == "string" and tPlainData.contextId or ""
+		self.presentationActorId = type(tPlainData.presentationActorId) == "string" and tPlainData.presentationActorId or ""
+		self.commandPayload = type(tPlainData.commandPayload) == "string" and tPlainData.commandPayload or ""
+		self.duration = type(tPlainData.duration) == "number" and tPlainData.duration or 0
+		self.betAmount = type(tPlainData.betAmount) == "number" and math.floor(tPlainData.betAmount) or 0
+		self.balance = type(tPlainData.balance) == "number" and math.floor(tPlainData.balance) or 0
+		self.mesoBalance = math.max(0, math.floor(tonumber(tPlainData.mesoBalance) or 0))
+		self.coinBalance = math.max(0, math.floor(tonumber(tPlainData.coinBalance) or 0))
+		self.isDebug = tPlainData.isDebug == true
+		self.entryCurrency = type(tPlainData.entryCurrency) == "string" and tPlainData.entryCurrency or ""
+		self.entryAmount = math.max(0, math.floor(tonumber(tPlainData.entryAmount) or 0))
+		return self
+	end
 
 end
