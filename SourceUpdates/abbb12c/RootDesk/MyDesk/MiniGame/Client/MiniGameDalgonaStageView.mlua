@@ -1,0 +1,869 @@
+---@description "달고나 미니게임 UI 관리 로직"
+@Component
+script MiniGameDalgonaStageView extends Component
+	@HideFromInspector
+	property boolean initialized = false
+	property string TEXT_UI_DALGONA_INSTRUCTION = "ui.dalgona.instruction"
+	property string TEXT_UI_DALGONA_TITLE = "ui.dalgona.title"
+	property string TEXT_UI_DALGONA_PAYOUT = "ui.dalgona.payout"
+	property string LOCALIZATION_KEY_PREFIX = "ui."
+
+	property string BLOCK_SQUARE = "square"
+	property string BLOCK_S = "s_block"
+	property string BLOCK_LINE_THREE = "line_three"
+	property number INVALID_DROP_SHAKE_SECONDS = 0.2
+	property number INVALID_DROP_SHAKE_ANGLE = 3
+	property number INVALID_DROP_SHAKE_FREQUENCY = 12
+	property number DRAW_SHAKE_SECONDS = 0.5
+	property number DRAW_SHAKE_ANGLE = 6
+	property number DRAW_SHAKE_FREQUENCY = 2
+	property number BLOCK_CLICK_MAX_MOVEMENT = 12
+	property number RESULT_POPUP_OPEN_SECONDS = 0.35
+	property number RESULT_POPUP_CLOSE_SECONDS = 0.2
+	property number RESULT_POPUP_START_SCALE = 0.8
+	property integer resultPopupCloseId = 0
+	property boolean resultPopupClosing = false
+	property integer boardShakeId = 0
+	property integer drawShakeId = 0
+	property number drawAnimationRemaining = 0
+	property string pressedBlockId = ""
+	property integer pressedTouchId = 0
+	property Vector2 pressedTouchPoint = Vector2(0, 0)
+
+	property Entity panelEntity = nil
+	property Entity headerEntity = nil
+	property Entity titleTextEntity = nil
+	property Entity instructionTextEntity = nil
+	property Entity entryBalanceRow = nil
+	property Entity entryBetRow = nil
+	property Entity popupDimEntity = "a1b56006-eb3b-481d-8e97-057a244ea40d"
+	property Entity resultPanelEntity = nil
+	property Entity resultTextEntity = nil
+	property Entity boardFrameEntity = nil
+	property Entity blockControlPanelEntity = nil
+	property Entity gameStartPanelEntity = nil
+	property Entity drawCellHighlightEntity = nil
+
+	property Entity betSliderEntity = nil
+	property any betSliderBinding = nil
+	property boolean updatingBetSlider = false
+	property Entity startButtonEntity = nil
+	property Entity exitButtonEntity = nil
+	property Entity squareBlockEntity = nil
+	property Entity sBlockEntity = nil
+	property Entity lineThreeBlockEntity = nil
+	property Entity drawButtonEntity = nil
+	property Entity drawNumberEntity = nil
+	property Entity drawNumberTextEntity = nil
+	property Entity confirmButtonEntity = nil
+
+
+	property any tBoardCells = {}
+	property any tButtonHandlers = {}
+	property any tDragHandlers = {}
+	property any tPalettePositions = {}
+	-- Presenter가 전달한 표시 전용 스냅샷
+	property any tViewState = nil
+	property string activeDragBlockId = ""
+	property integer activeDragTouchId = 0
+	property Vector2 dragPointerOffset = Vector2(0, 0)
+
+	-- 화면 표시 API
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:Initialize()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		self:ReleaseView()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectButtons()
+		-- 고정 조작 버튼 연결
+		self:DisconnectButtons()
+		self.betSliderBinding = _MiniGameSettlementRule:GetBetSliderInput(self.betSliderEntity):ConnectEvent(SliderValueChangedEvent, function(event)
+			if not self.updatingBetSlider then _MiniGameDalgonaPresenter:SetBet(math.floor(event.Value)) end
+		end)
+		self:ConnectButton(self.startButtonEntity, function() self:RequestStart() end)
+		self:ConnectButton(self.exitButtonEntity, function() _MiniGameDalgonaPresenter:Close() end)
+		self:ConnectButton(self.drawButtonEntity, function() self:RequestDrawSequence() end)
+		self:ConnectButton(self.confirmButtonEntity, function() self:OnConfirmClicked() end)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectButton(Entity buttonEntity, any callback)
+		-- 단일 버튼 클릭 핸들러 등록
+		if buttonEntity == nil or callback == nil then
+			return
+		end
+
+		local eventHandler = buttonEntity:ConnectEvent(ButtonClickEvent, callback)
+		table.insert(self.tButtonHandlers, { entity = buttonEntity, eventHandler = eventHandler })
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectButtons()
+		-- 등록된 버튼 클릭 핸들러 일괄 해제
+		for _, item in ipairs(self.tButtonHandlers or {}) do
+			if item.entity ~= nil and isvalid(item.entity) and item.eventHandler ~= nil then
+				item.entity:DisconnectEvent(ButtonClickEvent, item.eventHandler)
+			end
+		end
+		self.tButtonHandlers = {}
+		if self.betSliderBinding ~= nil and isvalid(self.betSliderEntity) then
+			_MiniGameSettlementRule:GetBetSliderInput(self.betSliderEntity):DisconnectEvent(SliderValueChangedEvent, self.betSliderBinding)
+		end
+		self.betSliderBinding = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CachePalettePositions()
+		-- 블록별 팔레트 원위치 저장
+		self.tPalettePositions = {}
+		for _, blockId in ipairs(self:GetBlockIds()) do
+			local blockEntity = self:GetBlockEntity(blockId)
+			local transform = blockEntity ~= nil and blockEntity.UITransformComponent or nil
+			if transform ~= nil then
+				self.tPalettePositions[blockId] = Vector2(transform.anchoredPosition.x, transform.anchoredPosition.y)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConnectBlockDrags()
+		-- 블록 팔레트의 드래그 입력 연결
+		self:DisconnectBlockDrags()
+		for _, blockId in ipairs(self:GetBlockIds()) do
+			local blockEntity = self:GetBlockEntity(blockId)
+			if blockEntity ~= nil and blockEntity.UITouchReceiveComponent ~= nil then
+				local downHandler = blockEntity:ConnectEvent(UITouchDownEvent, self.OnBlockTouchDown)
+				local upHandler = blockEntity:ConnectEvent(UITouchUpEvent, self.OnBlockTouchUp)
+				local beginHandler = blockEntity:ConnectEvent(UITouchBeginDragEvent, self.OnBlockBeginDrag)
+				local dragHandler = blockEntity:ConnectEvent(UITouchDragEvent, self.OnBlockDrag)
+				local endHandler = blockEntity:ConnectEvent(UITouchEndDragEvent, self.OnBlockEndDrag)
+				table.insert(self.tDragHandlers, {
+					entity = blockEntity,
+					downHandler = downHandler,
+					upHandler = upHandler,
+					beginHandler = beginHandler,
+					dragHandler = dragHandler,
+					endHandler = endHandler
+				})
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectBlockDrags()
+		-- 블록 드래그 입력 연결 해제
+		for _, item in ipairs(self.tDragHandlers or {}) do
+			if item.entity ~= nil and isvalid(item.entity) then
+				if item.downHandler ~= nil then item.entity:DisconnectEvent(UITouchDownEvent, item.downHandler) end
+				if item.upHandler ~= nil then item.entity:DisconnectEvent(UITouchUpEvent, item.upHandler) end
+				if item.beginHandler ~= nil then
+					item.entity:DisconnectEvent(UITouchBeginDragEvent, item.beginHandler)
+				end
+				if item.dragHandler ~= nil then
+					item.entity:DisconnectEvent(UITouchDragEvent, item.dragHandler)
+				end
+				if item.endHandler ~= nil then
+					item.entity:DisconnectEvent(UITouchEndDragEvent, item.endHandler)
+				end
+			end
+		end
+		self.tDragHandlers = {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetBlockIds()
+		-- 기획 기준 블록 식별자 순서 반환
+		return { self.BLOCK_SQUARE, self.BLOCK_S, self.BLOCK_LINE_THREE }
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetBlockEntity(string blockId)
+		-- 블록 식별자에 대응하는 UI 엔티티 반환
+		if blockId == self.BLOCK_SQUARE then
+			return self.squareBlockEntity
+		elseif blockId == self.BLOCK_S then
+			return self.sBlockEntity
+		elseif blockId == self.BLOCK_LINE_THREE then
+			return self.lineThreeBlockEntity
+		end
+		return nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolveBlockId(Entity blockEntity)
+		-- UI 엔티티에 대응하는 블록 식별자 반환
+		if blockEntity == self.squareBlockEntity then
+			return self.BLOCK_SQUARE
+		elseif blockEntity == self.sBlockEntity then
+			return self.BLOCK_S
+		elseif blockEntity == self.lineThreeBlockEntity then
+			return self.BLOCK_LINE_THREE
+		end
+		return ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBlockTouchDown(UITouchDownEvent event)
+		-- 잡은 위치를 기록해 블록이 드래그 시작 시 튀지 않도록 유지
+		if event == nil or self.tViewState == nil or self.drawAnimationRemaining > 0 then return end
+		local blockId = self:ResolveBlockId(event.Entity)
+		if blockId == "" or self.activeDragBlockId ~= "" or self.tViewState.canDrag[blockId] ~= true then return end
+		self.pressedBlockId = blockId
+		self.pressedTouchId = event.TouchId
+		self.pressedTouchPoint = Vector2(event.TouchPoint.x, event.TouchPoint.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBlockTouchUp(UITouchUpEvent event)
+		-- 드래그 없이 눌렀다 놓은 배치 블록만 제거
+		if event == nil or self.pressedBlockId == "" or event.TouchId ~= self.pressedTouchId then return end
+		local blockId = self.pressedBlockId
+		self.pressedBlockId = ""
+		if self.drawAnimationRemaining > 0 or self.tViewState == nil
+			or self.tViewState.placements[blockId] == nil or self:ResolveBlockId(event.Entity) ~= blockId then return end
+		local dx = event.TouchPoint.x - self.pressedTouchPoint.x
+		local dy = event.TouchPoint.y - self.pressedTouchPoint.y
+		if dx * dx + dy * dy > self.BLOCK_CLICK_MAX_MOVEMENT * self.BLOCK_CLICK_MAX_MOVEMENT then return end
+		_MiniGameDalgonaPresenter:RemoveBlock(blockId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBlockBeginDrag(UITouchBeginDragEvent event)
+		-- 선택한 포인터의 누름 지점을 블록 기준 오프셋으로 저장
+		if event == nil or self.tViewState == nil or self.drawAnimationRemaining > 0 or self.activeDragBlockId ~= "" then return end
+		local blockId = self:ResolveBlockId(event.Entity)
+		if blockId == "" or self.tViewState.placements[blockId] ~= nil then return end
+		local pressPoint = event.TouchPoint
+		if self.pressedBlockId == blockId and self.pressedTouchId == event.TouchId then
+			pressPoint = self.pressedTouchPoint
+		end
+		self.pressedBlockId = ""
+		local blockEntity = self:GetBlockEntity(blockId)
+		local localPoint = self:ScreenToBlockPanelLocal(pressPoint)
+		if blockEntity == nil or blockEntity.UITransformComponent == nil or localPoint == nil then return end
+		if not _MiniGameDalgonaPresenter:CanSelectBlock(blockId) then return end
+		local position = blockEntity.UITransformComponent.anchoredPosition
+		self.activeDragBlockId = blockId
+		self.activeDragTouchId = event.TouchId
+		self.dragPointerOffset = Vector2(localPoint.x - position.x, localPoint.y - position.y)
+		self:MoveDraggedBlock(event.TouchPoint)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void MoveDraggedBlock(Vector2 screenPoint)
+		local blockEntity = self:GetBlockEntity(self.activeDragBlockId)
+		local localPoint = self:ScreenToBlockPanelLocal(screenPoint)
+		if blockEntity == nil or blockEntity.UITransformComponent == nil or localPoint == nil then return end
+		blockEntity.UITransformComponent.anchoredPosition = Vector2(
+			localPoint.x - self.dragPointerOffset.x,
+			localPoint.y - self.dragPointerOffset.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBlockDrag(UITouchDragEvent event)
+		if event == nil or self.activeDragBlockId == "" or event.TouchId ~= self.activeDragTouchId then return end
+		self:MoveDraggedBlock(event.TouchPoint)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBlockEndDrag(UITouchEndDragEvent event)
+		-- 마지막 이동 이벤트 대신 실제 놓은 위치에서 배치 판정
+		if event == nil or self.activeDragBlockId == "" or event.TouchId ~= self.activeDragTouchId then return end
+		local blockId = self.activeDragBlockId
+		self:MoveDraggedBlock(event.TouchPoint)
+		local tDropPlacement = self:ResolveDropPlacement(blockId)
+		self.activeDragBlockId = ""
+		local accepted = false
+		if tDropPlacement ~= nil then
+			accepted = _MiniGameDalgonaPresenter:PlaceBlock(blockId, tDropPlacement.row, tDropPlacement.column)
+		end
+		if not accepted then
+			_MiniGameDalgonaPresenter:RemoveBlock(blockId)
+			self:ShowInvalidPlacement()
+		end
+		self:RefreshBlockPositions()
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ScreenToBlockPanelLocal(Vector2 screenPoint)
+		-- 화면 좌표를 블록 패널 로컬 좌표로 변환
+		local transform = self.blockControlPanelEntity ~= nil and self.blockControlPanelEntity.UITransformComponent or nil
+		if transform == nil then
+			return nil
+		end
+		return _UILogic:ScreenToLocalUIPosition(screenPoint, transform)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetBoardCellCenterInBlockPanel(integer row, integer column)
+		-- Grid가 배치한 셀 중심을 블록 패널 로컬 좌표로 변환
+		local index = row * _MiniGameTable.DALGONA_BOARD_SIZE + column + 1
+		local cellEntity = self.tBoardCells[index]
+		local cellTransform = cellEntity ~= nil and cellEntity.UITransformComponent or nil
+		local panelTransform = self.blockControlPanelEntity ~= nil and self.blockControlPanelEntity.UITransformComponent or nil
+		if cellTransform == nil or panelTransform == nil then
+			return nil
+		end
+
+		local corners = cellTransform:GetWorldCorners()
+		if corners == nil or #corners == 0 then
+			return nil
+		end
+		local centerX = 0
+		local centerY = 0
+		for _, corner in ipairs(corners) do
+			centerX = centerX + corner.x
+			centerY = centerY + corner.y
+		end
+		local centerPoint = panelTransform:ToLocalPoint(
+			Vector3(centerX / #corners, centerY / #corners, 0))
+		return Vector2(centerPoint.x, centerPoint.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ResolveDropPlacement(string blockId)
+		-- 블록 중심과 회전 셀 무게중심으로 좌상단 배치 좌표 계산
+		local blockEntity = self:GetBlockEntity(blockId)
+		if blockEntity == nil or blockEntity.UITransformComponent == nil then
+			return nil
+		end
+
+		local cells = self.tViewState ~= nil and self.tViewState.blockCells[blockId] or nil
+		if cells == nil or #cells == 0 then
+			return nil
+		end
+
+		local meanRow = 0
+		local meanColumn = 0
+		for _, cell in ipairs(cells) do
+			meanRow = meanRow + cell.row
+			meanColumn = meanColumn + cell.column
+		end
+		meanRow = meanRow / #cells
+		meanColumn = meanColumn / #cells
+
+		local origin = self:GetBoardCellCenterInBlockPanel(0, 0)
+		local columnPoint = self:GetBoardCellCenterInBlockPanel(0, 1)
+		local rowPoint = self:GetBoardCellCenterInBlockPanel(1, 0)
+		if origin == nil or columnPoint == nil or rowPoint == nil then
+			return nil
+		end
+
+		local columnAxis = Vector2(columnPoint.x - origin.x, columnPoint.y - origin.y)
+		local rowAxis = Vector2(rowPoint.x - origin.x, rowPoint.y - origin.y)
+		local columnLength = columnAxis.x * columnAxis.x + columnAxis.y * columnAxis.y
+		local rowLength = rowAxis.x * rowAxis.x + rowAxis.y * rowAxis.y
+		if columnLength <= 0 or rowLength <= 0 then
+			return nil
+		end
+
+		local position = blockEntity.UITransformComponent.anchoredPosition
+		local delta = Vector2(position.x - origin.x, position.y - origin.y)
+		local centerColumn = (delta.x * columnAxis.x + delta.y * columnAxis.y) / columnLength
+		local centerRow = (delta.x * rowAxis.x + delta.y * rowAxis.y) / rowLength
+		return {
+			row = math.floor(centerRow - meanRow + 0.5),
+			column = math.floor(centerColumn - meanColumn + 0.5)
+		}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FitViewportOverlays(Vector3 scale)
+		-- 오른쪽 판돈 패널을 보드와 함께 축소해 화면 가장자리 여백 유지
+		if not isvalid(self.gameStartPanelEntity) then return end
+		local transform = self.gameStartPanelEntity.UITransformComponent
+		if self._T.bettingPanelPosition == nil then self._T.bettingPanelPosition = transform.anchoredPosition end
+		transform.anchoredPosition = self._T.bettingPanelPosition * scale.x
+		transform.UIScale = scale
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		self:ShowLobby()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(any tContext)
+		-- 서버 세션의 안내 문구와 화면만 초기화
+		self:ResetVisuals()
+		self:SetText(self.titleTextEntity, tContext.title)
+		self:SetText(self.instructionTextEntity, tContext.instruction)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		-- 달고나 패널 표시
+		_MiniGameUIRouter:SetStageVisible(self.panelEntity, true)
+		self:RefreshAll()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectStage(integer inputType, boolean useGauge)
+		-- Selection 전용 화면 상태 갱신
+		self:RefreshAll()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 달고나 패널과 표시 스냅샷 정리
+		self:StopInteractionEffects()
+		self.activeDragBlockId = ""
+		self.tViewState = MiniGameDalgonaViewState()
+		self:SetEntityEnabled(self.popupDimEntity, false)
+		_MiniGameUIRouter:SetStageVisible(self.panelEntity, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirmClicked()
+		-- 결과 창 축소 완료 후 기존 Presenter의 화면 종료 처리
+		if self.tViewState == nil or not self.tViewState.showResult or self.resultPopupClosing then return end
+		self.resultPopupClosing = true
+		self:SetButtonEnabled(self.confirmButtonEntity, false)
+		local finish = function()
+			self.resultPopupCloseId = 0
+			self.resultPopupClosing = false
+			_MiniGameDalgonaPresenter:Close()
+		end
+		self.resultPopupCloseId = _UITween:PopOut(self.resultPanelEntity, self.RESULT_POPUP_CLOSE_SECONDS, 0, finish)
+		if self.resultPopupCloseId == 0 then finish() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetResultPopupVisible(boolean show)
+		-- 새로 열릴 때만 등장 효과 재생, 결과 갱신 중 닫기 효과 유지
+		if not isvalid(self.resultPanelEntity) then return end
+		if not show then
+			self:HideResultPopupImmediately()
+			return
+		end
+		if self.resultPopupClosing or self.resultPanelEntity.Enable then return end
+		self.resultPanelEntity.Enable = true
+		_UITween:PopIn(self.resultPanelEntity, self.RESULT_POPUP_OPEN_SECONDS, self.RESULT_POPUP_START_SCALE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideResultPopupImmediately()
+		-- 초기화와 종료 시 지연 콜백 취소 및 원래 크기 복원
+		_UITween:Stop(self.resultPopupCloseId)
+		self.resultPopupCloseId = 0
+		self.resultPopupClosing = false
+		if not isvalid(self.resultPanelEntity) then return end
+		_UITween:StopEffect(self.resultPanelEntity, _UITween.EFFECT_POP_IN)
+		_UITween:StopEffect(self.resultPanelEntity, _UITween.EFFECT_POP_OUT)
+		self.resultPanelEntity.Enable = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestStart()
+		-- 시작 버튼 의도 전달
+		_MiniGameDalgonaPresenter:RequestStart()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RestoreBlockToPalette(string blockId)
+		-- 블록을 팔레트 원위치와 기본 회전으로 복구
+		local blockEntity = self:GetBlockEntity(blockId)
+		local position = self.tPalettePositions[blockId]
+		if blockEntity == nil or blockEntity.UITransformComponent == nil or position == nil then
+			return
+		end
+		blockEntity.UITransformComponent.anchoredPosition = Vector2(position.x, position.y)
+		blockEntity.UITransformComponent.ZRotation = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SnapBlockToPlacement(string blockId)
+		-- 배치 셀 중심에 실제 블록 UI 스냅
+		local placement = self.tViewState.placements[blockId]
+		local blockEntity = self:GetBlockEntity(blockId)
+		if placement == nil or blockEntity == nil or blockEntity.UITransformComponent == nil then
+			return
+		end
+
+		local centerX = 0
+		local centerY = 0
+		local count = 0
+		for _, cell in ipairs(self:GetAbsoluteCells(placement)) do
+			local center = self:GetBoardCellCenterInBlockPanel(cell.row, cell.column)
+			if center == nil then
+				return
+			end
+			centerX = centerX + center.x
+			centerY = centerY + center.y
+			count = count + 1
+		end
+		if count == 0 then
+			return
+		end
+		blockEntity.UITransformComponent.anchoredPosition = Vector2(centerX / count, centerY / count)
+		blockEntity.UITransformComponent.ZRotation = -(placement.rotation or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetAbsoluteCells(any placement)
+		-- 표시 스냅샷의 셀 목록 반환
+		return placement ~= nil and placement.cells or {}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestDrawSequence()
+		-- 흔들림과 대기 중 입력 잠금, 같은 연출이 유지된 경우에만 추첨
+		if self.tViewState == nil or not self.tViewState.canDraw or self.drawAnimationRemaining > 0 then return end
+		local shakeId = _UITween:ShakeRotation(self.drawButtonEntity, self.DRAW_SHAKE_SECONDS,
+			self.DRAW_SHAKE_ANGLE, self.DRAW_SHAKE_FREQUENCY, false)
+		if shakeId <= 0 then return end
+		self.drawShakeId = shakeId
+		self.pressedBlockId = ""
+		self.drawAnimationRemaining = self.DRAW_SHAKE_SECONDS
+		self:RefreshBlockControls()
+		self:RefreshActionButtons()
+		wait(self.DRAW_SHAKE_SECONDS)
+		if self.drawShakeId ~= shakeId then return end
+		_UITween:Stop(shakeId)
+		wait(0.3)
+		if self.drawShakeId ~= shakeId then return end
+		if not isvalid(self.panelEntity) or not self.panelEntity.EnabledInHierarchy then
+			self:StopInteractionEffects()
+			return
+		end
+		self.drawShakeId = 0
+		self.drawAnimationRemaining = 0
+		_MiniGameDalgonaPresenter:RequestDrawSequence()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowInvalidPlacement()
+		-- 유효하지 않은 드롭을 보드 회전 흔들림으로 표시
+		self.boardShakeId = _UITween:ShakeRotation(self.boardFrameEntity, self.INVALID_DROP_SHAKE_SECONDS,
+			self.INVALID_DROP_SHAKE_ANGLE, self.INVALID_DROP_SHAKE_FREQUENCY, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopInteractionEffects()
+		-- 화면 초기화와 종료 시 예약 추첨 취소 및 모든 연출 복원
+		self:HideResultPopupImmediately()
+		_UITween:Stop(self.boardShakeId)
+		_UITween:Stop(self.drawShakeId)
+		self.boardShakeId = 0
+		self.drawShakeId = 0
+		self.drawAnimationRemaining = 0
+		self.pressedBlockId = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshPhaseVisibility()
+		-- Presenter가 전달한 단계별 표시 여부 적용
+		local tState = self.tViewState
+		self:SetEntityEnabled(self.popupDimEntity, tState.showBetting or tState.showResult)
+		self:SetEntityEnabled(self.gameStartPanelEntity, tState.showBetting)
+		self:SetEntityEnabled(self.blockControlPanelEntity, tState.showPlacement)
+		self:SetEntityEnabled(self.boardFrameEntity, tState.showBetting or tState.showPlacement)
+		self:SetResultPopupVisible(tState.showResult)
+		self:SetEntityEnabled(self.headerEntity, not tState.showBetting)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshAll()
+		-- 현재 표시 스냅샷 전체 UI 반영
+		if self.tViewState == nil then return end
+		self:RefreshPhaseVisibility()
+		self:RefreshBetControls()
+		self:RefreshBlockControls()
+		if self.tViewState.showResult == true and self.tViewState.tDrawResult ~= nil then
+			self:RefreshBoardWithResult(self.tViewState.tDrawResult)
+		else
+			self:RefreshBoard()
+		end
+		self:RefreshActionButtons()
+		self:SetButtonEnabled(self.confirmButtonEntity, self.tViewState.showResult == true and not self.resultPopupClosing)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBetControls()
+		-- 표시 금액과 조작 가능 여부 적용
+		local tState = self.tViewState
+		local settlement = _MiniGameSettlementRule
+		if tState.showBetting then
+			settlement:SetEntryCurrencyRow(self.entryBalanceRow, tState.entryCurrency, tState.balance)
+			settlement:SetEntryCurrencyRow(self.entryBetRow, tState.entryCurrency, tState.betAmount)
+		end
+		self.updatingBetSlider = true
+		local slider = _MiniGameSettlementRule:GetBetSliderInput(self.betSliderEntity).SliderComponent
+		if tState.showBetting then settlement:SetBetSliderCurrency(slider, tState.entryCurrency) end
+		slider.MaxValue = math.max(slider.MinValue, tState.betUnitCount)
+		slider.Value = math.max(slider.MinValue, tState.betUnits)
+		slider.Enable = tState.canExit and tState.betUnitCount > 1
+		settlement:RefreshBetSliderFill(self.betSliderEntity, slider)
+		self.updatingBetSlider = false
+		self:SetButtonEnabled(self.startButtonEntity, tState.canStart)
+		self:SetButtonEnabled(self.exitButtonEntity, tState.canExit)
+		self:SetText(self.exitButtonEntity, "ui.common.exit")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBlockControls()
+		-- 세 블록 모두 표시하고 추첨 중 입력만 차단
+		for _, blockId in ipairs(self:GetBlockIds()) do
+			local blockEntity = self:GetBlockEntity(blockId)
+			self:SetEntityEnabled(blockEntity, true)
+			self:SetBlockTouchEnabled(blockEntity, self.tViewState.canDrag[blockId] == true and self.drawAnimationRemaining <= 0)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshActionButtons()
+		-- 전달받은 추첨 버튼과 결과 숫자 표시
+		local tState = self.tViewState
+		local showDrawNumber = tState.showResult and tState.tDrawResult ~= nil
+		self:SetEntityEnabled(self.drawButtonEntity, tState.showDrawButton)
+		self:SetButtonEnabled(self.drawButtonEntity, tState.canDraw and self.drawAnimationRemaining <= 0)
+		self:SetEntityEnabled(self.drawNumberEntity, showDrawNumber)
+		self:SetEntityEnabled(self.drawNumberTextEntity, showDrawNumber)
+		self:SetText(self.drawNumberTextEntity,
+			showDrawNumber and tostring(tState.tDrawResult.drawNumber) or "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBoard()
+		-- 숫자와 블록 점유 색상 표시
+		self:SetEntityEnabled(self.drawCellHighlightEntity, false)
+		local colors = {
+			[self.BLOCK_SQUARE] = Color(0.91, 0.27, 0.24, 1),
+			[self.BLOCK_S] = Color(0.91, 0.27, 0.24, 1),
+			[self.BLOCK_LINE_THREE] = Color(0.91, 0.27, 0.24, 1)
+		}
+		for index, cellEntity in ipairs(self.tBoardCells) do
+			self:SetText(cellEntity, tostring(index))
+			self:SetCellColor(cellEntity, Color(0.13, 0.20, 0.33, 1))
+			self:SetButtonEnabled(cellEntity, false)
+		end
+		for blockId, placement in pairs(self.tViewState.placements) do
+			for _, cell in ipairs(self:GetAbsoluteCells(placement)) do
+				local index = cell.row * _MiniGameTable.DALGONA_BOARD_SIZE + cell.column + 1
+				self:SetCellColor(self.tBoardCells[index], colors[blockId])
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBoardWithResult(any tDrawResult)
+		-- 추첨 셀과 적중 블록 강조
+		self:RefreshBoard()
+		if tDrawResult.isWin == true then
+			local placement = self.tViewState.placements[tDrawResult.blockId]
+			for _, cell in ipairs(self:GetAbsoluteCells(placement)) do
+				self:SetCellColor(self.tBoardCells[cell.row * _MiniGameTable.DALGONA_BOARD_SIZE + cell.column + 1], Color(0.25, 0.90, 0.48, 1))
+			end
+		end
+		local drawNumber = math.floor(tonumber(tDrawResult.drawNumber) or 0)
+		if drawNumber >= 1 and drawNumber <= #self.tBoardCells then
+			local drawCellEntity = self.tBoardCells[drawNumber]
+			self:SetCellColor(drawCellEntity, Color(1, 0.86, 0.24, 1))
+			self:ShowDrawCellHighlight(drawCellEntity)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowDrawCellHighlight(Entity cellEntity)
+		-- 추첨 셀 중심을 BlockControlPanel 로컬 좌표로 변환해 하이라이트 배치
+		if cellEntity == nil or cellEntity.UITransformComponent == nil
+			or self.blockControlPanelEntity == nil or self.blockControlPanelEntity.UITransformComponent == nil
+			or self.drawCellHighlightEntity == nil or self.drawCellHighlightEntity.UITransformComponent == nil then
+			return
+		end
+		local cellCorners = cellEntity.UITransformComponent:GetWorldCorners()
+		if cellCorners == nil or #cellCorners == 0 then
+			self:SetEntityEnabled(self.drawCellHighlightEntity, false)
+			return
+		end
+		local cellCenterX = 0
+		local cellCenterY = 0
+		for _, corner in ipairs(cellCorners) do
+			cellCenterX = cellCenterX + corner.x
+			cellCenterY = cellCenterY + corner.y
+		end
+		local panelTransform = self.blockControlPanelEntity.UITransformComponent
+		local cellLocalPoint = panelTransform:ToLocalPoint(Vector3(
+			cellCenterX / #cellCorners, cellCenterY / #cellCorners, 0))
+		self.drawCellHighlightEntity.UITransformComponent.anchoredPosition = Vector2(
+			cellLocalPoint.x, cellLocalPoint.y)
+		self.drawCellHighlightEntity.UITransformComponent.RectSize = cellEntity.UITransformComponent.RectSize
+		self.drawCellHighlightEntity.UITransformComponent.UIScale = Vector3(1, 1, 1)
+		self:SetEntityEnabled(self.drawCellHighlightEntity, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetButtonEnabled(Entity entity, boolean enabled)
+		-- 버튼 입력 활성 상태 설정
+		if entity ~= nil and entity.ButtonComponent ~= nil then
+			entity.ButtonComponent.Enable = enabled
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBlockTouchEnabled(Entity entity, boolean enabled)
+		-- 드래그 대상의 터치 입력 활성 상태 설정
+		if entity ~= nil and entity.UITouchReceiveComponent ~= nil then
+			entity.UITouchReceiveComponent.Enable = enabled
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetCellColor(Entity entity, Color color)
+		-- 보드 셀 배경색 설정
+		if entity ~= nil and entity.SpriteGUIRendererComponent ~= nil then
+			entity.SpriteGUIRendererComponent.Color = color
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntityEnabled(Entity entity, boolean enabled)
+		-- UI 엔티티 표시 상태 설정
+		if entity ~= nil then
+			entity.Enable = enabled
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(Entity entity, string text)
+		-- 번역 키는 현재 언어로 해석하고 숫자·완성 문구는 그대로 표시
+		if entity ~= nil and entity.TextGUIRendererComponent ~= nil then
+			local value = text or ""
+			if string.sub(value, 1, #self.LOCALIZATION_KEY_PREFIX) == self.LOCALIZATION_KEY_PREFIX then
+				value = _LocaleTextUtil:GetText(value)
+			end
+			entity.TextGUIRendererComponent.Text = value
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string FormatInteger(number value)
+		-- 정수 천 단위 구분 문자열 생성
+		local formatted = tostring(math.floor(value or 0))
+		while true do
+			local nextText, count = string.gsub(formatted, "^(-?%d+)(%d%d%d)", "%1,%2")
+			formatted = nextText
+			if count == 0 then
+				break
+			end
+		end
+		return formatted
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowLobby()
+		-- 판돈 선택 화면만 표시
+		self:ResetVisuals()
+		_MiniGameUIRouter:SetStageVisible(self.panelEntity, true)
+		self:SetText(self.titleTextEntity, self.TEXT_UI_DALGONA_TITLE)
+		self:SetText(self.instructionTextEntity, self.TEXT_UI_DALGONA_INSTRUCTION)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetVisuals()
+		-- 드래그 연출과 이전 결과 표시 초기화
+		self:StopInteractionEffects()
+		self.activeDragBlockId = ""
+		self.tViewState = MiniGameDalgonaViewState()
+		self:SetText(self.resultTextEntity, "")
+		for _, blockId in ipairs(self:GetBlockIds()) do self:RestoreBlockToPalette(blockId) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderState(any tState)
+		-- 전달받은 스냅샷으로만 화면 갱신
+		if tState == nil then return end
+		self.tViewState = tState
+		if self.activeDragBlockId ~= "" and not tState.canDrag[self.activeDragBlockId] then
+			self.activeDragBlockId = ""
+		end
+		if tState.tDrawResult ~= nil then
+			_LocaleTextUtil:SetLocalizedText(self.resultTextEntity.TextGUIRendererComponent, self.TEXT_UI_DALGONA_PAYOUT, self:FormatInteger(tState.tDrawResult.payout), _LocaleTextUtil:GetText(_MiniGameSettlementRule:GetCurrencyLabelKey(tState.entryCurrency)), nil)
+		else
+			self:SetText(self.resultTextEntity, "")
+		end
+		self:RefreshBlockPositions()
+		self:RefreshAll()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBlockPositions()
+		-- 드래그 중인 블록을 제외한 표시 위치 복구
+		if self.tViewState == nil then return end
+		for _, blockId in ipairs(self:GetBlockIds()) do
+			if blockId ~= self.activeDragBlockId then
+				if self.tViewState.placements[blockId] ~= nil then
+					self:SnapBlockToPlacement(blockId)
+				else
+					self:RestoreBlockToPalette(blockId)
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetStageRoot()
+		return self.Entity
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCapabilities()
+		-- 단계 표시와 블록 선택 화면만 제공
+		local caps = _MiniGameViewRegistry
+		return {[caps.CAP_STAGE] = self, [caps.CAP_SELECTION] = self}
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		-- 숨겨진 스테이지에서도 중복 없이 UI 입력 연결
+		if self.initialized then return true end
+		if not _MiniGameViewRegistry:ValidateBindings("MiniGameDalgonaStageView", {
+			{"panelEntity", self.panelEntity},
+			{"entryBalanceRow", self.entryBalanceRow},
+			{"entryBetRow", self.entryBetRow},
+			{"popupDimEntity", self.popupDimEntity},
+			{"startButtonEntity", self.startButtonEntity},
+			{"betSliderEntity", self.betSliderEntity},
+			{"confirmButtonEntity", self.confirmButtonEntity},
+			{"squareBlockEntity", self.squareBlockEntity},
+			{"sBlockEntity", self.sBlockEntity},
+			{"lineThreeBlockEntity", self.lineThreeBlockEntity},
+			{"exitButtonEntity", self.exitButtonEntity},
+			{"boardFrameEntity", self.boardFrameEntity}
+		}) then return false end
+		-- UI 엔티티 캐시와 버튼 이벤트 연결
+		_UILogic:SetSiblingIndex(self.popupDimEntity.UITransformComponent, 1)
+		self.tBoardCells = {}
+		local boardSize = _MiniGameTable.DALGONA_BOARD_SIZE
+		for index = 1, boardSize * boardSize do
+			local cellEntity = self.boardFrameEntity:GetChildByName(string.format("Cell%02d", index), false)
+			if not isvalid(cellEntity) then return false end
+			self.tBoardCells[index] = cellEntity
+		end
+		self.tViewState = MiniGameDalgonaViewState()
+		self:CachePalettePositions()
+		self:ConnectButtons()
+		self:ConnectBlockDrags()
+		self:Close()
+		self.initialized = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReleaseView()
+		-- 수동 초기화와 엔티티 생명주기 종료의 중복 해제 방지
+		if not self.initialized then return end
+		self.initialized = false
+		-- 버튼 이벤트와 진행 중 연출 정리
+		self:StopInteractionEffects()
+		self:DisconnectButtons()
+		self:DisconnectBlockDrags()
+	end
+end

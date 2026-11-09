@@ -1,0 +1,341 @@
+---@description "캐릭터 스탯 기반 공연 점수 산출과 서버 권위 클리어 판정, 결과 동기화"
+@Logic
+script PerformanceResultManager extends Logic
+
+	-- 팀 스탯 가중치: 센터 캐릭터 스탯에 곱하는 배율 (서브는 1)
+	property number centerStatWeight = 1.4
+
+	-- 주요 스탯(50%) 배율/최대 반영 점수
+	property number mainStatMultiplier = 10
+	property number mainStatMax = 15000
+
+	-- 부스탯(각 25%) 배율/최대 반영 점수
+	property number subStatMultiplier = 8
+	property number subStatMax = 7500
+
+	-- 스탯 총점(주스탯+부스탯1+부스탯2) 최대
+	property number statTotalMax = 30000
+
+	property integer stageRewardMeso = 500
+
+	property integer stageRewardIntimacy = 50
+
+	property any pendingStageReward = nil
+
+	-- 서버에서 승인한 현재 스테이지 공연 시도와 확정 결과
+	property any tStageAttempt = nil
+
+	@ExecSpace("Server")
+	method void RequestBeginPerformance(string performanceId, table tRoleAssignmentPlain, string requestId)
+		-- 요청 소유자와 현재 스테이지·편성을 검증한 뒤 서버 시계로 공연 시도 승인
+		local tStage = self:GetCurrentStageForUser(performanceId, senderUserId)
+		local tAssignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, senderUserId)
+		local tHeader = _PerformanceMaster:GetPerformance(performanceId)
+		if requestId == nil or requestId == "" or tStage == nil or tAssignment == nil or tHeader == nil
+			or type(tHeader.length) ~= "number" or tHeader.length ~= tHeader.length
+			or tHeader.length <= 0 or tHeader.length == math.huge
+			or self:IsUserInPerformanceMap(senderUserId) == false then
+			log_warning("[PerformanceResult] 공연 시작 거부 id=" .. tostring(performanceId))
+			self:SyncPerformanceStart(requestId, performanceId, "", {}, senderUserId)
+			return
+		end
+
+		local tAttempt = PerformanceStageAttempt()
+		tAttempt.attemptId = _UtilLogic:NewGuid()
+		tAttempt.requestId = requestId
+		tAttempt.userId = senderUserId
+		tAttempt.stageId = tStage.stageId
+		tAttempt.performanceId = performanceId
+		tAttempt.startedAt = _UtilLogic.ServerElapsedSeconds
+		tAttempt.duration = tHeader.length
+		tAttempt.targetScore = tStage.targetScore
+		tAttempt.tRoleAssignment = tAssignment:Copy()
+		self.pendingStageReward = nil
+		self.tStageAttempt = tAttempt
+		self:SyncPerformanceStart(requestId, performanceId, tAttempt.attemptId, tAssignment:ToPlainTable(), senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestFinishPerformance(string performanceId, table tRoleAssignmentPlain, string attemptId)
+		-- 서버가 승인한 공연 시도·경과 시간·편성이 일치할 때만 결과 확정
+		local tStage = self:GetCurrentStageForUser(performanceId, senderUserId)
+		local tAssignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, senderUserId)
+		local tAttempt = self.tStageAttempt
+		if tStage == nil or tAssignment == nil or tAttempt == nil or tAttempt.isFinished
+			or attemptId == nil or attemptId == "" or tAttempt.attemptId ~= attemptId
+			or tAttempt.userId ~= senderUserId or tAttempt.stageId ~= tStage.stageId
+			or tAttempt.performanceId ~= performanceId or tAttempt.targetScore ~= tStage.targetScore
+			or self:IsSameAssignment(tAttempt.tRoleAssignment, tAssignment) == false
+			or self:IsUserInPerformanceMap(senderUserId) == false
+			or _UtilLogic.ServerElapsedSeconds - tAttempt.startedAt < tAttempt.duration then
+			log_warning("[PerformanceResult] 공연 결과 요청 거부 id=" .. tostring(performanceId))
+			return
+		end
+
+		self:FinalizeAttempt(tAttempt)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void FinalizeAttempt(PerformanceStageAttempt tAttempt)
+		-- 종료 시점의 팀 점수로 클리어를 판정하고 요청자에게 결과 통지
+		local assignment = tAttempt.tRoleAssignment
+		local tScore = self:ComputeScore(tAttempt.performanceId, assignment:ToPlainTable())
+		if tScore == nil then return end
+
+		tScore.isClear = tScore.total >= tAttempt.targetScore
+		tAttempt.tScore = tScore
+		tAttempt.isFinished = true
+		self.pendingStageReward = nil
+		if tScore.isClear then
+			self.pendingStageReward = { stageId = tAttempt.stageId, characterIds = { assignment.center, assignment.subL, assignment.subR } }
+		end
+		self:SyncPerformanceResult(tAttempt.performanceId, tScore, tAttempt.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyStageReward(string stageId, string forUserId)
+		-- 스테이지 완료 경로에서 서버가 확인한 클리어 보상을 적용합니다. 저장은 스텝 완료 시 함께 처리합니다.
+		local reward = self.pendingStageReward
+		if reward == nil or reward.stageId ~= stageId or self:CanCompleteStage(forUserId) == false or _CharacterManager:CanUseCharacters(forUserId) == false then return false end
+
+		local progressDelta = ProgressStatDelta()
+		progressDelta.meso = self.stageRewardMeso
+		if _ProgressManager:ApplyProgressStat(progressDelta:ToPlainTable()) == false then return false end
+
+		for _, characterId in ipairs(reward.characterIds) do
+			local characterDelta = CharacterStatDelta()
+			characterDelta.characterId = characterId
+			characterDelta.intimacy = self.stageRewardIntimacy
+			_CharacterManager:ApplyCharacterStat(characterDelta:ToPlainTable())
+		end
+
+		self:ResetStageReward()
+		_CharacterManager:PushCharactersToClient(forUserId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ResetStageReward()
+		-- 새 스테이지 시작 또는 보상 적용 후 이전 공연의 보상 대기 정보를 비웁니다.
+		self.pendingStageReward = nil
+	end
+
+	@ExecSpace("Server")
+	method void RequestDebugCompletePerformance(string performanceId, table tRoleAssignmentPlain)
+		-- 메이커에서만 확정 결과를 만들어 실제 스테이지 완료 및 보상 경로를 테스트합니다.
+		if Environment:IsMakerPlay() == false then return end
+		local stage = self:GetCurrentStageForUser(performanceId, senderUserId)
+		local assignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, senderUserId)
+		if stage == nil or assignment == nil then return end
+		local attempt = PerformanceStageAttempt()
+		attempt.attemptId = _UtilLogic:NewGuid()
+		attempt.userId = senderUserId
+		attempt.stageId = stage.stageId
+		attempt.performanceId = performanceId
+		attempt.targetScore = stage.targetScore
+		attempt.tRoleAssignment = assignment:Copy()
+		self.tStageAttempt = attempt
+		self:FinalizeAttempt(attempt)
+	end
+
+	@ExecSpace("Server")
+	method void RequestCancelPerformance(string requestId, string performanceId, string attemptId)
+		-- 본인이 시작한 미완료 공연만 취소, 이전 요청으로 새 공연을 취소하지 않도록 식별자 확인
+		local tAttempt = self.tStageAttempt
+		if tAttempt == nil or tAttempt.isFinished or tAttempt.userId ~= senderUserId
+			or tAttempt.performanceId ~= performanceId then return end
+		local matchesRequest = requestId ~= nil and requestId ~= "" and requestId == tAttempt.requestId
+		local matchesAttempt = attemptId ~= nil and attemptId ~= "" and attemptId == tAttempt.attemptId
+		if matchesRequest == false and matchesAttempt == false then return end
+		self:ClearStageAttempt()
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetCurrentStageForUser(string performanceId, string forUserId)
+		-- 현재 진행 소유자·공연 단계·StageTable의 공연 및 목표 점수 검증
+		if _ProgressManager == nil or _StageMaster == nil or _PerformanceMaster == nil
+			or _ProgressManager:CanUseProgress(forUserId) == false then return nil end
+		local tProgress = _ProgressManager:ServerGetProgress()
+		if tProgress == nil or tProgress.eCurrentStep ~= _EProgressStep.Performance then return nil end
+		local tStage = _StageMaster:GetStage(tProgress.eCurrentStage)
+		if tStage == nil or tStage.performanceId ~= performanceId
+			or _StageMaster:IsUsableStage(tStage) == false then return nil end
+		return tStage
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ValidateRoleAssignment(any tPlain, string forUserId)
+		-- 현재 편성의 서로 다른 보유 캐릭터 세 명만 역할 배정에 허용
+		if type(tPlain) ~= "table" or _CharacterManager == nil
+			or _CharacterManager:CanUseCharacters(forUserId) == false then return nil end
+		if type(tPlain.center) ~= "string" or type(tPlain.subL) ~= "string"
+			or type(tPlain.subR) ~= "string" then return nil end
+		local ids = { tPlain.center, tPlain.subL, tPlain.subR }
+		if _CharacterManager:CanSetStageCharacters(ids) == false then return nil end
+		for _, characterId in ipairs(ids) do
+			if _CharacterManager:IsActiveCharacter(characterId) == false then return nil end
+		end
+		return PerformanceRoleAssignment():FromPlainTable(tPlain)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsSameAssignment(PerformanceRoleAssignment tLeft, PerformanceRoleAssignment tRight)
+		-- 시작 시 승인한 역할 배정과 종료 요청의 역할 배정 비교
+		return tLeft ~= nil and tRight ~= nil and tLeft.center == tRight.center
+			and tLeft.subL == tRight.subL and tLeft.subR == tRight.subR
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsUserInPerformanceMap(string forUserId)
+		-- 공연 시작·종료 요청이 실제 공연 맵에서 발생했는지 확인
+		local player = _UserService:GetUserEntityByUserId(forUserId)
+		return isvalid(player) and isvalid(player.CurrentMap)
+			and player.CurrentMap.Name == _PerformanceConductor.performanceMapName
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanCompleteStage(string forUserId)
+		-- 현재 스테이지에 연결된 서버 확정 공연만 단계 완료에 허용
+		local tAttempt = self.tStageAttempt
+		if tAttempt == nil or tAttempt.userId ~= forUserId or tAttempt.isFinished == false
+			or tAttempt.tScore == nil or tAttempt.tScore.isClear ~= true then return false end
+		local tStage = self:GetCurrentStageForUser(tAttempt.performanceId, forUserId)
+		return tStage ~= nil and tAttempt.stageId == tStage.stageId
+			and tAttempt.targetScore == tStage.targetScore and tAttempt.tScore.total >= tStage.targetScore
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearStageAttempt()
+		-- 완료·재접속·스테이지 재선택 시 이전 공연 시도 무효화
+		self.tStageAttempt = nil
+		self.pendingStageReward = nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 공연 시도 및 결과 정리
+		self:ClearStageAttempt()
+	end
+
+	@ExecSpace("Client")
+	method void SyncPerformanceStart(string requestId, string performanceId, string attemptId, table tAssignmentPlain)
+		-- 시작 승인 결과를 해당 클라이언트의 대기 중인 공연에 전달
+		_PerformanceConductor:OnPerformanceStartResponse(requestId, performanceId, attemptId, tAssignmentPlain)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ComputeScore(string performanceId, table tRoleAssignmentPlain)
+		-- 캐릭터 스탯 점수를 산출해 결과 UI용 plain table로 반환
+		-- 반환 필드: vocal, dance, visual, total
+		local tStage = self:GetCurrentStageForUser(performanceId, _ProgressManager.currentUserId)
+		local tAssignment = self:ValidateRoleAssignment(tRoleAssignmentPlain, _ProgressManager.currentUserId)
+		local tHeader = _PerformanceMaster:GetPerformance(performanceId)
+		if tStage == nil or tAssignment == nil or tHeader == nil then return nil end
+		local assignment = tAssignment
+
+		-- 공연 헤더의 스탯 가중치 사용
+		-- tHeader: PerformanceRow
+		local vocalWeight = tHeader.vocalWeight
+		local danceWeight = tHeader.danceWeight
+		local visualWeight = tHeader.visualWeight
+
+		-- 포지션별 캐릭터 데이터 조회 (센터/서브L/서브R)
+		-- centerChar/subLChar/subRChar: CharacterData 또는 nil
+		local centerChar = self:GetCharacter(assignment.center)
+		local subLChar = self:GetCharacter(assignment.subL)
+		local subRChar = self:GetCharacter(assignment.subR)
+
+		-- 주요 스탯 결정: 가중치가 가장 높은 스탯. 동점이면 보컬>댄스>비주얼 우선
+		local mainStatKey = self:ResolveMainStatKey(vocalWeight, danceWeight, visualWeight)
+
+		-- 스탯별 점수: 주스탯은 ×mainStatMultiplier(최대 mainStatMax), 부스탯은 ×subStatMultiplier(최대 subStatMax)
+		-- 팀 스탯 = (센터×centerStatWeight + 서브L + 서브R) / (centerStatWeight + 2)
+		local vocal = self:ComputeStatScore(centerChar, subLChar, subRChar, "vocal", mainStatKey)
+		local dance = self:ComputeStatScore(centerChar, subLChar, subRChar, "dance", mainStatKey)
+		local visual = self:ComputeStatScore(centerChar, subLChar, subRChar, "visual", mainStatKey)
+
+		return {
+			vocal = vocal,
+			dance = dance,
+			visual = visual,
+			total = math.min(vocal + dance + visual, self.statTotalMax)
+		}
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetCharacter(string characterId)
+		-- characterId로 서버 권위 캐릭터 데이터를 반환 (없거나 비어있으면 nil)
+		if characterId == nil or characterId == "" or _CharacterManager == nil then
+			return nil
+		end
+		return _CharacterManager:ServerGetCharacterById(characterId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string ResolveMainStatKey(number vocalWeight, number danceWeight, number visualWeight)
+		-- 가중치가 가장 높은 스탯을 주요 스탯으로 결정. 동점이면 보컬>댄스>비주얼 순으로 우선(strict 비교)
+		local mainKey = "vocal"
+		local mainWeight = vocalWeight
+		if danceWeight > mainWeight then
+			mainKey = "dance"
+			mainWeight = danceWeight
+		end
+		if visualWeight > mainWeight then
+			mainKey = "visual"
+			mainWeight = visualWeight
+		end
+		return mainKey
+	end
+
+	@ExecSpace("ServerOnly")
+	method number ComputeStatScore(any centerChar, any subLChar, any subRChar, string statKey, string mainStatKey)
+		-- 팀 가중 스탯을 산출한 뒤 주스탯/부스탯 배율·상한을 적용한 점수(정수)를 반환
+		-- 팀 스탯 = (센터×centerStatWeight + 서브L + 서브R) / (centerStatWeight + 2)
+		local divisor = self.centerStatWeight + 2
+		if divisor <= 0 then
+			divisor = 1
+		end
+		local teamStat = (self:StatOf(centerChar, statKey) * self.centerStatWeight
+			+ self:StatOf(subLChar, statKey)
+			+ self:StatOf(subRChar, statKey)) / divisor
+
+		local score = 0
+		local cap = 0
+		if statKey == mainStatKey then
+			score = teamStat * self.mainStatMultiplier
+			cap = self.mainStatMax
+		else
+			score = teamStat * self.subStatMultiplier
+			cap = self.subStatMax
+		end
+
+		score = math.floor(score)
+		if score > cap then
+			score = cap
+		end
+		if score < 0 then
+			score = 0
+		end
+		return score
+	end
+
+	method number StatOf(any tCharacter, string statKey)
+		-- 캐릭터의 스탯 값(vocal/dance/visual)을 반환, 캐릭터가 없으면 0
+		if tCharacter == nil then
+			return 0
+		end
+		if statKey == "vocal" then return tCharacter.vocal end
+		if statKey == "dance" then return tCharacter.dance end
+		if statKey == "visual" then return tCharacter.visual end
+		return 0
+	end
+
+	@ExecSpace("Client")
+	method void SyncPerformanceResult(string performanceId, table tScore)
+		-- 서버가 산출한 결과를 받아 점수 UI를 표시 (Step 3b에서 PerformanceScoreUILogic 연결)
+		if _PerformanceScoreUILogic ~= nil then
+			_PerformanceScoreUILogic:ShowScores(performanceId, tScore)
+		end
+	end
+
+end

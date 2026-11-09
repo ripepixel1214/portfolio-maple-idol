@@ -1,0 +1,550 @@
+---@description "달팽이 사다리 화면과 달팽이 이동 연출"
+@Component
+script MiniGameSnailLadderStageView extends Component
+	@HideFromInspector
+	property boolean initialized = false
+	property Entity choice3 = nil
+	property Entity snail3 = nil
+	property Entity choice2 = nil
+	property Entity snail2 = nil
+	property Entity choice1 = nil
+	property Entity snail1 = nil
+	property Entity resultRewardCount = nil
+	property Entity resultSummary = nil
+	property Entity resultConfirm = nil
+	property Entity resultPanel = nil
+	property Entity resultPopup = nil
+	property Entity entryMessage = "c7c8c1c1-66d3-4771-af40-9b108032eabb"
+	property Entity entryBalanceRow = nil
+	property Entity entryBetRow = nil
+	property Entity entryConfirm = nil
+	property Entity betSlider = nil
+	property any betSliderBinding = nil
+	property boolean updatingBetSlider = false
+	property integer entryMesoBalance = 0
+	property integer betUnitCount = 0
+	property Entity entryPanel = nil
+	property Entity entryPopup = nil
+	property Entity coinBalanceLabel = nil
+	property Entity coinBalanceAmount = nil
+	property Entity mesoBalanceLabel = nil
+	property Entity mesoBalanceAmount = nil
+	property Entity root = nil
+	property string TEXT_UI_COIN_BALANCE = "ui.lucky_cube.balance"
+	property string TEXT_UI_MESO_BALANCE = "ui.lucky_cube.balance_meso"
+	property string TEXT_UI_SNAIL_INSTRUCTION = "ui.snail_ladder.instruction"
+	property string TEXT_UI_ENTRY_FAILED = "ui.lucky_cube.debit_failed"
+	property string TEXT_UI_SNAIL_REWARD_COUNT = "ui.snail_ladder.reward_count"
+	property string TEXT_UI_SNAIL_RESULT_WIN = "ui.snail_ladder.result_win"
+	property string TEXT_UI_SNAIL_RESULT_REFUND = "ui.snail_ladder.result_refund"
+	property string TEXT_UI_SNAIL_RESULT_LOSE = "ui.snail_ladder.result_lose"
+	property number POPUP_POP_SECONDS = 0.35
+	property number POPUP_START_SCALE = 0.8
+	property number POPUP_CLOSE_SECONDS = 0.2
+	property any buttonBindings = {}
+	-- 에디터에서 배치한 경로 기준 엔티티
+	property Entity gate1 = nil
+	property Entity ropeLane1 = nil
+	property Entity ropeRung1 = nil
+	property Entity gate2 = nil
+	property Entity ropeLane2 = nil
+	property Entity ropeRung2 = nil
+	property Entity gate3 = nil
+	property Entity ropeLane3 = nil
+	property Entity ropeRung3 = nil
+	@HideFromInspector
+	property boolean layoutReady = false
+	property any startAnchoredPositions = {}
+	property any startPositions = {}
+	property any snailAnchorOffsets = {}
+	property any lanePositions = {}
+	property any rungPositions = {}
+	property any gatePositions = {}
+	property any snails = {}
+	property any choices = {}
+	property any tState = nil
+	property number animationElapsed = 0
+	property boolean animationActive = false
+	property boolean requestPending = false
+	property boolean entryPopupOpen = false
+	property boolean entryPopupClosing = false
+	property integer entryPopupTweenId = 0
+	property boolean resultPopupOpen = false
+	property boolean resultPopupClosing = false
+	property integer resultPopupTweenId = 0
+
+
+
+	@ExecSpace("ClientOnly")
+	method Entity GetStageRoot()
+		-- 전용 Stage 루트 제공
+		return self.root
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCapabilities()
+		-- 라우터 필수 기능과 달팽이 선택 기능 제공
+		if not isvalid(self.root) then
+			log_warning("[SnailLadder] UI 루트 연결 확인 필요")
+			return {}
+		end
+		local caps = _MiniGameViewRegistry
+		return {[caps.CAP_STAGE] = self, [caps.CAP_SNAIL_LADDER] = self}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BindButton(Entity child, any callback)
+		local entity = child
+		if not isvalid(entity) then return end
+		local subscription = entity:ConnectEvent(ButtonClickEvent, callback)
+		table.insert(self.buttonBindings, {entity = entity, subscription = subscription})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:Initialize()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- 새 판 표시 상태와 달팽이 시작 위치로 초기화
+		self:HideResultPopup()
+		self.tState = nil
+		self.animationActive = false
+		self.animationElapsed = 0
+		self:SetStageVisible(true)
+		self:ResetSnails()
+		if not self:CaptureLayout() then return end
+		self:ShowEntryPopup()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(any tContext)
+		-- 서버 세션 화면을 공통 View 계약에 연결
+		self:SetStageVisible(true)
+		if not self.layoutReady then
+			self:ResetSnails()
+			self:CaptureLayout()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		-- 서버 세션 진행 중 Stage 표시
+		self:SetStageVisible(true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectStage(integer inputType, boolean useGauge)
+		-- 공통 입력 Stage 선택 요청을 전용 사다리 화면 표시로 연결
+		self:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetStageVisible(boolean visible)
+		-- MiniGameUIRouter가 승인한 Stage만 표시
+		_MiniGameUIRouter:SetStageVisible(self.root, visible)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 화면 종료 시 애니메이션과 엔티티 참조 정리
+		self:HideEntryPopup()
+		self:HideResultPopup()
+		self.animationActive = false
+		self.layoutReady = false
+		self.requestPending = false
+		self.tState = nil
+		self:SetStageVisible(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowEntryPopup()
+		-- 낚시 스테이지와 같은 시작 안내 팝업 표시
+		self:HideEntryPopup()
+		local popup = self.entryPopup
+		local panel = self.entryPanel
+		local confirm = self.entryConfirm
+		if not isvalid(popup) or not isvalid(panel) or not isvalid(confirm) then return end
+		self.entryPopupOpen = true
+		popup.Enable = true
+		panel.Enable = true
+		confirm.Enable = true
+		self:SetButton(self.entryConfirm, true)
+		self.entryPopupTweenId = _UITween:PopIn(panel, self.POPUP_POP_SECONDS, self.POPUP_START_SCALE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConfirmEntryPopup()
+		-- 안내 퇴장 후 달팽이 선택 입력 허용
+		if not self.entryPopupOpen or self.entryPopupClosing or self.requestPending or self.betUnitCount <= 0 then return end
+		self.entryPopupClosing = true
+		self:SetButton(self.entryConfirm, false)
+		_UITween:Stop(self.entryPopupTweenId)
+		local finish = function()
+			self:HideEntryPopup()
+			if self.tState ~= nil then self:RenderState(self.tState, self.requestPending, self.betUnitCount, self.entryMesoBalance) end
+		end
+		self.entryPopupTweenId = _UITween:PopOut(self.entryPanel, self.POPUP_CLOSE_SECONDS, 0, finish)
+		if self.entryPopupTweenId == 0 then finish() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideEntryPopup()
+		-- 재진입과 화면 종료 시 팝업 연출과 입력 차단 상태 정리
+		_UITween:Stop(self.entryPopupTweenId)
+		self.entryPopupTweenId = 0
+		self.entryPopupOpen = false
+		self.entryPopupClosing = false
+		local popup = self.entryPopup
+		if isvalid(popup) then popup.Enable = false end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowResultPopup(any tState)
+		-- 낚시 스테이지 결과 카드에 확정된 관문 보상 표시
+		local summaryKey = tState.multiplier == 2 and self.TEXT_UI_SNAIL_RESULT_WIN
+			or (tState.multiplier == 1 and self.TEXT_UI_SNAIL_RESULT_REFUND or self.TEXT_UI_SNAIL_RESULT_LOSE)
+		self:SetText(self.resultSummary, _LocaleTextUtil:GetText(summaryKey))
+		self:SetText(self.resultRewardCount, _LocaleTextUtil:Format(self.TEXT_UI_SNAIL_REWARD_COUNT, tostring(tState.payout), nil, nil, ""))
+		if self.resultPopupOpen then return end
+		local popup = self.resultPopup
+		local panel = self.resultPanel
+		local confirm = self.resultConfirm
+		if not isvalid(popup) or not isvalid(panel) or not isvalid(confirm) then return end
+		self.resultPopupOpen = true
+		popup.Enable = true
+		panel.Enable = true
+		confirm.Enable = true
+		self:SetButton(self.resultConfirm, true)
+		self.resultPopupClosing = false
+		self.resultPopupTweenId = _UITween:PopIn(panel, self.POPUP_POP_SECONDS, self.POPUP_START_SCALE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConfirmResultPopup()
+		-- 결과 확인 후 팝업 퇴장 연출을 마치고 미니게임 종료
+		if not self.resultPopupOpen or self.resultPopupClosing then return end
+		self.resultPopupClosing = true
+		self:SetButton(self.resultConfirm, false)
+		_UITween:Stop(self.resultPopupTweenId)
+		local finish = function()
+			self.resultPopupTweenId = 0
+			_MiniGameSnailLadderPresenter:Close()
+		end
+		self.resultPopupTweenId = _UITween:PopOut(self.resultPanel, self.POPUP_CLOSE_SECONDS, 0, finish)
+		if self.resultPopupTweenId == 0 then finish() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideResultPopup()
+		-- 화면 종료와 재진입 시 결과 팝업과 지연 콜백 정리
+		_UITween:Stop(self.resultPopupTweenId)
+		self.resultPopupTweenId = 0
+		self.resultPopupOpen = false
+		self.resultPopupClosing = false
+		local popup = self.resultPopup
+		if isvalid(popup) then popup.Enable = false end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(Entity child, string value)
+		local entity = child
+		if isvalid(entity) and entity.TextGUIRendererComponent ~= nil then
+			entity.TextGUIRendererComponent.Text = value
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetButton(Entity child, boolean enabled)
+		local entity = child
+		if isvalid(entity) and entity.ButtonComponent ~= nil then
+			entity.ButtonComponent.Enable = enabled
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetSnailPosition(integer lane, number x, number y)
+		-- 스테이지 좌표를 달팽이 부모의 앵커 좌표로 변환
+		local snail = self.snails[lane]
+		local offset = self.snailAnchorOffsets[lane]
+		if not isvalid(snail) or offset == nil then return end
+		local parentTransform = snail.Parent.UITransformComponent
+		local worldPoint = self.root.UITransformComponent:ToWorldPoint(Vector3(x, y, 0))
+		local localPoint = parentTransform:ToLocalPoint(worldPoint)
+		snail.UITransformComponent.anchoredPosition = Vector2(localPoint.x - offset.x, localPoint.y - offset.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ResetSnails()
+		-- 경주 중 이동한 좌표를 최초 에디터 배치로 복원
+		for lane = 1, 3 do
+			local snail = self.snails[lane]
+			local position = self.startAnchoredPositions[lane]
+			if isvalid(snail) and position ~= nil then
+				snail.UITransformComponent.anchoredPosition = Vector2(position.x, position.y)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplySnailPositions(any tState, number progress)
+		-- 서버 경로를 실제 사다리와 관문 위치에 맞춰 보간
+		local lane = tState.selectedLane
+		if not self.layoutReady or lane < 1 or lane > 3 or type(tState.route) ~= "table" or #tState.route < 4 then return end
+		local route = tState.route
+		for i = 1, 4 do
+			if type(route[i]) ~= "number" or route[i] < 1 or route[i] > 3 or route[i] ~= math.floor(route[i]) then return end
+		end
+		local start = self.startPositions[lane]
+		local exit = self.gatePositions[route[4]]
+		local points = {
+			{x = start.x, y = start.y},
+			{x = self.rungPositions[1].x, y = self.lanePositions[route[1]].y},
+			{x = self.rungPositions[1].x, y = self.lanePositions[route[2]].y},
+			{x = self.rungPositions[2].x, y = self.lanePositions[route[2]].y},
+			{x = self.rungPositions[2].x, y = self.lanePositions[route[3]].y},
+			{x = self.rungPositions[3].x, y = self.lanePositions[route[3]].y},
+			{x = self.rungPositions[3].x, y = self.lanePositions[route[4]].y},
+			{x = exit.x, y = self.lanePositions[route[4]].y}
+		}
+		local segmentCount = #points - 1
+		local scaled = math.max(0, math.min(1, progress)) * segmentCount
+		local segment = math.min(segmentCount, math.floor(scaled) + 1)
+		local alpha = scaled - (segment - 1)
+		local from = points[segment]
+		local to = points[segment + 1]
+		local x = from.x + (to.x - from.x) * alpha
+		local y = from.y + (to.y - from.y) * alpha
+		self:SetSnailPosition(lane, x, y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateSnailVisibility(any tState)
+		-- 로비에서는 세 달팽이를 보이고 실행 중에는 선택한 한 마리만 표시
+		local showAll = tState.stage == _MiniGameSnailLadderRule.STAGE_LOBBY
+			or tState.selectedLane < 1
+		for lane = 1, 3 do
+			local snail = self.snails[lane]
+			if isvalid(snail) then
+				snail.Enable = showAll or lane == tState.selectedLane
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetMesoBalance(integer mesoBalance)
+		self.entryMesoBalance = mesoBalance
+		self:SetText(self.mesoBalanceLabel, _LocaleTextUtil:GetText(self.TEXT_UI_MESO_BALANCE))
+		self:SetText(self.mesoBalanceAmount, tostring(mesoBalance))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderState(any tState, boolean pending, integer betUnitCount, integer mesoBalance)
+		-- 서버 상태, 선택 버튼, 잔액과 경로 연출 반영
+		local previousStage = self.tState ~= nil and self.tState.stage or ""
+		self.tState = tState
+		self.requestPending = pending
+		self:SetText(self.coinBalanceLabel, _LocaleTextUtil:GetText(self.TEXT_UI_COIN_BALANCE))
+		self:SetText(self.coinBalanceAmount, tostring(tState.balance))
+		self:SetMesoBalance(mesoBalance)
+		local rule = _MiniGameSnailLadderRule
+		local lobby = tState.stage == rule.STAGE_LOBBY
+		self.betUnitCount = betUnitCount
+		local entryRejected = tState.stage == rule.STAGE_READY and tState.entryRejected
+		if not self.entryPopupOpen and (entryRejected or (lobby and not pending and betUnitCount <= 0)) then self:ShowEntryPopup() end
+		if entryRejected then
+			self:SetText(self.entryMessage, _LocaleTextUtil:GetText(self.TEXT_UI_ENTRY_FAILED))
+			self.entryConfirm.Enable = false
+			self.betSlider.Enable = false
+		elseif lobby and self.entryPopupOpen then
+			self.entryConfirm.Enable = true
+			self.betSlider.Enable = true
+			self:SetButton(self.entryConfirm, not self.entryPopupClosing and not pending and betUnitCount > 0)
+			local settlement = _MiniGameSettlementRule
+			local instruction = _LocaleTextUtil:GetText(self.TEXT_UI_SNAIL_INSTRUCTION)
+			self:SetText(self.entryMessage, string.match(instruction, "^(.-)\r?\n\r?\n") or instruction)
+			local balance = tState.entryCurrency == settlement.CURRENCY_MESO and mesoBalance or tState.balance
+			settlement:SetEntryCurrencyRow(self.entryBalanceRow, tState.entryCurrency, balance)
+			settlement:SetEntryCurrencyRow(self.entryBetRow, tState.entryCurrency, tState.entryAmount)
+			local preset = _MiniGameTable:FindMiniGame(rule.MINI_GAME_ID)
+			local slider = _MiniGameSettlementRule:GetBetSliderInput(self.betSlider).SliderComponent
+			settlement:SetBetSliderCurrency(slider, tState.entryCurrency)
+			self.updatingBetSlider = true
+			slider.MaxValue = math.max(slider.MinValue, betUnitCount)
+			slider.Value = math.max(slider.MinValue, settlement:GetBetUnitsFromAmount(preset.settlementRule, tState.bet))
+			slider.Enable = not self.entryPopupClosing and not pending and betUnitCount > 1
+			settlement:RefreshBetSliderFill(self.betSlider, slider)
+			self.updatingBetSlider = false
+		end
+		local ready = tState.stage == rule.STAGE_READY
+		local racing = tState.stage == rule.STAGE_RACING
+		local settling = tState.stage == rule.STAGE_SETTLING
+		local result = tState.stage == rule.STAGE_RESULT
+		local canChoose = not self.entryPopupOpen and not self.resultPopupOpen and not pending and (lobby or ready) and tState.bet > 0
+		for lane = 1, 3 do
+			local button = self.choices[lane]
+			self:SetButton(button, canChoose)
+			local entity = button
+			if isvalid(entity) and entity.SpriteGUIRendererComponent ~= nil then
+				local selected = tState.selectedLane == lane
+				entity.SpriteGUIRendererComponent.Color = selected and Color(1, 0.75, 0.35, 1) or Color(1, 1, 1, 1)
+			end
+		end
+		self:UpdateSnailVisibility(tState)
+		if racing then
+			if previousStage ~= rule.STAGE_RACING then self.animationElapsed = 0 end
+			self.animationActive = true
+		else
+			self.animationActive = false
+			if result or settling then
+				self:ApplySnailPositions(tState, 1)
+			elseif lobby or ready then
+				self:ResetSnails()
+			end
+		end
+		if result then self:ShowResultPopup(tState) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- 서버 확정 경로를 로컬 화면에서만 보간
+		if not self.animationActive or self.tState == nil then return end
+		self.animationElapsed = self.animationElapsed + math.max(0, delta)
+		local progress = math.min(1, self.animationElapsed / _MiniGameSnailLadderRule.RACE_SECONDS)
+		self:ApplySnailPositions(self.tState, progress)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		self:ReleaseView()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		-- 숨겨진 스테이지에서도 중복 없이 UI 입력 연결
+		if self.initialized then return true end
+		local entryExit = isvalid(self.entryPanel) and self.entryPanel:GetChildByName("Exit") or nil
+		if not _MiniGameViewRegistry:ValidateBindings("MiniGameSnailLadderStageView", {
+			{"entryExit", entryExit},
+			{"coinBalanceLabel", self.coinBalanceLabel},
+			{"coinBalanceAmount", self.coinBalanceAmount},
+			{"mesoBalanceLabel", self.mesoBalanceLabel},
+			{"mesoBalanceAmount", self.mesoBalanceAmount},
+			{"entryPopup", self.entryPopup},
+			{"entryPanel", self.entryPanel},
+			{"entryConfirm", self.entryConfirm},
+			{"betSlider", self.betSlider},
+			{"entryMessage", self.entryMessage},
+			{"entryBalanceRow", self.entryBalanceRow},
+			{"entryBetRow", self.entryBetRow},
+			{"resultPopup", self.resultPopup},
+			{"resultPanel", self.resultPanel},
+			{"resultConfirm", self.resultConfirm},
+			{"resultSummary", self.resultSummary},
+			{"resultRewardCount", self.resultRewardCount},
+			{"snail1", self.snail1},
+			{"choice1", self.choice1},
+			{"snail2", self.snail2},
+			{"choice2", self.choice2},
+			{"snail3", self.snail3},
+			{"choice3", self.choice3},
+			{"root", self.root},
+			{"gate1", self.gate1},
+			{"ropeLane1", self.ropeLane1},
+			{"ropeRung1", self.ropeRung1},
+			{"gate2", self.gate2},
+			{"ropeLane2", self.ropeLane2},
+			{"ropeRung2", self.ropeRung2},
+			{"gate3", self.gate3},
+			{"ropeLane3", self.ropeLane3},
+			{"ropeRung3", self.ropeRung3}
+		}) then return false end
+		-- 버튼 이벤트 연결과 표시 배열 초기화
+		self.snails = {self.snail1, self.snail2, self.snail3}
+		self.choices = {self.choice1, self.choice2, self.choice3}
+		for lane = 1, 3 do
+			local transform = self.snails[lane].UITransformComponent
+			if transform == nil then return false end
+			if self.startAnchoredPositions[lane] == nil then
+				local position = transform.anchoredPosition
+				self.startAnchoredPositions[lane] = Vector2(position.x, position.y)
+			end
+		end
+		for lane = 1, 3 do
+			local child = self.choices[lane]
+			local selectedLane = lane
+			self:BindButton(child, function()
+				if not self.entryPopupOpen and not self.resultPopupOpen then _MiniGameSnailLadderPresenter:Choose(selectedLane) end
+			end)
+		end
+		self:BindButton(self.entryConfirm, function() self:ConfirmEntryPopup() end)
+		self:BindButton(entryExit, function()
+			if self.entryPopupOpen and not self.entryPopupClosing then _MiniGameSnailLadderPresenter:Close() end
+		end)
+		self.betSliderBinding = _MiniGameSettlementRule:GetBetSliderInput(self.betSlider):ConnectEvent(SliderValueChangedEvent, function(event)
+			if self.entryPopupOpen and not self.entryPopupClosing and not self.updatingBetSlider then
+				_MiniGameSnailLadderPresenter:SetBet(math.floor(event.Value))
+			end
+		end)
+		self:BindButton(self.resultConfirm, function() self:ConfirmResultPopup() end)
+		self.initialized = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReleaseView()
+		-- 수동 초기화와 엔티티 생명주기 종료의 중복 해제 방지
+		if not self.initialized then return end
+		self.initialized = false
+		if self.betSliderBinding ~= nil and isvalid(self.betSlider) then
+			_MiniGameSettlementRule:GetBetSliderInput(self.betSlider):DisconnectEvent(SliderValueChangedEvent, self.betSliderBinding)
+		end
+		self.betSliderBinding = nil
+		-- 버튼 이벤트 구독과 화면 참조 해제
+		for _, binding in ipairs(self.buttonBindings) do
+			if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.subscription) end
+		end
+		self.buttonBindings = {}
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetStagePosition(Entity target)
+		-- 부모 이동과 크기·회전을 포함한 스테이지 로컬 좌표 산출
+		if not isvalid(target) or target.UITransformComponent == nil then return nil end
+		local point = self.root.UITransformComponent:ToLocalPoint(target.UITransformComponent.WorldPosition)
+		return Vector2(point.x, point.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CaptureLayout()
+		-- 복원된 출발점과 각 레인·분기점·관문의 실제 위치 저장
+		self.layoutReady = false
+		local lanes = {self.ropeLane1, self.ropeLane2, self.ropeLane3}
+		local rungs = {self.ropeRung1, self.ropeRung2, self.ropeRung3}
+		local gates = {self.gate1, self.gate2, self.gate3}
+		for lane = 1, 3 do
+			local snail = self.snails[lane]
+			local start = self:GetStagePosition(snail)
+			local lanePosition = self:GetStagePosition(lanes[lane])
+			local rungPosition = self:GetStagePosition(rungs[lane])
+			local gatePosition = self:GetStagePosition(gates[lane])
+			if start == nil or lanePosition == nil or rungPosition == nil or gatePosition == nil then
+				log_warning("[SnailLadder] 경로 기준 UITransform 연결 확인 필요")
+				return false
+			end
+			local parentTransform = snail.Parent.UITransformComponent
+			if parentTransform == nil then return false end
+			local localPoint = parentTransform:ToLocalPoint(snail.UITransformComponent.WorldPosition)
+			local anchored = snail.UITransformComponent.anchoredPosition
+			self.snailAnchorOffsets[lane] = Vector2(localPoint.x - anchored.x, localPoint.y - anchored.y)
+			self.startPositions[lane] = start
+			self.lanePositions[lane] = lanePosition
+			self.rungPositions[lane] = rungPosition
+			self.gatePositions[lane] = gatePosition
+		end
+		self.layoutReady = true
+		return true
+	end
+end

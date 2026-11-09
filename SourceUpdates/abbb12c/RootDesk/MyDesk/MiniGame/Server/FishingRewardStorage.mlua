@@ -1,0 +1,44 @@
+---@description "구버전 낚시 보상 조회와 종료 점수의 영속 대기 등록"
+@Logic
+script FishingRewardStorage extends Logic
+	property string STORAGE_KEY = "fishingRewards"
+
+	@ExecSpace("ServerOnly")
+	method any ReadLegacy(any storage)
+		-- 통합 인벤토리가 없는 유저만 기존 낚시 잔량과 거래 복구 상태 조회
+		local code, raw = storage:GetAndWait(self.STORAGE_KEY)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and raw == nil) then return FishingRewardData() end
+		if code ~= 0 then return nil end
+		local ok, plain = pcall(function() return _HttpService:JSONDecode(raw) end)
+		local tData = FishingRewardData()
+		if not ok or not tData:FromPlainTable(plain) then
+			log_error("[Inventory] 이전 낚시 보상 데이터 손상")
+			return nil
+		end
+		return tData
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean QueueResult(string userId, string id, integer score)
+		-- 종료 점수를 지급 전에 영속 보관하여 재접속 시 미완료 정산 복구
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		for attempt = 1, _ItemStorage.MAX_ATTEMPTS do
+			local read = _ItemStorage:LoadOrCreate(storage)
+			if read == nil then return false end
+			local receipt = read.tData.pending ~= nil and read.tData.pending.id == id
+				and read.tData.pending or _ItemStorage:ReadReceipt(storage, id)
+			if receipt == nil then return false end
+			if receipt ~= false then return receipt.kind == self.KIND_REWARD and receipt.score == score end
+			local row = read.tData.pendingResult
+			if row ~= nil then return row.id == id and row.score == score end
+			read.tData.pendingResult = {id = id, score = score}
+			local raw = _ItemStorage:EncodeInventory(read.ownership, read.tData)
+			if raw == "" then return false end
+			local code = storage:UpdateAndWait(_ItemStorage.itemStorageKey, read.raw, raw)
+			if code == 0 then return true end
+			if code ~= _ItemStorage.CONFLICT_CODE and code ~= _DataStorageErrorUtil.TimedOut then return false end
+		end
+		return false
+	end
+
+end

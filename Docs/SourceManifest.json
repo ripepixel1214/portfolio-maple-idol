@@ -3186,5 +3186,1017 @@
       "Jinwon"
     ],
     "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/DiamondWalletLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b94823d9d0de61250bd629c1959653f822169fea",
+    "post_review_change": false,
+    "sha256": "c475c6bb763aabc4f4baf5ec5fbc2f988c0a40559c8a1aec1ff2e02a62f6f8f5",
+    "sha256_lf": "c475c6bb763aabc4f4baf5ec5fbc2f988c0a40559c8a1aec1ff2e02a62f6f8f5",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/DiamondWalletOperationData.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b94823d9d0de61250bd629c1959653f822169fea",
+    "post_review_change": false,
+    "sha256": "1dfc8df342fcca9970edcca6b85ab3586caf5ae8c0e745ed9df87bf7afa8f006",
+    "sha256_lf": "1dfc8df342fcca9970edcca6b85ab3586caf5ae8c0e745ed9df87bf7afa8f006",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/DiamondWalletStorage.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b94823d9d0de61250bd629c1959653f822169fea",
+    "post_review_change": false,
+    "sha256": "bf0e3c69bdb49836450e44cb585aecfed45072c047d3fc392d3b349be751a663",
+    "sha256_lf": "bf0e3c69bdb49836450e44cb585aecfed45072c047d3fc392d3b349be751a663",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/ChoiceEventUILogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "6cc6730b9421db194b1d8f168c3472f391db9409",
+    "post_review_change": false,
+    "sha256": "0056aa4c20fbe6a310716d67f12e64144fdf322204c1d1fa1363c7d868de9801",
+    "sha256_lf": "0056aa4c20fbe6a310716d67f12e64144fdf322204c1d1fa1363c7d868de9801",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/EventCompletionManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "9d34c60bfac3877c30157a7499019ca72784e89412d7d659e87643d9826d4087",
+    "sha256_lf": "9d34c60bfac3877c30157a7499019ca72784e89412d7d659e87643d9826d4087",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/EventExecutor.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "89db4a49e32f7e5e25069dde9ba2b3cb8ff2ce22",
+    "post_review_change": false,
+    "sha256": "d2c5a5aded5f363f8f650b1f2dd224151cfe86c2353077ead220a771967ee738",
+    "sha256_lf": "d2c5a5aded5f363f8f650b1f2dd224151cfe86c2353077ead220a771967ee738",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/EventResultHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "89db4a49e32f7e5e25069dde9ba2b3cb8ff2ce22",
+    "post_review_change": false,
+    "sha256": "65e84a1c017c082d735dc4d6edd7db0cbd6ce77f2dfa2120983b4d664838260e",
+    "sha256_lf": "65e84a1c017c082d735dc4d6edd7db0cbd6ce77f2dfa2120983b4d664838260e",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/EventResultMaster.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "6d8fdc7aa016c2db76620240365965b158ed573b",
+    "post_review_change": false,
+    "sha256": "8f8ee321a274a1f628fd557ca3156059d28966732eae135a5b4d1d958e9a6733",
+    "sha256_lf": "8f8ee321a274a1f628fd557ca3156059d28966732eae135a5b4d1d958e9a6733",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/EventTriggerManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "bf988f8bf7081f36182056f2cd4799315273a126daaebc2d4c2a33f210334d8c",
+    "sha256_lf": "bf988f8bf7081f36182056f2cd4799315273a126daaebc2d4c2a33f210334d8c",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcDialogGuard.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "6cc6730b9421db194b1d8f168c3472f391db9409",
+    "post_review_change": false,
+    "sha256": "ab56d9f70234ecac6ca9e6777c126f68b1d81bb04b499e366cee012ea67134bc",
+    "sha256_lf": "ab56d9f70234ecac6ca9e6777c126f68b1d81bb04b499e366cee012ea67134bc",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcDialogState.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "6cc6730b9421db194b1d8f168c3472f391db9409",
+    "post_review_change": false,
+    "sha256": "082356cd7fb109345885c2d9f775fba9520fd97955656e585ecd507a645d838a",
+    "sha256_lf": "082356cd7fb109345885c2d9f775fba9520fd97955656e585ecd507a645d838a",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "89db4a49e32f7e5e25069dde9ba2b3cb8ff2ce22",
+    "post_review_change": false,
+    "sha256": "b51f4a351bf0a32a4f2eab44a3f2534538fab2f4891d5a3ecf58c00beb06dc75",
+    "sha256_lf": "b51f4a351bf0a32a4f2eab44a3f2534538fab2f4891d5a3ecf58c00beb06dc75",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventTriggerComponent.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "bc546854f4bca15153f4343997f222b92303ce5326052f9a8d488ec5bfe60179",
+    "sha256_lf": "bc546854f4bca15153f4343997f222b92303ce5326052f9a8d488ec5bfe60179",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcInteractionGateLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "e18d92d6def289b9fba96ab8f6478d88a15c68f81be45d2e7a5bce1d18b919bc",
+    "sha256_lf": "e18d92d6def289b9fba96ab8f6478d88a15c68f81be45d2e7a5bce1d18b919bc",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcRequestState.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "6cc6730b9421db194b1d8f168c3472f391db9409",
+    "post_review_change": false,
+    "sha256": "291a8700a6f815f6e9f22c81b7e9cdfb37a4072710a22098a5530886b95fefc6",
+    "sha256_lf": "291a8700a6f815f6e9f22c81b7e9cdfb37a4072710a22098a5530886b95fefc6",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcSpawnComponent.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "c3e6c5c6f222d48067be71ed1c816386aa0f67c9b5e8a952464d3465c37501b3",
+    "sha256_lf": "c3e6c5c6f222d48067be71ed1c816386aa0f67c9b5e8a952464d3465c37501b3",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcTileBlockerComponent.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "ec8acbbcb14d4b4e490dc6eb96145a287e47a3f3afb54d6f54b3a663bf04db09",
+    "sha256_lf": "ec8acbbcb14d4b4e490dc6eb96145a287e47a3f3afb54d6f54b3a663bf04db09",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemChangedEvent.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "430d3f4cea5e12b8da7e6f3a54f7221f3a9cd7c9",
+    "post_review_change": false,
+    "sha256": "ca328a0e54b90149ee235bbe4da4256d0579b74dd93cc4e8bf72b0a4eaaa621a",
+    "sha256_lf": "ca328a0e54b90149ee235bbe4da4256d0579b74dd93cc4e8bf72b0a4eaaa621a",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemEffectLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f458d92b583f85d02680f0e7d1d4498c53cef53c",
+    "post_review_change": false,
+    "sha256": "581b5a2845d035eeb2e158e410253a8285e2668f2b906fd8c50e4869a729a2dd",
+    "sha256_lf": "581b5a2845d035eeb2e158e410253a8285e2668f2b906fd8c50e4869a729a2dd",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "89db4a49e32f7e5e25069dde9ba2b3cb8ff2ce22",
+    "post_review_change": false,
+    "sha256": "1e33c065a1659b153412dbd07d4d08f5f2157924d0e76d0972a69cfb9ebd371b",
+    "sha256_lf": "1e33c065a1659b153412dbd07d4d08f5f2157924d0e76d0972a69cfb9ebd371b",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemMaster.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f458d92b583f85d02680f0e7d1d4498c53cef53c",
+    "post_review_change": false,
+    "sha256": "9467023614490f503185e953175c723228033a6eaacd06de42614e63ae970ba3",
+    "sha256_lf": "9467023614490f503185e953175c723228033a6eaacd06de42614e63ae970ba3",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemRow.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c5f8cb3f305cb2eb7b3033dec8b258160aba9",
+    "post_review_change": false,
+    "sha256": "a63e1d6791a58b3bd977d8cc2c8546399822ee0ce7f63835e8a2c972921c033a",
+    "sha256_lf": "a63e1d6791a58b3bd977d8cc2c8546399822ee0ce7f63835e8a2c972921c033a",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemStorage.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "68b206759d311055a8a4f4ed15b679e55e3590972cc443914ba53057f1730ed9",
+    "sha256_lf": "68b206759d311055a8a4f4ed15b679e55e3590972cc443914ba53057f1730ed9",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameDalgonaModel.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "9fbf88836927319367d2d8e664177cc8c2c0b3c49d4d60aaedcb39f76478423a",
+    "sha256_lf": "9fbf88836927319367d2d8e664177cc8c2c0b3c49d4d60aaedcb39f76478423a",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameDalgonaPresenter.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "e9c2a7e3cba54e12f879fd1d84ccb14e5b58600cf8270643547e7ec182de4cfa",
+    "sha256_lf": "e9c2a7e3cba54e12f879fd1d84ccb14e5b58600cf8270643547e7ec182de4cfa",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameDalgonaStageView.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "ae53beaf883090788e1c67bfdd2a3b9f9d1b69a0",
+    "post_review_change": false,
+    "sha256": "7354f05de539eb250074a95e2082cfb7388992f8a96e756339554265f03110cf",
+    "sha256_lf": "7354f05de539eb250074a95e2082cfb7388992f8a96e756339554265f03110cf",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingPresenter.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "e025d145169cde0703f9dfabf1cd5bf7ed3c46710df8646a9eaf860b7be7364c",
+    "sha256_lf": "e025d145169cde0703f9dfabf1cd5bf7ed3c46710df8646a9eaf860b7be7364c",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingStageView.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "f01ff243b6e1834d0936d711d2429f0b285ac307aca43f7dd2b90ca5feb6f33e",
+    "sha256_lf": "f01ff243b6e1834d0936d711d2429f0b285ac307aca43f7dd2b90ca5feb6f33e",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameLuckyCubeModel.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "7f889c45e3d3c806e67989ba2f39dd9f3b672f53f7b6c95cebb702644a1bb30f",
+    "sha256_lf": "7f889c45e3d3c806e67989ba2f39dd9f3b672f53f7b6c95cebb702644a1bb30f",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameLuckyCubePresenter.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "379816b09e7dc57d345549a51d1718e4ed9a6058953001b0568570c94ae2f0d4",
+    "sha256_lf": "379816b09e7dc57d345549a51d1718e4ed9a6058953001b0568570c94ae2f0d4",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameLuckyCubeStageView.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "ae53beaf883090788e1c67bfdd2a3b9f9d1b69a0",
+    "post_review_change": false,
+    "sha256": "e463b6b654143242fef9facd69cf88026de85d98f59ea20ccd967f7a2738c38b",
+    "sha256_lf": "e463b6b654143242fef9facd69cf88026de85d98f59ea20ccd967f7a2738c38b",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameSnailLadderClientHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "6ec5640b9e9d1ed0e506886d67575d881db3d5314940488fcda703e115b8a72a",
+    "sha256_lf": "6ec5640b9e9d1ed0e506886d67575d881db3d5314940488fcda703e115b8a72a",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameSnailLadderModel.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "905c732ab4cd2bfb95cdab166f5c1980340c9c7ef7e0c9482c4196fe356bdacd",
+    "sha256_lf": "905c732ab4cd2bfb95cdab166f5c1980340c9c7ef7e0c9482c4196fe356bdacd",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameSnailLadderPresenter.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "2e37d180d7ae297c43a65f90b1763d935d0df81aec6f913b2810747e049296d3",
+    "sha256_lf": "2e37d180d7ae297c43a65f90b1763d935d0df81aec6f913b2810747e049296d3",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameSnailLadderStageView.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "ae53beaf883090788e1c67bfdd2a3b9f9d1b69a0",
+    "post_review_change": false,
+    "sha256": "5c42da7d7b509594b2607d074eb4630b47f865e50e6b03a072f0a62d3273ce56",
+    "sha256_lf": "5c42da7d7b509594b2607d074eb4630b47f865e50e6b03a072f0a62d3273ce56",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameTrainingStageView.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "e3a8d309d61d462639c2bf8a70ce0c8d14368ccfb0e67f8a60e93e6c8b5e20e5",
+    "sha256_lf": "e3a8d309d61d462639c2bf8a70ce0c8d14368ccfb0e67f8a60e93e6c8b5e20e5",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/FishingRewardData.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "430d3f4cea5e12b8da7e6f3a54f7221f3a9cd7c9",
+    "post_review_change": false,
+    "sha256": "13aa2d801b45bd492c490484ee52b297228099133c9bc00234d3326480508fb9",
+    "sha256_lf": "13aa2d801b45bd492c490484ee52b297228099133c9bc00234d3326480508fb9",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/MiniGameDalgonaViewState.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "5e7c6807b08db6e2221207987f4db8b0e518d1d79c241030e85c2a94ae057a85",
+    "sha256_lf": "5e7c6807b08db6e2221207987f4db8b0e518d1d79c241030e85c2a94ae057a85",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/MiniGameFishingState.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "1356e7b3448252def7673a7c8813e171d5dceba51ae9eca9a22e2120bcc3e247",
+    "sha256_lf": "1356e7b3448252def7673a7c8813e171d5dceba51ae9eca9a22e2120bcc3e247",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/MiniGameFishingViewState.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "dca39395d0272e96533c2137b3d409824f6b82f2bf1fe257a8f7c530d8950663",
+    "sha256_lf": "dca39395d0272e96533c2137b3d409824f6b82f2bf1fe257a8f7c530d8950663",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/MiniGameSnailLadderState.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "fa5c3eba109624c8ea9bd6851b629f7e067be595ff38023be0ce56a54ee3014e",
+    "sha256_lf": "fa5c3eba109624c8ea9bd6851b629f7e067be595ff38023be0ce56a54ee3014e",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/MiniGameStartOptions.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "0cca1b7bc69482721a2fe5f0fb5666ae4933fde9571892a6a1c4df26e139f12b",
+    "sha256_lf": "0cca1b7bc69482721a2fe5f0fb5666ae4933fde9571892a6a1c4df26e139f12b",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Data/MiniGameTable.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "503031993ae2e554313eb58b3ea925c75d4036d69c6f09d3ea8f6a2dcad5020f",
+    "sha256_lf": "503031993ae2e554313eb58b3ea925c75d4036d69c6f09d3ea8f6a2dcad5020f",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/MiniGameCommandFlow.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "1e19d01dd99b5f7e8f0b85e5cb8d93ad2a676e6e18a6888bf951f73768475a10",
+    "sha256_lf": "1e19d01dd99b5f7e8f0b85e5cb8d93ad2a676e6e18a6888bf951f73768475a10",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "04a04391d8cc79ccd2bc6a1080cb2b408dda03d439e224fb48bd6253a991d9c3",
+    "sha256_lf": "04a04391d8cc79ccd2bc6a1080cb2b408dda03d439e224fb48bd6253a991d9c3",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/MiniGamePlayLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "d503936d76aa13c89725375fb33412ecf902d1e0ba8c963a5eb2373a55b5bf17",
+    "sha256_lf": "d503936d76aa13c89725375fb33412ecf902d1e0ba8c963a5eb2373a55b5bf17",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/MiniGameUIRouter.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "b40cd37f02507630d72a1ebe47854c20d32f6b9fe4678a4e3989afcbdfc136ea",
+    "sha256_lf": "b40cd37f02507630d72a1ebe47854c20d32f6b9fe4678a4e3989afcbdfc136ea",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Rule/MiniGameFishingRule.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "d611e3ebb3992e6f14849364bab17a5a024d93b033fcd41d828aec10af0ac0c8",
+    "sha256_lf": "d611e3ebb3992e6f14849364bab17a5a024d93b033fcd41d828aec10af0ac0c8",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Rule/MiniGameSettlementRule.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "ae53beaf883090788e1c67bfdd2a3b9f9d1b69a0",
+    "post_review_change": false,
+    "sha256": "d760f250206b8dbe86da5a7a91847512fcf4d5c9fb08299aee4de272c0d80eca",
+    "sha256_lf": "d760f250206b8dbe86da5a7a91847512fcf4d5c9fb08299aee4de272c0d80eca",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Rule/MiniGameSnailLadderRule.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "03a25c86b844a5b8234e1f4e45777bab7ffcd97afd34e3221be3a5946008b144",
+    "sha256_lf": "03a25c86b844a5b8234e1f4e45777bab7ffcd97afd34e3221be3a5946008b144",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/FishingRewardLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "430d3f4cea5e12b8da7e6f3a54f7221f3a9cd7c9",
+    "post_review_change": false,
+    "sha256": "2b895232c77bd0a51a9619e5c62e870824c8b4d12f2b883d560f1cda8ae6f014",
+    "sha256_lf": "2b895232c77bd0a51a9619e5c62e870824c8b4d12f2b883d560f1cda8ae6f014",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/FishingRewardStorage.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "430d3f4cea5e12b8da7e6f3a54f7221f3a9cd7c9",
+    "post_review_change": false,
+    "sha256": "18f5c8a8748717e9f63b303f1103851368840e949c419ed3facf89420cc857fa",
+    "sha256_lf": "18f5c8a8748717e9f63b303f1103851368840e949c419ed3facf89420cc857fa",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/MiniGameClientResultServerHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "b5f0c0f9faed6335e211a88a11e7ff9bb7e54fc5fae25574f2c91ae0572fe35a",
+    "sha256_lf": "b5f0c0f9faed6335e211a88a11e7ff9bb7e54fc5fae25574f2c91ae0572fe35a",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/MiniGameDalgonaServerHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "e1c46f5d3267cae504ade43d1c6c8bd6b8fccf0b",
+    "post_review_change": false,
+    "sha256": "22c5e301f773821caee1fb9fe562ee8a142cd401530f4e51b5000cb4c2be0cda",
+    "sha256_lf": "22c5e301f773821caee1fb9fe562ee8a142cd401530f4e51b5000cb4c2be0cda",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/MiniGameFishingServerHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "ca203e66cd33d51ff6b2becb1497e745dde377b2265301fce3ea1aad0d915df4",
+    "sha256_lf": "ca203e66cd33d51ff6b2becb1497e745dde377b2265301fce3ea1aad0d915df4",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/MiniGameLuckyCubeServerHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "a102e26f5a1e258cf5c387f41fbe34b0035dee7fce51bf65d98b31a2899de793",
+    "sha256_lf": "a102e26f5a1e258cf5c387f41fbe34b0035dee7fce51bf65d98b31a2899de793",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/MiniGameSessionService.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "89db4a49e32f7e5e25069dde9ba2b3cb8ff2ce22",
+    "post_review_change": false,
+    "sha256": "9801b48a2cfde66c5dc3d745ced25e68284e9cb81f227586e6f4065fa7c456fe",
+    "sha256_lf": "9801b48a2cfde66c5dc3d745ced25e68284e9cb81f227586e6f4065fa7c456fe",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Server/MiniGameSnailLadderServerHandler.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "89db4a49e32f7e5e25069dde9ba2b3cb8ff2ce22",
+    "post_review_change": false,
+    "sha256": "34c27d16c8205de13e4deb8dca469a4e2a360ba494ac179da7a03342084dd579",
+    "sha256_lf": "34c27d16c8205de13e4deb8dca469a4e2a360ba494ac179da7a03342084dd579",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/Data/PerformanceCueRow.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "5d2c1de98c59353d7f44e588b47617b65c9942d2",
+    "post_review_change": false,
+    "sha256": "0053c2dad4b9b6a8b2fca8453f1c632937a2bd70672be4a8064bf6416c97d869",
+    "sha256_lf": "0053c2dad4b9b6a8b2fca8453f1c632937a2bd70672be4a8064bf6416c97d869",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/Data/PerformanceRow.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "abd742dca2e344a40f4382f5d0175492e50c90bf",
+    "post_review_change": false,
+    "sha256": "5de25c7fd30634e9971c1092b1ae612442a11abc4412c4219b8f0868dc2b4da8",
+    "sha256_lf": "5de25c7fd30634e9971c1092b1ae612442a11abc4412c4219b8f0868dc2b4da8",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceConductor.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "5d2c1de98c59353d7f44e588b47617b65c9942d2",
+    "post_review_change": false,
+    "sha256": "44a9cddb6201872305af326440b54a4ce6fd08cbe195bf30f707724e0a01ce5b",
+    "sha256_lf": "44a9cddb6201872305af326440b54a4ce6fd08cbe195bf30f707724e0a01ce5b",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceDebugLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "abd742dca2e344a40f4382f5d0175492e50c90bf",
+    "post_review_change": false,
+    "sha256": "0e2416d18a49b96c4c9ab9e115623f9fc2b45245777c40b56dafbbba99a3fd25",
+    "sha256_lf": "0e2416d18a49b96c4c9ab9e115623f9fc2b45245777c40b56dafbbba99a3fd25",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceEffectLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "f876b670ceaa7131b55bee119cb058cd9a451f37",
+    "post_review_change": false,
+    "sha256": "b17e7561ba1add3e9661f3cd342260280963f0f0d2e5925a7fb7c22497e7732e",
+    "sha256_lf": "b17e7561ba1add3e9661f3cd342260280963f0f0d2e5925a7fb7c22497e7732e",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceMaster.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "abd742dca2e344a40f4382f5d0175492e50c90bf",
+    "post_review_change": false,
+    "sha256": "a9d8ea58c558848e0f4046506cc3d0e1ba95a83e00ef42490036c73f56c6bbe2",
+    "sha256_lf": "a9d8ea58c558848e0f4046506cc3d0e1ba95a83e00ef42490036c73f56c6bbe2",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformancePostFlowLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "abd742dca2e344a40f4382f5d0175492e50c90bf",
+    "post_review_change": false,
+    "sha256": "85f536497c645209d386d7b940ce6205fa42f5fcaa3f274881b8ab3cb49bd9a2",
+    "sha256_lf": "85f536497c645209d386d7b940ce6205fa42f5fcaa3f274881b8ab3cb49bd9a2",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceResultManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "abd742dca2e344a40f4382f5d0175492e50c90bf",
+    "post_review_change": false,
+    "sha256": "ee20442c9adaf0dd96b4a8548b7b042c40d24838688812a725912ea87fd10f26",
+    "sha256_lf": "ee20442c9adaf0dd96b4a8548b7b042c40d24838688812a725912ea87fd10f26",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceScoreUILogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "abd742dca2e344a40f4382f5d0175492e50c90bf",
+    "post_review_change": false,
+    "sha256": "5a92e278e54d30b870342657bfd3a557de3b31df2f7b7951c0123fc17d92d409",
+    "sha256_lf": "5a92e278e54d30b870342657bfd3a557de3b31df2f7b7951c0123fc17d92d409",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/NightMarketShopUILogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "1ae53c3eaecdff268a8da95df3e3d771b5a560e7e62530494d62ad1d39ae2979",
+    "sha256_lf": "1ae53c3eaecdff268a8da95df3e3d771b5a560e7e62530494d62ad1d39ae2979",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/PurchaseUILogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "c086858430129c29b3d0c7f3445f75d2c4ab1eb543faa541c972f3904de52ad8",
+    "sha256_lf": "c086858430129c29b3d0c7f3445f75d2c4ab1eb543faa541c972f3904de52ad8",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/ShopItemManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "6b9486462cd4b6d81100bb2566b8f66b8b15ab1360e84a9f0853b9e6508dedeb",
+    "sha256_lf": "6b9486462cd4b6d81100bb2566b8f66b8b15ab1360e84a9f0853b9e6508dedeb",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/ShopItemMaster.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "b3a297e2e0c7a9c4865a9e77ecbc09d099c6ff9e1496cc022067bde0b60af4c9",
+    "sha256_lf": "b3a297e2e0c7a9c4865a9e77ecbc09d099c6ff9e1496cc022067bde0b60af4c9",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/ShopItemRow.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "64494e8bda6f2f32e9de144388bae064546bffdec332205e26ec0f7038be3e43",
+    "sha256_lf": "64494e8bda6f2f32e9de144388bae064546bffdec332205e26ec0f7038be3e43",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/ShopItemStorage.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b94823d9d0de61250bd629c1959653f822169fea",
+    "post_review_change": false,
+    "sha256": "be4f5b52154969c3e175d9d16117666e5b0224894d989abf7984cc2223b8eb6d",
+    "sha256_lf": "be4f5b52154969c3e175d9d16117666e5b0224894d989abf7984cc2223b8eb6d",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/ShopUILogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "5ee5ea1ca7e12dcbd945d0735304ab0bff47f393",
+    "post_review_change": false,
+    "sha256": "cae5f64d2c90e26a4998429e504844c680c2d89719d6ff6b0dbc3441889f3a50",
+    "sha256_lf": "cae5f64d2c90e26a4998429e504844c680c2d89719d6ff6b0dbc3441889f3a50",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/WorldShopPurchaseLogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "2c1c82405154b2167dce56b1fa85858f4fb78cbf",
+    "post_review_change": false,
+    "sha256": "4a820a95d458fba258dde8bf086de9d4bea58a9450d3544b793573097500f5df",
+    "sha256_lf": "4a820a95d458fba258dde8bf086de9d4bea58a9450d3544b793573097500f5df",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/UI/LoadingUILogic.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "fee8de333e3369e4481a0c5a3eb899b72867f5f7",
+    "post_review_change": false,
+    "sha256": "904708b1a2bd380ebc9ab14ba37dedf968f9fd822109696da3e5eb7d54104f27",
+    "sha256_lf": "904708b1a2bd380ebc9ab14ba37dedf968f9fd822109696da3e5eb7d54104f27",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/RootDesk/MyDesk/UserDataManager.mlua",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b94823d9d0de61250bd629c1959653f822169fea",
+    "post_review_change": false,
+    "sha256": "eceac1ae2bca8c01c322a6f0caa1c6d638b3c2788309cf1c959903d99b0e2420",
+    "sha256_lf": "eceac1ae2bca8c01c322a6f0caa1c6d638b3c2788309cf1c959903d99b0e2420",
+    "git_authors": [
+      "HGM2695",
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/tools/performance-sequencer/README.md",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b9d83d941a6aa32872179d0b9853a189d90d3167",
+    "post_review_change": false,
+    "sha256": "ccfdfcf96ca3660579677d5955ab23e830b8f9f64f4cbadd6ed4785dc7b6a4f3",
+    "sha256_lf": "ccfdfcf96ca3660579677d5955ab23e830b8f9f64f4cbadd6ed4785dc7b6a4f3",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/tools/performance-sequencer/csv-store.cjs",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b9d83d941a6aa32872179d0b9853a189d90d3167",
+    "post_review_change": false,
+    "sha256": "7ccebf54b835b272d5dbcae24523c81b8c803a8822c41a88ef414bf3159bbf6e",
+    "sha256_lf": "7ccebf54b835b272d5dbcae24523c81b8c803a8822c41a88ef414bf3159bbf6e",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/tools/performance-sequencer/index.html",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b9d83d941a6aa32872179d0b9853a189d90d3167",
+    "post_review_change": false,
+    "sha256": "d9b8489235cb8c9dd343f43cefcededc77efa7cc5d2cd6a9136779bbc43484d4",
+    "sha256_lf": "d9b8489235cb8c9dd343f43cefcededc77efa7cc5d2cd6a9136779bbc43484d4",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/tools/performance-sequencer/serve.cjs",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b9d83d941a6aa32872179d0b9853a189d90d3167",
+    "post_review_change": false,
+    "sha256": "ec367d0cebecff3a5b82d5672126af7bd225cbe3937895303ab8ec81353e7bdf",
+    "sha256_lf": "ec367d0cebecff3a5b82d5672126af7bd225cbe3937895303ab8ec81353e7bdf",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
+  },
+  {
+    "file": "SourceUpdates/abbb12c/tools/performance-sequencer/start-sequencer.bat",
+    "source_base_commit": "abbb12c4ec378f33fd46c36bb152d4a666773035",
+    "source_file_commit": "b9d83d941a6aa32872179d0b9853a189d90d3167",
+    "post_review_change": false,
+    "sha256": "ab2fd470cbd470d55c89f41325d7e1bbed612fed314d2579e610ab5f2efce172",
+    "sha256_lf": "ab2fd470cbd470d55c89f41325d7e1bbed612fed314d2579e610ab5f2efce172",
+    "git_authors": [
+      "Jinwon"
+    ],
+    "attribution_basis": "Git modification history, not sole ownership"
   }
 ]

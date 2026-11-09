@@ -4,6 +4,17 @@
 
 담당 기능과 연동에 사용한 공동 모듈을 원본 경로에 맞춰 정리했습니다. 미니게임은 [구조와 입력 흐름](MiniGames.md), 구매와 저장은 [거래 처리](Payments.md)에서 주요 함수로 이동할 수 있습니다.
 
+## 후속 구현
+
+| 기능 | 코드 |
+| --- | --- |
+| 낚시, 야시장과 공통 세션 | [미니게임](../SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/) |
+| 대화 요청, 분기와 보상 검증 | [NPC와 이벤트](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/) |
+| 지갑 저장과 수량형 상품 지급 | [재화](../SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/), [상점](../SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/), [아이템](../SourceUpdates/abbb12c/RootDesk/MyDesk/Item/) |
+| 공연 재생과 데이터 편집 | [공연](../SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/), [시퀀서](../SourceUpdates/abbb12c/tools/performance-sequencer/) |
+
+아래 목록은 포트폴리오의 코드 링크가 가리키는 발췌입니다.
+
 ## Activity
 
 - [RootDesk/MyDesk/Activity/ActivityHandler.mlua](../Source/RootDesk/MyDesk/Activity/ActivityHandler.mlua)

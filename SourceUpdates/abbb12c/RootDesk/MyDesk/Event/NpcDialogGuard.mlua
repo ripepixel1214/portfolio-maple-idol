@@ -1,0 +1,65 @@
+@Logic
+script NpcDialogGuard extends Logic
+	property boolean isCached = false
+	property table npcEventIds = {}
+	property table dialogEventIds = {}
+	property string REWARD_CLAIMED = "claimed"
+	property string REWARD_DUPLICATE = "duplicate"
+	property string REWARD_REJECTED = "rejected"
+
+	method void EnsureCached()
+		-- 문구 번역 없이 대화 줄의 이벤트 순서와 NPC 하위 이벤트 그래프 캐싱
+		if self.isCached then return end
+		local dataSet = _DataService:GetTable("DialogTable")
+		if dataSet == nil or _EventTriggerManager == nil or _EventMaster == nil then return end
+		local linesByDialog = {}
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local dialogId = dataSet:GetCell(rowIndex, "dialogId") or ""
+			local eventId = dataSet:GetCell(rowIndex, "eventId") or ""
+			if dialogId ~= "" and eventId ~= "" then
+				if linesByDialog[dialogId] == nil then linesByDialog[dialogId] = {} end
+				table.insert(linesByDialog[dialogId], { index = tonumber(dataSet:GetCell(rowIndex, "index")) or rowIndex, eventId = eventId })
+			end
+		end
+		self.dialogEventIds = {}
+		for dialogId, lines in pairs(linesByDialog) do
+			table.sort(lines, function(a, b) return a.index < b.index end)
+			local eventIds = {}
+			for _, line in ipairs(lines) do table.insert(eventIds, line.eventId) end
+			self.dialogEventIds[dialogId] = eventIds
+		end
+		if not _EventTriggerManager.IsEventTriggerTableLoaded then _EventTriggerManager:LoadEventTriggerTable() end
+		self.npcEventIds = {}
+		for _, trigger in ipairs(_EventTriggerManager.tTriggers) do
+			if (trigger.npcId or "") ~= "" then self:RegisterEventTree(trigger.eventId) end
+		end
+		self.isCached = true
+	end
+
+	method void RegisterEventTree(string eventId)
+		-- 순환 참조를 끊고 NPC 대화에서 도달하는 모든 분기를 공용 RPC 차단 목록에 등록
+		if eventId == nil or eventId == "" or self.npcEventIds[eventId] then return end
+		self.npcEventIds[eventId] = true
+		local tEvent = _EventMaster:GetEvent(eventId)
+		if tEvent == nil then return end
+		if tEvent.eventType == _EEventType.Dialog then
+			for _, childId in ipairs(self.dialogEventIds[tEvent.dialogId] or {}) do self:RegisterEventTree(childId) end
+		elseif tEvent.eventType == _EEventType.Choice then
+			for _, childId in ipairs(_EventMaster:GetChoiceEventIds(eventId)) do self:RegisterEventTree(childId) end
+		end
+	end
+
+	method boolean IsNpcEvent(string eventId)
+		-- 트리거 본체뿐 아니라 선택지와 보상 이벤트까지 보호 여부 조회
+		self:EnsureCached()
+		return self.npcEventIds[eventId] == true
+	end
+
+	method any GetDialogEventIds(string dialogId)
+		-- 현재 대화에 연결된 실행 이벤트의 독립 목록 반환
+		self:EnsureCached()
+		local copied = {}
+		for _, eventId in ipairs(self.dialogEventIds[dialogId] or {}) do table.insert(copied, eventId) end
+		return copied
+	end
+end

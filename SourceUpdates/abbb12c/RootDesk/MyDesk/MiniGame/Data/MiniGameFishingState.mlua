@@ -1,0 +1,96 @@
+---@description "잡아라! 날치왕 서버 상태와 클라이언트 표시 데이터"
+@Struct
+script MiniGameFishingState
+	property string stage = "ready"
+	property string operationId = ""
+	property number elapsed = 0
+	property number remaining = 40
+	property integer score = 0
+	property integer rank = 5
+	property number playerX = 550
+	property number shotX = 550
+	property number tipY = 515
+	property string shotPhase = "idle"
+	property number phaseElapsed = 0
+	property number cooldown = 0
+	property number stun = 0
+	property integer caught = 0
+	property integer goldCaught = 0
+	property boolean hasGold = false
+	property any caughtLanes = {}
+	property any fish = {}
+	property integer shotSequence = 0
+	property integer hitSequence = 0
+	property any hitEffects = {}
+	property integer nextFishId = 0
+	property integer inputSequence = 0
+	property integer revision = 0
+	property number broadcastElapsed = 0
+	property string message = ""
+	property string rewardItemId = ""
+	property integer rewardCount = 0
+	property boolean rewardConfirmed = false
+	property boolean isDebug = false
+
+	method any ToPlainTable()
+		-- 런타임 참조를 제외한 표시용 스냅샷 생성
+		local rows = {}
+		for _, row in ipairs(self.fish) do
+			table.insert(rows, {id = row.id, lane = row.lane, x = row.x, kind = row.kind})
+		end
+		local hits = {}
+		for _, hit in ipairs(self.hitEffects) do
+			table.insert(hits, {id = hit.id, fishId = hit.fishId, kind = hit.kind, x = hit.x, y = hit.y, time = hit.time, points = hit.points})
+		end
+		return {stage = self.stage, elapsed = self.elapsed, remaining = self.remaining,
+			score = self.score, rank = self.rank, playerX = self.playerX, shotX = self.shotX,
+			tipY = self.tipY, shotPhase = self.shotPhase, cooldown = self.cooldown,
+			shotSequence = self.shotSequence, stun = self.stun, caught = self.caught, hasGold = self.hasGold, fish = rows, hitEffects = hits,
+			revision = self.revision, message = self.message, rewardItemId = self.rewardItemId,
+			rewardCount = self.rewardCount, rewardConfirmed = self.rewardConfirmed, isDebug = self.isDebug}
+	end
+
+	method void FromPlainTable(any tPlainData)
+		-- 서버 스냅샷 타입 정규화
+		if type(tPlainData) ~= "table" then return end
+		self.stage = type(tPlainData.stage) == "string" and tPlainData.stage or "ready"
+		self.shotPhase = type(tPlainData.shotPhase) == "string" and tPlainData.shotPhase or "idle"
+		self.elapsed = tonumber(tPlainData.elapsed) or 0
+		self.remaining = math.max(0, tonumber(tPlainData.remaining) or 0)
+		self.score = math.max(0, math.floor(tonumber(tPlainData.score) or 0))
+		self.rank = math.max(1, math.min(5, math.floor(tonumber(tPlainData.rank) or 5)))
+		self.playerX = tonumber(tPlainData.playerX) or 550
+		self.shotX = tonumber(tPlainData.shotX) or 550
+		self.tipY = tonumber(tPlainData.tipY) or 515
+		self.cooldown = tonumber(tPlainData.cooldown) or 0
+		self.stun = tonumber(tPlainData.stun) or 0
+		self.shotSequence = math.max(0, math.floor(tonumber(tPlainData.shotSequence) or 0))
+		self.caught = math.floor(tonumber(tPlainData.caught) or 0)
+		self.hasGold = tPlainData.hasGold == true
+		self.revision = math.floor(tonumber(tPlainData.revision) or 0)
+		self.message = type(tPlainData.message) == "string" and tPlainData.message or ""
+		self.rewardItemId = type(tPlainData.rewardItemId) == "string" and tPlainData.rewardItemId or ""
+		self.rewardCount = math.floor(tonumber(tPlainData.rewardCount) or 0)
+		self.rewardConfirmed = tPlainData.rewardConfirmed == true
+		self.isDebug = tPlainData.isDebug == true
+		self.hitEffects = {}
+		if type(tPlainData.hitEffects) == "table" then
+			for _, hit in ipairs(tPlainData.hitEffects) do
+				if type(hit) == "table" and type(hit.id) == "number" and type(hit.kind) == "string"
+					and type(hit.x) == "number" and type(hit.y) == "number" and type(hit.time) == "number" then
+					table.insert(self.hitEffects, {id = hit.id, fishId = math.max(0, math.floor(tonumber(hit.fishId) or 0)),
+						kind = hit.kind, x = hit.x, y = hit.y, time = hit.time,
+						points = math.max(0, math.floor(tonumber(hit.points) or 0))})
+				end
+			end
+		end
+		self.fish = {}
+		if type(tPlainData.fish) ~= "table" then return end
+		for _, row in ipairs(tPlainData.fish) do
+			if type(row) == "table" and type(row.id) == "number" and type(row.lane) == "number"
+				and type(row.x) == "number" and type(row.kind) == "string" then
+				table.insert(self.fish, {id = row.id, lane = row.lane, x = row.x, kind = row.kind})
+			end
+		end
+	end
+end

@@ -1,0 +1,206 @@
+---@description "미니게임 UI 선택 및 연결 로직"
+@Logic
+script MiniGameUIRouter extends Logic
+
+	property string UI_ID = "minigameUI"
+	property number STAGE_SIDE_MARGIN = 24
+	property boolean isUiOpen = false
+	property string activePresentationId = ""
+	property any activeView = nil
+	property any activeCapabilities = {}
+	property Entity playGroup = "bf41fc6e-9b0d-47c7-8cfc-e6a14911a76c"
+	property Entity activeStageRoot = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 공통 그룹과 등록된 Stage를 비표시 상태로 초기화
+		self:HideInactiveStages(nil)
+		if isvalid(self.playGroup) then self.playGroup.Enable = false end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideInactiveStages(Entity targetRoot)
+		-- 선택한 Stage 외에는 각 View가 제공한 루트만 비표시
+		for _, view in ipairs(_MiniGameViewRegistry:GetViews()) do
+			if type(view.GetStageRoot) == "function" then
+				local root = view:GetStageRoot()
+				if isvalid(root) and isvalid(self.playGroup) and isvalid(self.playGroup:GetChild(root.Id, false))
+					and (not isvalid(targetRoot) or root.Id ~= targetRoot.Id) then
+					root.Enable = false
+				end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetStageVisible(Entity stageRoot, boolean show)
+		-- 활성 Stage만 그룹 표시 권한 부여, 이전 View의 닫기는 자기 루트로 제한
+		if not isvalid(stageRoot) then return false end
+		local active = isvalid(self.activeStageRoot) and stageRoot.Id == self.activeStageRoot.Id
+		if show then
+			if not active or not isvalid(self.playGroup) then return false end
+			self:NotifyVisibility(true)
+			self:HideInactiveStages(stageRoot)
+			stageRoot.Enable = true
+			self.playGroup.Enable = true
+			self:FitStageToViewport(stageRoot)
+			_SoundManager:PlayMiniGameBGM()
+		else
+			stageRoot.Enable = false
+			if active then
+				if isvalid(self.playGroup) then self.playGroup.Enable = false end
+				self:NotifyVisibility(false)
+				_SoundManager:RestoreBGMAfterMiniGame()
+			end
+		end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FitStageToViewport(Entity stageRoot)
+		-- 배경과 플레이 영역을 같은 배율로 조정하고 전체 화면 딤은 유지
+		self._T.layoutWidth = _UILogic.ScreenWidth
+		self._T.layoutHeight = _UILogic.ScreenHeight
+		local panel = stageRoot:GetChildByName("Panel")
+		if not isvalid(panel) then return end
+		local content = panel:GetChildByName("Content")
+		local background = panel:GetChildByName("Background")
+		if not isvalid(content) or not isvalid(background) then return end
+
+		local scale = _UIScreenUtil:GetHeightFitContentScale(content.UITransformComponent.RectSize.x, self.STAGE_SIDE_MARGIN)
+		if isvalid(stageRoot:GetChildByName("PopupDim")) then
+			panel.UITransformComponent.UIScale = scale
+		else
+			content.UITransformComponent.UIScale = scale
+			background.UITransformComponent.UIScale = scale
+		end
+		if type(self.activeView.FitViewportOverlays) == "function" then self.activeView:FitViewportOverlays(scale) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		if not self.isUiOpen or not isvalid(self.activeStageRoot) then return end
+		if self._T.layoutWidth ~= _UILogic.ScreenWidth or self._T.layoutHeight ~= _UILogic.ScreenHeight then
+			self:FitStageToViewport(self.activeStageRoot)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void NotifyVisibility(boolean isOpen)
+		-- 로비부터 결과 화면까지 공통 UI 잠금 유지, 중복 표시 알림 방지
+		if self.isUiOpen == isOpen then return end
+		self.isUiOpen = isOpen
+		_UIVisibilityNotifierLogic:SendFrom(self, self.UI_ID, isOpen)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean SetPresentation(string presentationId)
+		-- 게임 규칙과 독립적인 View 선택
+		local view = _MiniGameViewRegistry:Resolve(presentationId)
+		if view == nil or type(view.GetCapabilities) ~= "function" or type(view.GetStageRoot) ~= "function" then
+			log_warning("[MiniGameUIRouter] 등록되지 않은 View=" .. tostring(presentationId))
+			return false
+		end
+		if type(view.Initialize) == "function" and not view:Initialize() then return false end
+		local stageRoot = view:GetStageRoot()
+		if not isvalid(stageRoot) or not isvalid(self.playGroup)
+			or not isvalid(self.playGroup:GetChild(stageRoot.Id, false)) then return false end
+		if self.activeView ~= nil and (self.activePresentationId ~= presentationId or self.activeView ~= view) then
+			self.activeView:Close()
+		end
+		self.activeView = view
+		self.activeStageRoot = stageRoot
+		self.activePresentationId = presentationId
+		self.activeCapabilities = view:GetCapabilities()
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanPresent(string presentationId, string gameKind)
+		-- 필수 기능이 없는 View를 세션 입력과 이동 잠금 전에 차단
+		local view = _MiniGameViewRegistry:Resolve(presentationId)
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(gameKind)
+		if view == nil or tBehavior == nil then return false end
+		if type(view.GetCapabilities) ~= "function"
+			or type(view.GetStageRoot) ~= "function"
+			or type(view.OpenForSession) ~= "function"
+			or type(view.ShowActiveSession) ~= "function"
+			or type(view.Close) ~= "function" then
+			return false
+		end
+		if type(view.Initialize) == "function" and not view:Initialize() then return false end
+		local stageRoot = view:GetStageRoot()
+		if not isvalid(stageRoot) or not isvalid(self.playGroup)
+			or not isvalid(self.playGroup:GetChild(stageRoot.Id, false)) then return false end
+		local capabilities = view:GetCapabilities()
+		if type(capabilities) ~= "table" then return false end
+		for _, key in ipairs(tBehavior.requiredCapabilities) do
+			if capabilities[key] == nil then
+				log_warning("[MiniGameUIRouter] 필수 View 기능 누락 id=" .. presentationId .. " capability=" .. key)
+				return false
+			end
+		end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method string ResolvePresentationId(any presentations)
+		-- 프리셋의 표시 id 해석
+		if presentations ~= nil then
+			local defaultId = presentations.default
+			if defaultId ~= nil and defaultId ~= "" then
+				return defaultId
+			end
+		end
+
+		return _MiniGameViewRegistry.PRESENTATION_DEFAULT_TRAINING
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		-- 선택한 View 계약으로 전달
+		if self.activeView == nil then return end
+		if not self:SetStageVisible(self.activeStageRoot, true) then return end
+		self.activeView:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetMobilePrimaryInputEnabled(boolean enabled)
+		-- 모바일 공통 입력을 제공하는 View에만 전달
+		local view = self:GetCapability(_MiniGameViewRegistry.CAP_MOBILE_INPUT)
+		if view ~= nil then view:SetMobilePrimaryInputEnabled(enabled) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(any tContext)
+		-- 표시 전용 Context 전달
+		if self.activeView ~= nil then self.activeView:OpenForSession(tContext) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CloseActive()
+		-- 현재 View 숨김
+		if self.activeView ~= nil then self.activeView:Close() end
+		self:SetStageVisible(self.activeStageRoot, false)
+		-- 루트가 먼저 제거된 경우에도 미니게임 UI 잠금 해제
+		self:NotifyVisibility(false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 종료 시 View 참조 해제
+		self:CloseActive()
+		self.activeView = nil
+		self.activeStageRoot = nil
+		self.activeCapabilities = {}
+		self.activePresentationId = ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCapability(string capabilityId)
+		-- 현재 View의 좁은 기능 계약 조회
+		if self.activeView == nil then return nil end
+		return self.activeCapabilities[capabilityId]
+	end
+
+end

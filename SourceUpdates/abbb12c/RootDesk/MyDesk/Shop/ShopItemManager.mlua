@@ -1,0 +1,709 @@
+-- 유저가 상점에서 구매해 보유 중인 치장 아이템 목록을 관리한다(런타임 캐시 + 서버 권위 + 구매 처리).
+@Logic
+script ShopItemManager extends Logic
+
+	property boolean isShopItemOwnershipLoaded = false
+	property boolean hasSyncedShopItems = false
+
+	property boolean isPurchaseInProgress = false
+
+	property string CONTENT_DOMAIN_COSTUME = "costume"
+	property string CONTENT_DOMAIN_CHARACTER = "character"
+	property string CONTENT_CATEGORY_IDOL = "idol"
+
+	property table purchaseCharacterIds = {}
+	property table purchaseConsumableGrants = {}
+	property string purchaseOperationId = ""
+	property string CONSUMABLE_OPERATION_PREFIX = "shop_"
+	property string DRAW_EXCHANGE_PREFIX = "drawex_"
+	property string NIGHT_MARKET_OPERATION_PREFIX = "nmshop_"
+	property string NIGHT_MARKET_PURCHASE_SUCCESS = "success"
+	property string NIGHT_MARKET_PURCHASE_INSUFFICIENT = "insufficient"
+	property string NIGHT_MARKET_PURCHASE_FAILED = "failed"
+	property string NIGHT_MARKET_PURCHASE_BUSY = "busy"
+	property number lastRefreshRequestedAt = -5
+
+	-- ownedShopItemIds: { shopItemId:string, shopItemId:string, ... }
+	property any ownedShopItemIds = {}
+
+	-- ownedShopItemIdSet: { [shopItemId:string] = true }
+	property any ownedShopItemIdSet = {}
+
+	property string currentUserId = ""
+
+	property any userEnterHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 서버 권위 상점 소유 목록을 로드하고 클라이언트에 동기화합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 서버 종료 시점에 유저 입장 이벤트 핸들러를 정리합니다.
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientHasShopItem(string shopItemId)
+		-- 클라이언트 로컬 캐시의 상점 아이템 보유 여부를 반환합니다.
+		if shopItemId == nil or shopItemId == "" then
+			return false
+		end
+
+		local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+		if tShopItem ~= nil and (tShopItem.grantItemId ~= "" or tShopItem.grantCurrencyId ~= "") then return false end
+		if tShopItem ~= nil and tShopItem.category == _ShopItemMaster.CATEGORY_PACKAGE then
+			return self:HasAllPackageCostumes(tShopItem)
+		end
+		if tShopItem ~= nil and (tShopItem.characterId or "") ~= "" then
+			local tCharacter = _CharacterManager:ClientGetCharacterById(tShopItem.characterId)
+			if tCharacter ~= nil and tCharacter.isDiscovered then return true end
+		end
+
+		return self.ownedShopItemIdSet[shopItemId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetOwnedShopItemIds()
+		-- 클라이언트 로컬 캐시의 보유 상점 아이템 id 목록 복사본을 반환합니다.
+		return self:CopyStringList(self.ownedShopItemIds)
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestPurchaseItems(table shopItemIds)
+		-- 클라이언트 요청으로 지정한 상점 아이템들을 한 번에 구매합니다.
+		if self:CanUseShopItems(senderUserId) == false then
+			return false
+		end
+
+		return self:PurchaseItemsWithCommit(shopItemIds, senderUserId, _UtilLogic:NewGuid())
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 유저가 서버에 입장하면 상점 소유 데이터를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][ShopItemManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadShopItems()
+
+		if self:IsShopItemsLoaded() then
+			self:PushShopItemsToClient(event.UserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadShopItems()
+		-- Storage에서 보유 상점 아이템 id 목록을 읽어 서버 권위 캐시로 보관합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ShopItemManager] currentUserId is required")
+			self.isShopItemOwnershipLoaded = false
+			return
+		end
+
+		local loadedShopItemIds = {}
+		if _ShopItemStorage ~= nil then
+			loadedShopItemIds = _ShopItemStorage:LoadShopItems(self.currentUserId)
+			if loadedShopItemIds == nil then
+				log_warning("[ShopItemManager] shop item ids are nil")
+				self.isShopItemOwnershipLoaded = false
+				return
+			end
+		end
+
+		self:RegisterOwnedShopItems(loadedShopItemIds)
+		self.isShopItemOwnershipLoaded = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsShopItemsLoaded()
+		-- 서버 상점 소유 데이터 로드 여부를 반환합니다.
+		return self.isShopItemOwnershipLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseShopItems(string userId)
+		-- Request 입구에서 현재 유저와 상점 소유 데이터 로드 상태를 검증합니다.
+		if self.isPurchaseInProgress or self:IsShopItemsLoaded() == false then
+			log_warning("[ShopItemManager] request rejected because shop items are not loaded or a purchase is in progress")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ShopItemManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[ShopItemManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return _ShopItemStorage:IsShopInitializationReady(userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ServerHasShopItem(string shopItemId)
+		-- 서버 권위 캐시에 지정한 상점 아이템을 보유하고 있는지 반환합니다.
+		if self:IsShopItemsLoaded() == false then
+			return false
+		end
+
+		if shopItemId == nil or shopItemId == "" then
+			return false
+		end
+
+		local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+		if tShopItem ~= nil and tShopItem.grantItemId ~= "" then return false end
+		if tShopItem ~= nil and tShopItem.category == _ShopItemMaster.CATEGORY_PACKAGE then
+			return self:HasAllPackageCostumes(tShopItem)
+		end
+		if tShopItem ~= nil and (tShopItem.characterId or "") ~= "" then
+			local tCharacter = _CharacterManager:ServerGetCharacterById(tShopItem.characterId)
+			if tCharacter ~= nil and tCharacter.isDiscovered then return true end
+		end
+
+		local tInventory = _ItemManager.tInventory
+		return self.ownedShopItemIdSet[shopItemId] == true
+			or (tInventory ~= nil and _ItemManager.currentUserId == self.currentUserId and tInventory.redeemedCostumeIds[shopItemId] == true)
+	end
+
+	method boolean HasAllPackageCostumes(any tPackage)
+		-- 패키지 행 대신 실제 치장 보유 여부로 구매 가능 상태 판정
+		if #tPackage.packageCostumeIds == 0 then return false end
+		for _, id in ipairs(tPackage.packageCostumeIds) do
+			if self.ownedShopItemIdSet[id] ~= true then return false end
+		end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetOwnedShopItemIds()
+		-- 서버 권위 보유 상점 아이템 id 목록 복사본을 반환합니다.
+		if self:IsShopItemsLoaded() == false then
+			return {}
+		end
+
+		local ids = self:CopyStringList(self.ownedShopItemIds)
+		local tInventory = _ItemManager.tInventory
+		if tInventory ~= nil and _ItemManager.currentUserId == self.currentUserId then
+			for id in pairs(tInventory.redeemedCostumeIds) do
+				if not self.ownedShopItemIdSet[id] then table.insert(ids, id) end
+			end
+		end
+		return ids
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean PurchaseItemsWithCommit(any shopItemIds, string forUserId, string requestId)
+		-- 영구 보유권과 수량형 지급 지시를 재화별 저장 경로로 분리
+		if _UserDataManager.isResetInProgress then return false end
+		if not self:CanUseShopItems(forUserId) or _ProgressManager == nil
+			or not _ProgressManager:CanUseProgress(forUserId) then return false end
+		local purchaseTargets = self:CollectPurchasableShopItemIds(shopItemIds)
+		if #purchaseTargets == 0 then return false end
+		local totalPrice = self:GetTotalPrice(purchaseTargets)
+		if totalPrice < 0 then return false end
+		local tFirst = _ShopItemMaster:GetShopItemById(purchaseTargets[1])
+		local currency = self:GetCurrencyForCoinType(tFirst.coinType)
+		if currency == "" or #tFirst.drawDrops > 0 then return false end
+		local nextOwnedIds = self:CopyStringList(self.ownedShopItemIds)
+		local permanentIds = {}
+		local characterIds = {}
+		local grants = {}
+		for _, id in ipairs(purchaseTargets) do
+			local tItem = _ShopItemMaster:GetShopItemById(id)
+			if tItem.grantItemId ~= "" then
+				local itemId = tItem.grantItemId
+				grants[itemId] = (grants[itemId] or 0) + tItem.grantCount
+			elseif tItem.category == _ShopItemMaster.CATEGORY_PACKAGE then
+				for _, costumeId in ipairs(tItem.packageCostumeIds) do
+					if not self:ServerHasShopItem(costumeId) then
+						table.insert(permanentIds, costumeId)
+						table.insert(nextOwnedIds, costumeId)
+					end
+				end
+			else
+				table.insert(permanentIds, id)
+				table.insert(nextOwnedIds, id)
+				if tItem.characterId ~= "" then table.insert(characterIds, tItem.characterId) end
+			end
+		end
+		local hasGrants = next(grants) ~= nil
+		local operationId = _UtilLogic:NewGuid()
+		if hasGrants then
+			if #requestId > 60 or string.match(requestId, "^[%w_%-]+$") == nil
+				or not _ItemManager:CanUseItems(forUserId) or not _ItemStorage:IsValidGrantCounts(grants) then return false end
+			if tFirst.category == _ShopItemMaster.CATEGORY_NIGHT_MARKET then
+				if #requestId > 48 then return false end
+				operationId = self.NIGHT_MARKET_OPERATION_PREFIX .. tFirst.shopItemId .. "_" .. requestId
+			else
+				operationId = self.CONSUMABLE_OPERATION_PREFIX .. requestId
+			end
+		end
+		self.isPurchaseInProgress = true
+		self.purchaseCharacterIds = characterIds
+		self.purchaseConsumableGrants = grants
+		self.purchaseOperationId = operationId
+		local ok, confirmed = pcall(function()
+			if currency == _ProgressManager.CURRENCY_DIAMOND and totalPrice > 0 then
+				if not _DiamondWalletLogic:IsInitializedForUser(forUserId)
+					or (#permanentIds > 0 and not _ShopItemStorage:PrepareDiamondShopPurchase(forUserId, characterIds)) then return false end
+				return _DiamondWalletLogic:TryPurchaseShopItems(forUserId, totalPrice, permanentIds, characterIds, grants, operationId)
+			end
+			local storage = _DataStorageService:GetUserDataStorage(forUserId)
+			if hasGrants then
+				if not _ShopItemStorage:RecoverConsumablePurchase(storage) then return false end
+				local receipt = _ItemStorage:FindReceipt(storage, operationId)
+				if receipt == nil then return false end
+				if receipt ~= false then
+					return receipt.kind == _ItemStorage.KIND_GRANT
+						and _ItemStorage:MatchesGrantCounts(receipt.grants or {}, grants)
+				end
+			end
+			local saved = false
+			if totalPrice == 0 then
+				local balance = _ProgressManager:GetCurrencyBalance(_ProgressManager.CURRENCY_MESO)
+				saved = balance ~= nil and _ProgressManager:CommitCurrencyBalanceConfirmed(
+					_ProgressManager.CURRENCY_MESO, balance, nextOwnedIds, forUserId)
+			else
+				saved = _ProgressManager:TrySpendCurrencyForShopItems(currency, totalPrice, nextOwnedIds, forUserId)
+			end
+			if not saved then return false end
+			self:ApplyConfirmedShopGrants(permanentIds, characterIds, forUserId)
+			if hasGrants and not _ShopItemStorage:RecoverConsumablePurchase(storage) then
+				_ShopItemStorage.canSaveShopItems = false
+				log_warning("[ShopItemManager] 수량형 상품 지급 복구 대기 id=" .. operationId)
+				return false
+			end
+			return true
+		end)
+		if ok and confirmed and currency == _ProgressManager.CURRENCY_DIAMOND and totalPrice > 0 then
+			self:ApplyConfirmedShopGrants(permanentIds, characterIds, forUserId)
+		end
+		self.purchaseCharacterIds = {}
+		self.purchaseConsumableGrants = {}
+		self.purchaseOperationId = ""
+		self.isPurchaseInProgress = false
+		if not _ShopItemStorage.canSaveShopItems then self.isShopItemOwnershipLoaded = false end
+		if _CharacterStorage.isShopSaveDeferred and _CharacterStorage.canSaveCharacters then
+			_CharacterStorage.isShopSaveDeferred = false
+			_CharacterManager:SaveCharactersToStorage()
+		end
+		if not ok or not confirmed then
+			if not ok then log_error("[ShopItemManager] 구매 처리 예외 " .. tostring(confirmed)) end
+			log_warning("[ShopItemManager] purchase was not confirmed userId=" .. tostring(forUserId))
+			return false
+		end
+		return true
+	end
+	@ExecSpace("ServerOnly")
+	method any CollectPurchasableShopItemIds(any shopItemIds)
+		-- 요청 전체 검증으로 잘못된 상품의 부분 결제 방지
+		if not _DiamondWalletStorage:IsValidGrantIds(shopItemIds) or #shopItemIds == 0 then return {} end
+		local coinType = ""
+		local characterSet = {}
+		for _, id in ipairs(shopItemIds) do
+			local tItem = _ShopItemMaster:GetShopItemById(id)
+			if tItem == nil or tItem.packageOnly or tItem.grantCurrencyId ~= "" or self:ServerHasShopItem(id) then return {} end
+			if tItem.category == _ShopItemMaster.CATEGORY_NIGHT_MARKET
+				and (#shopItemIds ~= 1 or not self:CanUseNightMarketShop(self.currentUserId)) then return {} end
+			if tItem.category == _ShopItemMaster.CATEGORY_PACKAGE and #shopItemIds ~= 1 then return {} end
+			if coinType ~= "" and coinType ~= tItem.coinType then return {} end
+			coinType = tItem.coinType
+			if (tItem.characterId or "") ~= "" then
+				if not _CharacterManager:CanUseCharacters(self.currentUserId) then return {} end
+				local tCharacter = _CharacterManager.tCharacterById[tItem.characterId]
+				if tCharacter == nil or tCharacter.isDiscovered or characterSet[tItem.characterId] then return {} end
+				characterSet[tItem.characterId] = true
+			end
+		end
+		return self:CopyStringList(shopItemIds)
+	end
+	@ExecSpace("ServerOnly")
+	method integer GetTotalPrice(any shopItemIds)
+		-- 지정한 상점 아이템 id들의 price 합계를 반환합니다.
+		local total = 0
+		if shopItemIds == nil or type(shopItemIds) ~= "table" or _ShopItemMaster == nil then
+			return total
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			local tShopItem = _ShopItemMaster:GetShopItemById(shopItemId)
+			if tShopItem ~= nil then
+				local price = tShopItem.price or 0
+				if not _ProgressManager:IsValidCurrencyAmount(price)
+					or price > _ProgressManager.MAX_SAFE_CURRENCY_AMOUNT - total then return -1 end
+				total = total + price
+			end
+		end
+
+		return total
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddOwnedShopItem(string shopItemId)
+		-- 유효한 상점 아이템을 서버 권위 보유 목록에 추가합니다(캐시만 변경, 저장은 호출자가 결정).
+		if shopItemId == nil or shopItemId == "" then
+			return
+		end
+
+		if _ShopItemMaster ~= nil and _ShopItemMaster:GetShopItemById(shopItemId) == nil then
+			log_warning("[ShopItemManager] purchase item not found shopItemId=" .. tostring(shopItemId))
+			return
+		end
+
+		if self.ownedShopItemIdSet[shopItemId] == true then
+			return
+		end
+
+		table.insert(self.ownedShopItemIds, shopItemId)
+		self.ownedShopItemIdSet[shopItemId] = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveShopItemsToStorage()
+		-- 서버 권위 상점 소유 목록을 Storage에 저장합니다.
+		if _ShopItemStorage == nil then
+			return
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ShopItemManager] currentUserId is required")
+			return
+		end
+
+		if self:IsShopItemsLoaded() == false then
+			log_warning("[ShopItemManager] shop items are not loaded")
+			return
+		end
+
+		_ShopItemStorage:SaveShopItemsAsync(self.currentUserId, self:CopyStringList(self.ownedShopItemIds))
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterOwnedShopItems(any shopItemIds)
+		-- 로드한 보유 상점 아이템 id 목록을 서버 권위 캐시에 등록합니다.
+		self.ownedShopItemIds = {}
+		self.ownedShopItemIdSet = {}
+
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			self:AddOwnedShopItemIdIfValid(shopItemId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddOwnedShopItemIdIfValid(string shopItemId)
+		-- 중복 없이 유효한 shopItemId만 보유 목록에 추가합니다.
+		if shopItemId == nil or shopItemId == "" then
+			return
+		end
+
+		if _ShopItemMaster ~= nil and _ShopItemMaster:GetShopItemById(shopItemId) == nil then
+			log_warning("[ShopItemManager] ignored unknown saved shopItemId=" .. tostring(shopItemId))
+			return
+		end
+
+		if self.ownedShopItemIdSet[shopItemId] == true then
+			return
+		end
+
+		table.insert(self.ownedShopItemIds, shopItemId)
+		self.ownedShopItemIdSet[shopItemId] = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushShopItemsToClient(string forUserId)
+		-- 서버 권위 상점 소유 목록을 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		self:SyncShopItems(self:ServerGetOwnedShopItemIds(), self:IsShopItemsLoaded(), forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncShopItems(table shopItemIds, boolean loaded)
+		-- 준비 상태 또는 소유 목록이 달라진 경우에만 화면 갱신
+		local changed = self.hasSyncedShopItems ~= loaded or #shopItemIds ~= #self.ownedShopItemIds
+		if not changed then
+			for _, id in ipairs(shopItemIds) do
+				if not self.ownedShopItemIdSet[id] then changed = true break end
+			end
+		end
+		self.hasSyncedShopItems = loaded
+		if not changed then return end
+		self:RegisterOwnedShopItemsClientOnly(shopItemIds)
+		self:SendEvent(ShopItemChangedEvent())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RegisterOwnedShopItemsClientOnly(any shopItemIds)
+		-- 클라이언트 로컬 보유 상점 아이템 캐시를 교체합니다.
+		self.ownedShopItemIds = {}
+		self.ownedShopItemIdSet = {}
+
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return
+		end
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			if shopItemId ~= nil and shopItemId ~= "" and self.ownedShopItemIdSet[shopItemId] ~= true then
+				table.insert(self.ownedShopItemIds, shopItemId)
+				self.ownedShopItemIdSet[shopItemId] = true
+			end
+		end
+	end
+
+	method any CopyStringList(any source)
+		-- 문자열 배열 복사본을 만듭니다.
+		local copied = {}
+		if source == nil or type(source) ~= "table" then
+			return copied
+		end
+
+		for _, value in ipairs(source) do
+			if value ~= nil and value ~= "" then
+				table.insert(copied, value)
+			end
+		end
+
+		return copied
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetCurrencyForCoinType(string coinType)
+		-- 레거시 worldCoin은 플랫폼 유료 코인이 아닌 임시 재화로만 연결
+		if coinType == _ShopItemMaster.COIN_TYPE_MESO then return _ProgressManager.CURRENCY_MESO end
+		if coinType == _ShopItemMaster.COIN_TYPE_DIAMOND then return _ProgressManager.CURRENCY_DIAMOND end
+		if coinType == _ShopItemMaster.COIN_TYPE_NIGHT_MARKET then return _ProgressManager.CURRENCY_NIGHT_MARKET_COIN end
+		if coinType == _ShopItemMaster.COIN_TYPE_LEGACY_WORLD_COIN then return _ProgressManager.CURRENCY_TEMP_WORLD_COIN end
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ApplyConfirmedShopGrants(table itemIds, table characterIds, string userId)
+		-- 저장이 확인된 보유 표식만 캐시에 합치고 신규 콘텐츠 통지
+		local entries = {}
+		for _, id in ipairs(itemIds) do
+			self:AddOwnedShopItemIdIfValid(id)
+			local tItem = _ShopItemMaster:GetShopItemById(id)
+			if tItem ~= nil and (tItem.characterId or "") == "" then
+				table.insert(entries, { domain = self.CONTENT_DOMAIN_COSTUME, category = tItem.category, contentId = id })
+			end
+		end
+		for _, id in ipairs(characterIds) do
+			local tCharacter = _CharacterManager.tCharacterById[id]
+			if tCharacter ~= nil then
+				tCharacter.isDiscovered = true
+				table.insert(entries, { domain = self.CONTENT_DOMAIN_CHARACTER, category = self.CONTENT_CATEGORY_IDOL, contentId = id })
+			end
+		end
+		self:PushShopItemsToClient(userId)
+		if #characterIds > 0 then _CharacterManager:PushCharactersToClient(userId) end
+		if _NewContentManager ~= nil then _NewContentManager:MarkNewContentEntries(entries, userId) end
+	end
+
+	@ExecSpace("ServerOnly")
+	method any PurchaseDrawWithCommit(any tPackage, string userId, string requestId)
+		-- 서버가 선택한 한 보상을 다이아 차감 기록과 함께 영속
+		if _UserDataManager.isResetInProgress or not self:CanUseShopItems(userId)
+			or not _ProgressManager:CanUseProgress(userId) or not _ItemManager:CanUseItems(userId)
+			or not _DiamondWalletLogic:IsInitializedForUser(userId)
+			or #requestId > 60 or string.match(requestId, "^[%w_%-]+$") == nil then return nil end
+
+		self.isPurchaseInProgress = true
+		local ok, tReceipt = pcall(function()
+			local tDrop = _ShopItemMaster:RollDrawDrop(tPackage)
+			if tDrop == nil then return nil end
+			local tOperation = DiamondWalletOperationData()
+			tOperation.operationId = self.CONSUMABLE_OPERATION_PREFIX .. requestId
+			tOperation.kind = _DiamondWalletStorage.KIND_GAME
+			tOperation.reason = _DiamondWalletStorage.REASON_SHOP_PURCHASE
+			tOperation.productId = tPackage.shopItemId
+			tOperation.debit = tPackage.price
+			if tDrop.count > 0 then
+				tOperation.consumableGrants[tDrop.id] = tDrop.count
+			elseif self:ServerHasShopItem(tDrop.id) then
+				tOperation.consumableGrants[_ShopItemMaster.ALBUM_FRAGMENT_ITEM_ID] = tDrop.duplicateFragments
+			else
+				if not _ShopItemStorage:PrepareDiamondShopPurchase(userId, {}) then return nil end
+				table.insert(tOperation.shopItemIds, tDrop.id)
+			end
+
+			if not _DiamondWalletLogic:ExecuteOperation(userId, tOperation) then return nil end
+			if #tOperation.shopItemIds > 0 then
+				local itemId = tOperation.shopItemIds[1]
+				if not self:ServerHasShopItem(itemId) then self:ApplyConfirmedShopGrants(tOperation.shopItemIds, {}, userId) end
+				return { id = itemId, count = 1, isCostume = true }
+			end
+			local itemId, count = next(tOperation.consumableGrants)
+			if itemId == _ShopItemMaster.LEGACY_DRAW_POINTS_ITEM_ID then itemId = _ShopItemMaster.ALBUM_FRAGMENT_ITEM_ID end
+			return { id = itemId, count = count, isCostume = false }
+		end)
+		self.isPurchaseInProgress = false
+		if not ok then
+			log_error("[ShopItemManager] 가챠 구매 처리 예외 " .. tostring(tReceipt))
+			return nil
+		end
+		return tReceipt
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ExchangeDrawCostume(string userId, string itemId, string requestId)
+		if not self:CanUseShopItems(userId) or not _ItemManager:CanUseItems(userId)
+			or #requestId > 60 or string.match(requestId, "^[%w_%-]+$") == nil then return false end
+		local cost = _ShopItemMaster:GetDrawExchangeCost(itemId)
+		if cost <= 0 or self.ownedShopItemIdSet[itemId] then return false end
+
+		local wasOwned = self:ServerHasShopItem(itemId)
+		self.isPurchaseInProgress = true
+		local ok, result = pcall(function()
+			local storage = _DataStorageService:GetUserDataStorage(userId)
+			return _ItemStorage:ApplyOperation(storage, { id = self.DRAW_EXCHANGE_PREFIX .. requestId,
+				kind = _ItemStorage.KIND_DRAW_EXCHANGE, target = itemId, score = cost })
+		end)
+		self.isPurchaseInProgress = false
+		if not ok then
+			log_error("[ShopItemManager] 앨범 조각 교환 처리 예외 " .. tostring(result))
+			return false
+		end
+		if result == nil then return false end
+		_ItemManager:ApplyInventoryState(userId, result.tData)
+		if result.receipt == nil then return false end
+		self:PushShopItemsToClient(userId)
+		if not wasOwned and _NewContentManager ~= nil then
+			local tItem = _ShopItemMaster:GetShopItemById(itemId)
+			_NewContentManager:MarkNewContentEntries({
+				{ domain = self.CONTENT_DOMAIN_COSTUME, category = tItem.category, contentId = itemId }
+			}, userId)
+		end
+		return true
+	end
+
+	@ExecSpace("Server")
+	method void RequestDrawExchangeWithFeedback(string itemId, string requestId)
+		if senderUserId ~= self.currentUserId or requestId == "" or #requestId > 60 or #itemId > 100 then return end
+		local success = self:ExchangeDrawCostume(senderUserId, itemId, requestId)
+		_ShopUILogic:ReceivePurchaseResult(requestId, success, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestPurchaseWithFeedback(table shopItemIds, string requestId)
+		-- 클라이언트 요청 ID는 응답 라우팅에만 사용하고 가격·거래 ID는 서버 결정
+		if senderUserId ~= self.currentUserId or type(requestId) ~= "string" or requestId == "" or #requestId > 100 then return end
+		local tProduct = nil
+		if _DiamondWalletStorage:IsValidGrantIds(shopItemIds) and #shopItemIds == 1 then
+			tProduct = _ShopItemMaster:GetShopItemById(shopItemIds[1])
+		end
+		if tProduct ~= nil and #tProduct.drawDrops > 0 then
+			local tReward = self:PurchaseDrawWithCommit(tProduct, senderUserId, requestId)
+			_ShopUILogic:ReceiveDrawPurchaseResult(requestId, tReward or {}, senderUserId)
+			return
+		end
+		local success = self:PurchaseItemsWithCommit(shopItemIds, senderUserId, requestId)
+		_ShopUILogic:ReceivePurchaseResult(requestId, success, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseNightMarketShop(string userId)
+		return _MiniGameManager:CanUseNightMarketLobby(userId)
+			and _MiniGameSessionService:GetActiveSessionForUser(userId) == nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method table GetNightMarketProductQuote(any tProduct)
+		return { id = tProduct.shopItemId, nameKey = tProduct.nameKey, ruid = tProduct.ruid,
+			price = tProduct.price, coinType = tProduct.coinType, count = tProduct.grantCount,
+			isExchange = tProduct.grantCurrencyId ~= "" }
+	end
+
+	@ExecSpace("Server")
+	method void RequestNightMarketCatalog(string requestId)
+		if senderUserId ~= self.currentUserId or requestId == "" or #requestId > 48 then return end
+		local products = {}
+		if self:CanUseNightMarketShop(senderUserId) then
+			for _, tProduct in ipairs(_ShopItemMaster:GetShopItemsByCategory(_ShopItemMaster.CATEGORY_NIGHT_MARKET)) do
+				table.insert(products, self:GetNightMarketProductQuote(tProduct))
+			end
+		end
+		_NightMarketShopUILogic:ReceiveCatalog(requestId, products, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestNightMarketPurchase(string productId, string requestId, integer sequence)
+		if senderUserId ~= self.currentUserId or #productId > 100 or #requestId > 48
+			or string.match(requestId, "^[%w_%-]+$") == nil then return end
+		local result = self:PurchaseNightMarketProduct(productId, requestId, sequence, senderUserId)
+		_NightMarketShopUILogic:ReceivePurchase(requestId, result.status, result.quote, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any PurchaseNightMarketProduct(string productId, string requestId, integer sequence, string userId)
+		-- 서버 상품표만 결제에 사용하고 기존 인벤토리 복구 경로로 쿠키 지급
+		if self.isPurchaseInProgress or _ProgressManager.confirmedCurrencyWrite then
+			return {status = self.NIGHT_MARKET_PURCHASE_BUSY, quote = {}}
+		end
+		local tProduct = _ShopItemMaster:GetShopItemById(productId)
+		if _UserDataManager.isResetInProgress or tProduct == nil or tProduct.category ~= _ShopItemMaster.CATEGORY_NIGHT_MARKET
+			or not self:CanUseNightMarketShop(userId) or not self:CanUseShopItems(userId)
+			or not _ProgressManager:CanUseProgress(userId) then return {status = self.NIGHT_MARKET_PURCHASE_FAILED, quote = {}} end
+		local success
+		if tProduct.grantCurrencyId ~= "" then
+			success = _ProgressManager:TryBuyNightMarketCoins(tProduct, sequence, requestId, userId)
+		else
+			success = self:PurchaseItemsWithCommit({productId}, userId, requestId)
+		end
+		if success then
+			local quote = self:GetNightMarketProductQuote(tProduct)
+			quote.sequence = _ProgressManager.tCurrentProgress.nightMarketCoinPurchaseSequence
+			return {status = self.NIGHT_MARKET_PURCHASE_SUCCESS, quote = quote}
+		end
+		local balance = _ProgressManager:GetCurrencyBalance(self:GetCurrencyForCoinType(tProduct.coinType))
+		if balance ~= nil and balance < tProduct.price then return {status = self.NIGHT_MARKET_PURCHASE_INSUFFICIENT, quote = {}} end
+		return {status = self.NIGHT_MARKET_PURCHASE_FAILED, quote = {}}
+	end
+
+	@ExecSpace("Server")
+	method void RequestRefreshShop()
+		-- 실패한 지급 복구 완료 후 저장소 기준으로 상점과 캐릭터 재동기화
+		if senderUserId ~= self.currentUserId or self.isPurchaseInProgress
+			or _ShopItemStorage.isShopItemsSaveInProgress or _CharacterStorage.isCharactersSaveInProgress then return end
+		local now = _UtilLogic.ServerElapsedSeconds
+		if now - self.lastRefreshRequestedAt < 5 then return end
+		self.lastRefreshRequestedAt = now
+		self.isPurchaseInProgress = true
+		local ok, recovered = pcall(function() return _DiamondWalletLogic:LoadForUser(senderUserId) end)
+		if ok and recovered then
+			self:LoadShopItems()
+			if not _ProgressManager:IsProgressLoaded() then
+				_ProgressManager:LoadProgressFromStorage()
+				_ProgressManager:PushProgressToClient(senderUserId)
+			end
+			if _CharacterManager.currentUserId == senderUserId and not _CharacterManager:IsCharactersLoaded() then
+				_CharacterStorage.isShopSaveDeferred = false
+				_CharacterManager:LoadCharacters()
+				_CharacterManager:PushCharactersToClient(senderUserId)
+			end
+			self:PushShopItemsToClient(senderUserId)
+		end
+		self.isPurchaseInProgress = false
+	end
+
+end

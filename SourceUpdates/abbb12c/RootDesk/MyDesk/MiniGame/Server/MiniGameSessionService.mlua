@@ -1,0 +1,552 @@
+---@description "서버 측 미니게임 세션 관리 로직"
+@Logic
+script MiniGameSessionService extends Logic
+
+	-- 서버 세션 단일 저장소와 수명 관리, 클라이언트 동기화 대상에서 제외
+	property string SESSION_STATUS_RUNNING = "running"
+	property string SESSION_STATUS_PREPARING = "preparing"
+	property string SESSION_STATUS_FINISHED = "finished"
+	property string SESSION_STATUS_ABORTED = "aborted"
+	property string SESSION_REASON_CANCEL = "cancel"
+	property string SESSION_REASON_RESTART = "restart"
+	property string SESSION_REASON_TIMEOUT = "timeout"
+	property string SESSION_REASON_OBJECTIVE = "objective"
+	property string SESSION_REASON_USER_LEAVE = "userLeave"
+	property string SESSION_REASON_MAP_CHANGE = "mapChange"
+	property number SESSION_MAX_LIFETIME_SECONDS = 300
+	property number CLIENT_RESULT_GRACE_SECONDS = 10
+	property string REQUEST_REJECTED_DRAW = "drawRejected"
+	property string MINI_GAME_DALGONA_CHALLENGE = "dalgona_challenge"
+	property number SESSION_RETENTION_SECONDS = 300
+	property number SESSION_PREPARE_TIMEOUT_SECONDS = 10
+	property boolean isInitialized = false
+	property any miniGames = {}
+	property any sessions = {}
+	property any activeSessionByUser = {}
+	property integer sessionSeq = 0
+	property any userLeaveHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 세션 저장소 초기화 및 사용자 이탈 구독
+		self:InitializeMiniGames()
+		self.userLeaveHandler = _UserService:ConnectEvent(UserLeaveEvent, self.OnUserLeave)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 사용자 이탈 구독 해제 및 서버 세션 참조 정리
+		if self.userLeaveHandler ~= nil then
+			_UserService:DisconnectEvent(UserLeaveEvent, self.userLeaveHandler)
+			self.userLeaveHandler = nil
+		end
+		self.sessions = {}
+		self.activeSessionByUser = {}
+		self.isInitialized = false
+	end
+
+	@ExecSpace("ServerOnly")
+	method void InitializeMiniGames()
+		-- 서버 프리셋과 세션 저장소 초기화
+		self.miniGames = _MiniGameTable:GetMiniGames()
+		self.sessions = {}
+		self.activeSessionByUser = {}
+		self.sessionSeq = 0
+
+		self.isInitialized = self.miniGames ~= nil and #self.miniGames > 0
+		if self.isInitialized == false then
+			log_warning("[MiniGameSessionService] 미니게임 프리셋을 불러오지 못했습니다")
+			return
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetMiniGameByID(string miniGameId)
+		-- ID가 일치하는 미니게임 프리셋 반환
+		if miniGameId == nil or miniGameId == "" then
+			return nil
+		end
+
+		for _, miniGame in ipairs(self.miniGames) do
+			if miniGame.id == miniGameId then
+				return miniGame
+			end
+		end
+
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NextSessionId(string miniGameId)
+		-- "miniGameId-일련번호" 형식의 세션 식별자 생성
+		self.sessionSeq = self.sessionSeq + 1
+		return miniGameId .. "-" .. tostring(self.sessionSeq)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetActiveSessionForUser(string userId)
+		-- 사용자의 실행 중 세션 조회
+		local ownerKey = userId or ""
+		local sessionId = self.activeSessionByUser[ownerKey]
+		if sessionId == nil or sessionId == "" then
+			return nil
+		end
+
+		local tSession = self.sessions[sessionId]
+		if tSession == nil
+			or (tSession.status ~= self.SESSION_STATUS_RUNNING
+			and tSession.status ~= self.SESSION_STATUS_PREPARING) then
+			self.activeSessionByUser[ownerKey] = nil
+			return nil
+		end
+
+		return tSession
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SetSessionStatus(any tSession, string nextStatus, string reason)
+		-- 세션 종료 상태 전이와 종료 사유 기록
+		if tSession == nil then
+			return
+		end
+
+		if tSession.status ~= self.SESSION_STATUS_RUNNING
+			and tSession.status ~= self.SESSION_STATUS_PREPARING then
+			log_warning("[MiniGameSessionService] 종료된 세션 상태 전이 무시 session=" .. tostring(tSession.id) .. " status=" .. tostring(tSession.status))
+			return
+		end
+
+		tSession.status = nextStatus
+		tSession.endReason = reason or ""
+		tSession.finishedElapsed = 0
+		local ownerKey = tSession.userId
+		if self.activeSessionByUser[ownerKey] == tSession.id then
+			self.activeSessionByUser[ownerKey] = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserLeave(UserLeaveEvent event)
+		-- 이탈 사용자의 실행 세션 정리
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+
+		_MiniGameManager:ClearNightMarketLobby(event.UserId)
+		local tSession = self:GetActiveSessionForUser(event.UserId)
+		if tSession ~= nil then
+			self:AbortSession(tSession, self.SESSION_REASON_USER_LEAVE)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsAllowedContext(any preset, integer contextType)
+		-- 프리셋이 허용한 실행 문맥 여부 확인
+		if preset == nil or preset.allowedContexts == nil then
+			return false
+		end
+
+		for _, allowedContext in ipairs(preset.allowedContexts) do
+			if allowedContext == contextType then
+				return true
+			end
+		end
+
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ConfirmSessionResult(any tSession, any tResult)
+		-- 결과 확정 후 기존 콘텐츠별 보상 처리를 위한 이벤트 발송
+		if tResult == nil or self:IsActiveSession(tSession) == false then
+			return
+		end
+		local safeScore = tResult.score
+		if safeScore == nil or safeScore < 0 then
+			safeScore = 0
+		end
+
+		local resultType = self:ResolveResultType(tResult.success, tResult.reason)
+		self:SetSessionStatus(tSession, self.SESSION_STATUS_FINISHED, tResult.reason)
+		tSession.resultType = resultType
+		tSession.score = safeScore
+		tSession.progress = tResult.progress or 0
+		tSession.accuracy = tResult.accuracy or ""
+
+		log("[MiniGameSessionService] 결과 확정 session=" .. tSession.id ..
+			" result=" .. _EMiniGameResultType:ToName(resultType) ..
+			" score=" .. tostring(safeScore) ..
+			" progress=" .. tostring(tResult.progress) ..
+			" accuracy=" .. tostring(tResult.accuracy) ..
+			" reason=" .. tostring(tResult.reason))
+
+		_MiniGameManager:PublishMiniGameResult(tSession)
+		self:CleanupCompletedSession(tSession.id)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer ResolveResultType(boolean success, string reason)
+		-- 성공 여부와 종료 사유를 결과 enum으로 변환
+		if reason == self.SESSION_REASON_CANCEL or reason == self.SESSION_REASON_RESTART then
+			return _EMiniGameResultType.Canceled
+		end
+
+		if reason == self.SESSION_REASON_TIMEOUT then
+			return _EMiniGameResultType.Timeout
+		end
+
+		if success == true then
+			return _EMiniGameResultType.Success
+		end
+
+		return _EMiniGameResultType.Failure
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AbortSession(any tSession, string reason)
+		-- 지정 세션 취소 처리
+		if self:IsActiveSession(tSession) == false then
+			return
+		end
+		-- 정산 저장 중 재진입 차단
+		if tSession.settlement ~= nil and tSession.settlement.status == _MiniGameSettlementRule.STATUS_PROCESSING then return end
+
+		self:SetSessionStatus(tSession, self.SESSION_STATUS_ABORTED, reason)
+		if tSession.settlement ~= nil then
+			local settlementHandler = _MiniGameRuleRegistry:ResolveSettlementRule(tSession.settlement.type)
+			if settlementHandler ~= nil then
+				settlementHandler:Cancel(tSession.settlement)
+			end
+		end
+		tSession.resultType = _EMiniGameResultType.Canceled
+		tSession.score = 0
+		local modeHandler = _MiniGameServerHandlerRegistry:Resolve(tSession.gameKind)
+		tSession.progress = modeHandler ~= nil and modeHandler:GetProgress(tSession) or 0
+		_MiniGameManager:PublishMiniGameResult(tSession)
+		self:CleanupCompletedSession(tSession.id)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateMiniGameSession(any tStartOptions)
+		-- 공통 세션 Struct 생성 후 종류별 서버 상태 구성 및 클라이언트 실행 정보 전달
+		if self.isInitialized == false then
+			log_warning("[MiniGameSessionService] 초기화 전에는 미니게임을 시작할 수 없습니다")
+			return ""
+		end
+		if tStartOptions == nil then
+			return ""
+		end
+
+		local miniGameId = tStartOptions.miniGameId or ""
+		if tStartOptions.isDebugRequest == true then
+			if not Environment:IsMakerPlay() or not _MiniGameDebugLogic.isDebugMode then return "" end
+		end
+		local ownerUserId = tStartOptions.ownerUserId or ""
+		if tStartOptions.isDebugRequest ~= true and _MiniGameManager:IsNightMarketMiniGame(miniGameId)
+			and not _MiniGameManager:CanStartNightMarketMiniGame(ownerUserId, miniGameId) then
+			log_warning("[MiniGameSessionService] 야시장 로비 승인 조건 불충족 game=" .. miniGameId .. " user=" .. ownerUserId)
+			return ""
+		end
+		local tExistingSession = self:GetActiveSessionForUser(ownerUserId)
+		if tExistingSession ~= nil and tExistingSession.gameKind == _EMiniGameKind.FISHING
+			and tExistingSession.tModeState.stage == _MiniGameFishingRule.STAGE_SETTLING then return "" end
+		if tExistingSession ~= nil and tExistingSession.settlement ~= nil
+			and (tExistingSession.settlement.status == _MiniGameSettlementRule.STATUS_RESERVED
+			or tExistingSession.settlement.status == _MiniGameSettlementRule.STATUS_PROCESSING) then
+			return ""
+		end
+		local contextType = tStartOptions.contextType
+		local owner = ownerUserId ~= "" and _UserService:GetUserEntityByUserId(ownerUserId) or nil
+		if not isvalid(owner) or not isvalid(owner.CurrentMap) then
+			log_warning("[MiniGameSessionService] 연결된 세션 소유자와 시작 맵 필요")
+			return ""
+		end
+
+		local preset = self:GetMiniGameByID(miniGameId)
+		if preset == nil then
+			log_warning("[MiniGameSessionService] 알 수 없는 미니게임 id=" .. tostring(miniGameId))
+			return ""
+		end
+
+		if _EMiniGameContextType:IsValid(contextType) == false
+			or self:IsAllowedContext(preset, contextType) == false then
+			log_warning("[MiniGameSessionService] 허용되지 않은 실행 문맥 miniGame=" .. tostring(miniGameId)
+				.. " context=" .. tostring(contextType))
+			return ""
+		end
+
+		if _MiniGameServerHandlerRegistry:IsValidPreset(preset) == false then
+			log_warning("[MiniGameSessionService] 게임 종류 또는 입력 조합 오류 miniGame=" .. miniGameId)
+			return ""
+		end
+		local modeHandler = _MiniGameServerHandlerRegistry:Resolve(preset.gameKind)
+
+		local settlementConfig = preset.settlementRule or {}
+		local settlementType = settlementConfig.type or _EMiniGameSettlementType.None
+		local settlementHandler = _MiniGameRuleRegistry:ResolveSettlementRule(settlementType)
+		if settlementHandler == nil then
+			log_warning("[MiniGameSessionService] 정산 규칙 처리기 없음 miniGame=" .. tostring(miniGameId))
+			return ""
+		end
+
+		local settlementState = nil
+		if tStartOptions.isDebugRequest == true then
+			settlementState = settlementHandler:CreateDebugState(preset, tStartOptions.betAmount or 0)
+		else
+			settlementState = settlementHandler:CreateState(
+				preset,
+				tStartOptions.betAmount or 0,
+				ownerUserId,
+				tStartOptions.isBettingRequest == true
+			)
+		end
+		if settlementState == nil then
+			log_warning("[MiniGameSessionService] 정산 규칙 검증 실패 miniGame=" .. tostring(miniGameId)
+				.. " user=" .. tostring(ownerUserId))
+			return ""
+		end
+
+		if tStartOptions.expectedCurrency ~= "" and settlementState.inputCurrency ~= tStartOptions.expectedCurrency then return "" end
+
+		-- 같은 사용자에게 이미 진행 중인 세션이 있으면 해당 세션만 취소
+		local tActiveSession = self:GetActiveSessionForUser(ownerUserId)
+		if tActiveSession ~= nil then
+			log_warning("[MiniGameSessionService] 사용자 진행 세션 재시작 user=" .. tostring(ownerUserId) .. " prev=" .. tActiveSession.id)
+			self:AbortSession(tActiveSession, self.SESSION_REASON_RESTART)
+			-- 취소 콜백에서 후속 세션을 시작한 경우 덮어쓰기 방지
+			if self:GetActiveSessionForUser(ownerUserId) ~= nil then return "" end
+		end
+
+		local sessionId = self:NextSessionId(miniGameId)
+		local initialStatus = self.SESSION_STATUS_RUNNING
+		if modeHandler:RequiresPreparation() == true and ownerUserId ~= "" then
+			initialStatus = self.SESSION_STATUS_PREPARING
+		end
+
+		local tSession = MiniGameSessionData()
+		tSession.id = sessionId
+		tSession.miniGameId = miniGameId
+		tSession.contextType = contextType
+		tSession.contextId = tStartOptions.contextId or ""
+		tSession.userId = ownerUserId
+		tSession.startMapId = owner.CurrentMap.Id
+		tSession.cancelOnMapChange = tStartOptions.cancelOnMapChange ~= false
+		tSession.presentationActorId = tStartOptions.presentationActorId or ""
+		tSession.status = initialStatus
+		tSession.settlement = settlementState
+		tSession.ruleState = _MiniGameRuleEngine:CreateState(preset)
+		tSession.gameKind = preset.gameKind
+		tSession.inputType = preset.inputType
+		local timeConfig = preset.timeConfig or {}
+		tSession.duration = math.max(timeConfig.duration or 0, 0)
+		modeHandler:Configure(tSession, preset)
+		self.sessions[sessionId] = tSession
+		self.activeSessionByUser[ownerUserId] = sessionId
+
+		-- 세션 구성 완료 후 클라이언트 실행 트리거 전달
+		_MiniGameManager:DeliverSessionStart(tSession)
+
+		return sessionId
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsActiveSession(any tSession)
+		-- 종료 세션 중복 처리 방지
+		return tSession ~= nil and (tSession.status == self.SESSION_STATUS_RUNNING
+			or tSession.status == self.SESSION_STATUS_PREPARING)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GetOwnedSession(string sessionId, string fromUserId)
+		-- RPC 경계에서 전달한 실제 요청자와 세션 소유자 검증
+		local tSession = self.sessions[sessionId]
+		if tSession == nil then
+			return nil
+		end
+		if fromUserId == nil or fromUserId == "" or tSession.userId ~= fromUserId then
+			log_warning("[MiniGameSessionService] 세션 소유자 불일치 session=" .. sessionId)
+			return nil
+		end
+		if self:IsActiveSession(tSession) and not self:ValidateSessionOwner(tSession) then return nil end
+		return tSession
+	end
+
+	@ExecSpace("ServerOnly")
+	method any BuildLaunchContext(any tSession)
+		-- 서버 상태에서 전송용 실행 Struct 생성
+		local modeHandler = _MiniGameServerHandlerRegistry:Resolve(tSession.gameKind)
+		local settlement = tSession.settlement or {}
+		local tLaunchContext = MiniGameLaunchContext()
+		tLaunchContext.sessionId = tSession.id
+		tLaunchContext.miniGameId = tSession.miniGameId
+		tLaunchContext.contextType = tSession.contextType
+		tLaunchContext.contextId = tSession.contextId
+		tLaunchContext.cancelOnMapChange = tSession.cancelOnMapChange
+		tLaunchContext.presentationActorId = tSession.presentationActorId
+		tLaunchContext.commandPayload = modeHandler ~= nil and modeHandler:GetLaunchCommandPayload(tSession) or ""
+		tLaunchContext.duration = tSession.duration
+		tLaunchContext.betAmount = settlement.amount or 0
+		tLaunchContext.balance = settlement.balance or 0
+		tLaunchContext.isDebug = settlement.isDebug == true
+		if tSession.gameKind == _EMiniGameKind.LUCKY_CUBE and tSession.tModeState ~= nil then
+			tLaunchContext.mesoBalance = tSession.tModeState.mesoBalance
+			tLaunchContext.coinBalance = tSession.tModeState.coinBalance
+		end
+		tLaunchContext.entryCurrency = settlement.inputCurrency or ""
+		tLaunchContext.entryAmount = settlement.debitAmount or settlement.amount or 0
+		return tLaunchContext
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUpdate(number delta)
+		-- 실행 처리는 종류별 위임, 종료 세션 보관은 서비스에서 관리
+		local expiredSessionIds = {}
+		for sessionId, tSession in pairs(self.sessions) do
+			if self:IsActiveSession(tSession) then
+				if not self:ValidateSessionOwner(tSession) then continue end
+				tSession.lifetimeElapsed = tSession.lifetimeElapsed + delta
+				local isFishingReady = tSession.gameKind == _EMiniGameKind.FISHING
+					and tSession.tModeState ~= nil and tSession.tModeState.stage == _MiniGameFishingRule.STAGE_READY
+				-- 낚시의 시간 보너스와 보상 정산은 유지하되 미결제 대기 세션에는 공통 수명 적용
+				if (tSession.gameKind ~= _EMiniGameKind.FISHING or isFishingReady)
+					and tSession.lifetimeElapsed >= self.SESSION_MAX_LIFETIME_SECONDS then
+					self:AbortSession(tSession, self.SESSION_REASON_TIMEOUT)
+					continue
+				end
+				local modeHandler = _MiniGameServerHandlerRegistry:Resolve(tSession.gameKind)
+				if modeHandler ~= nil then
+					modeHandler:UpdateSession(tSession, delta)
+				end
+			elseif tSession ~= nil then
+				tSession.finishedElapsed = tSession.finishedElapsed + delta
+				if tSession.finishedElapsed >= self.SESSION_RETENTION_SECONDS then
+					expiredSessionIds[#expiredSessionIds + 1] = sessionId
+				end
+			end
+		end
+		for _, sessionId in ipairs(expiredSessionIds) do
+			self.sessions[sessionId] = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleInputReady(string sessionId, string fromUserId)
+		-- 커맨드 준비 요청의 소유권과 상태 확인 후 위임
+		local tSession = self:GetOwnedSession(sessionId, fromUserId)
+		if tSession == nil or tSession.status ~= self.SESSION_STATUS_PREPARING
+			or tSession.gameKind ~= _EMiniGameKind.COMMAND_SEQUENCE then
+			return
+		end
+		_MiniGameServerHandlerRegistry:Resolve(tSession.gameKind):HandleInputReady(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleCommandInput(string sessionId, integer inputSequence, string keyName, string inputHistoryPayload, string fromUserId)
+		-- 커맨드 요청의 소유권과 실행 상태 확인 후 위임
+		local tSession = self:GetOwnedSession(sessionId, fromUserId)
+		if tSession == nil or tSession.status ~= self.SESSION_STATUS_RUNNING
+			or tSession.gameKind ~= _EMiniGameKind.COMMAND_SEQUENCE then
+			return
+		end
+		_MiniGameServerHandlerRegistry:Resolve(tSession.gameKind):HandleCommandInput(tSession, inputSequence, keyName, inputHistoryPayload)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleSelection(string sessionId, string payload, string fromUserId)
+		-- 배치 요청의 소유권과 준비 상태 확인 후 위임
+		local tSession = self:GetOwnedSession(sessionId, fromUserId)
+		if tSession == nil or tSession.status ~= self.SESSION_STATUS_PREPARING
+			or tSession.gameKind ~= _EMiniGameKind.DALGONA_DRAW then
+			return
+		end
+		_MiniGameServerHandlerRegistry:Resolve(tSession.gameKind):HandleSelection(tSession, payload)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleDraw(string sessionId, string fromUserId)
+		-- 추첨 요청 소유권 확인 후 달고나 처리기로 위임
+		local tSession = self:GetOwnedSession(sessionId, fromUserId)
+		if tSession == nil then
+			_MiniGameManager:PushDalgonaRequestRejected(self.MINI_GAME_DALGONA_CHALLENGE, self.REQUEST_REJECTED_DRAW, fromUserId)
+			return
+		end
+		if tSession.gameKind ~= _EMiniGameKind.DALGONA_DRAW then
+			return
+		end
+		_MiniGameServerHandlerRegistry:Resolve(tSession.gameKind):HandleDraw(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleCancel(string sessionId, string fromUserId)
+		-- 실행 중인 소유 세션만 취소
+		local tSession = self:GetOwnedSession(sessionId, fromUserId)
+		if tSession ~= nil and tSession.gameKind == _EMiniGameKind.FISHING
+			and tSession.tModeState.stage == _MiniGameFishingRule.STAGE_SETTLING then return end
+		if self:IsActiveSession(tSession) then
+			if tSession.settlement ~= nil and tSession.settlement.status == _MiniGameSettlementRule.STATUS_RESERVED then return end
+			self:AbortSession(tSession, self.SESSION_REASON_CANCEL)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleClientResult(string sessionId, table tPlainResult, string fromUserId)
+		-- 소유권 검증 후 서버 입력 재계산 결과만 확정
+		if tPlainResult == nil or type(tPlainResult) ~= "table" then
+			return
+		end
+		local tSession = self:GetOwnedSession(sessionId, fromUserId)
+		if tSession == nil or tSession.status ~= self.SESSION_STATUS_RUNNING then
+			return
+		end
+		local modeHandler = _MiniGameServerHandlerRegistry:Resolve(tSession.gameKind)
+		if modeHandler == nil or modeHandler:AcceptsClientResult(tSession) == false then
+			log_warning("[MiniGameSessionService] 서버 판정 세션의 클라이언트 결과 거절 session=" .. sessionId)
+			return
+		end
+		local preset = self:GetMiniGameByID(tSession.miniGameId)
+		local tResult = modeHandler:ResolveClientResult(tSession, preset, tPlainResult)
+		if tResult == nil then
+			log_warning("[MiniGameSessionService] 미니게임 입력 기록 거절 session=" .. sessionId)
+			self:AbortSession(tSession, _MiniGameClientResultServerHandler.REASON_INVALID_INPUT)
+			return
+		end
+		if tSession.userId ~= "" then
+			_MiniGameManager:PushValidatedMiniGameResult(sessionId, tResult:ToPlainTable(), tSession.userId)
+		end
+		self:ConfirmSessionResult(tSession, tResult)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CleanupCompletedSession(string sessionId)
+		-- 종료 방식에 따라 소유 클라이언트에 세션 종료 통지
+		local tSession = self.sessions[sessionId]
+		local modeHandler = tSession ~= nil and _MiniGameServerHandlerRegistry:Resolve(tSession.gameKind) or nil
+		local resultHandledByMode = tSession ~= nil and tSession.status == self.SESSION_STATUS_FINISHED
+			and modeHandler ~= nil and modeHandler:HandlesFinishedFeedback() == true
+		if tSession ~= nil
+			and tSession.userId ~= nil
+			and tSession.userId ~= ""
+			and resultHandledByMode == false then
+			_MiniGameManager:PushSessionStopped(sessionId, tSession.endReason or "", tSession.userId)
+		end
+
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ValidateSessionOwner(any tSession)
+		-- 클라이언트 취소 요청과 독립적으로 사용자 이탈과 맵 변경 검증
+		local owner = _UserService:GetUserEntityByUserId(tSession.userId)
+		if not isvalid(owner) then
+			_MiniGameManager:ClearNightMarketLobby(tSession.userId)
+			self:AbortSession(tSession, self.SESSION_REASON_USER_LEAVE)
+			return false
+		end
+		if tSession.cancelOnMapChange and (not isvalid(owner.CurrentMap) or owner.CurrentMap.Id ~= tSession.startMapId) then
+			_MiniGameManager:ClearNightMarketLobby(tSession.userId)
+			self:AbortSession(tSession, self.SESSION_REASON_MAP_CHANGE)
+			return false
+		end
+		return true
+	end
+
+end

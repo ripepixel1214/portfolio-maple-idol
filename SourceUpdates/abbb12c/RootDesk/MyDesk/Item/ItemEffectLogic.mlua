@@ -1,0 +1,141 @@
+@Logic
+script ItemEffectLogic extends Logic
+	property integer MAX_CHERISHED_ITEMS = 3
+	property string STAT_VOCAL = "vocal"
+	property string STAT_DANCE = "dance"
+	property string STAT_VISUAL = "visual"
+	property string STAT_ALL = "all"
+	property string THUMBNAIL_PREFIX = "thumbnail://"
+	property string UI_EFFECT_UNKNOWN = "ui.item.effect_unknown"
+	property string UI_TRAINING_PREFIX = "ui.item.effect.training."
+	property string UI_STAGE_START = "ui.item.effect.stage_start.all"
+	property string UI_BASE_STAT = "ui.item.effect.base_stat.all"
+	property string UI_BASE_STAT_FLAT = "ui.item.effect.base_stat_flat.all"
+
+	method table GetEquippedItemIds()
+		-- 현재 진행 저장에 확정된 애장품만 조회하며 이전 저장은 빈 장착으로 호환
+		local tProgress = _ProgressManager.tCurrentProgress
+		local ids = {}
+		if tProgress == nil or tProgress.eCurrentStage == "" then return ids end
+		local seen = {}
+		for itemId in string.gmatch(tProgress.equippedCherishedItems or "", "[^,]+") do
+			if seen[itemId] ~= true and #ids < self.MAX_CHERISHED_ITEMS then table.insert(ids, itemId); seen[itemId] = true end
+		end
+		return ids
+	end
+
+	method boolean IsEquipped(string itemId)
+		-- 현재 스테이지 장착 여부 조회
+		for _, equippedId in ipairs(self:GetEquippedItemIds()) do if equippedId == itemId then return true end end
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanEquipItems(table itemIds)
+		-- 보유한 서로 다른 애장품 0~3개만 시작 요청에 허용
+		if _ItemManager:IsItemsLoaded() == false or #itemIds > self.MAX_CHERISHED_ITEMS then return false end
+		local seen = {}
+		local count = 0
+		for index, itemId in pairs(itemIds) do
+			if type(index) ~= "number" or index ~= math.floor(index) or index < 1 or index > #itemIds
+				or type(itemId) ~= "string" or seen[itemId] or _ItemManager:ServerHasItem(itemId) == false
+				or _ItemMaster:IsCherished(_ItemMaster:GetItemById(itemId)) == false then return false end
+			seen[itemId] = true
+			count = count + 1
+		end
+		return count == #itemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetEquippedEffect(string effectType, string stat)
+		-- 같은 종류의 장착 효과를 합산하고 데이터의 비유한 값 제외
+		local value = 0
+		for _, itemId in ipairs(self:GetEquippedItemIds()) do
+			local tItem = _ItemMaster:GetItemById(itemId)
+			if tItem ~= nil and _ItemManager:ServerHasItem(itemId) and tItem.effectType == effectType
+				and (tItem.effectStat == stat or tItem.effectStat == self.STAT_ALL)
+				and tItem.effectValue >= 0 and tItem.effectValue < math.huge then value = value + tItem.effectValue end
+		end
+		return value
+	end
+
+	@ExecSpace("ServerOnly")
+	method table GetFanBaseStatBonuses()
+		-- 활성화한 팬 선물의 생성 기본 능력치 정률·정액 보너스 합산
+		local bonuses = {percent = 0, flat = 0}
+		for _, tItem in ipairs(_ItemMaster:GetItems()) do
+			local value = tItem.effectValue
+			if tItem.effectStat == self.STAT_ALL and value > 0 and value < math.huge
+				and _ItemMaster:IsFanPresent(tItem) and _ItemManager:IsFanPresentEnabled(tItem.itemId) then
+				if tItem.effectType == _ItemMaster.EFFECT_BASE_STAT_PERCENT then
+					bonuses.percent = bonuses.percent + value
+				elseif tItem.effectType == _ItemMaster.EFFECT_BASE_STAT_FLAT then
+					bonuses.flat = bonuses.flat + value
+				end
+			end
+		end
+		return bonuses
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ProjectPersistentCharacter(any plain)
+		-- 원본 육성값을 보존하며 영구 친밀도와 팬 선물 효과를 조회 값에 합성
+		local bonus = _ItemManager:GetIntimacyBonus(plain.id)
+		plain.intimacy = (plain.intimacy or 0) + bonus
+		plain.maxIntimacyReached = math.max(plain.intimacy, (plain.maxIntimacyReached or 0) + bonus)
+		local bonuses = self:GetFanBaseStatBonuses()
+		if bonuses.percent > 0 or bonuses.flat > 0 then
+			local base = _CharacterBaseStatMaster:GetCharacterBaseStat(plain.id)
+			local rate = bonuses.percent / 100
+			for _, stat in ipairs({self.STAT_VOCAL, self.STAT_DANCE, self.STAT_VISUAL}) do
+				local baseValue = base ~= nil and base[stat] or 0
+				plain[stat] = plain[stat] + baseValue * rate + bonuses.flat
+			end
+		end
+		return plain
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ProjectStageCharacter(any tCharacter)
+		-- 스테이지 시작 올스탯은 원본 저장값을 바꾸지 않고 편성 캐릭터 조회에만 합성
+		if type(tCharacter) ~= "table" or _CharacterManager:IsActiveCharacter(tCharacter.id) == false then return tCharacter end
+		local bonus = self:GetEquippedEffect(_ItemMaster.EFFECT_STAGE_START_FLAT, self.STAT_ALL)
+		for _, stat in ipairs({self.STAT_VOCAL, self.STAT_DANCE, self.STAT_VISUAL}) do tCharacter[stat] = tCharacter[stat] + bonus end
+		return tCharacter
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ApplyTrainingBonus(table tResult, boolean isTraining, boolean failed)
+		-- 성공한 훈련의 양수 능력치 증가량에만 장착 보너스 적용하고 피로도는 유지
+		if isTraining == false or failed then return end
+		for _, stat in ipairs({self.STAT_VOCAL, self.STAT_DANCE, self.STAT_VISUAL}) do
+			if (tResult[stat] or 0) > 0 then
+				local bonus = self:GetEquippedEffect(_ItemMaster.EFFECT_TRAINING_PERCENT, stat)
+				tResult[stat] = math.floor(tResult[stat] * (1 + bonus / 100) + 0.5)
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetEffectDescription(any tItem)
+		-- 서버 적용 수치와 같은 테이블 필드로 현지화된 효과 설명 구성
+		if tItem == nil or tItem.effectType == "" then return _LocaleTextUtil:GetText(self.UI_EFFECT_UNKNOWN) end
+		local key = self.UI_EFFECT_UNKNOWN
+		if tItem.effectType == _ItemMaster.EFFECT_TRAINING_PERCENT then key = self.UI_TRAINING_PREFIX .. tItem.effectStat
+		elseif tItem.effectType == _ItemMaster.EFFECT_STAGE_START_FLAT then key = self.UI_STAGE_START
+		elseif tItem.effectType == _ItemMaster.EFFECT_BASE_STAT_PERCENT then key = self.UI_BASE_STAT
+		elseif tItem.effectType == _ItemMaster.EFFECT_BASE_STAT_FLAT then key = self.UI_BASE_STAT_FLAT end
+		return _LocaleTextUtil:Format(key, math.floor(tItem.effectValue), nil, nil, "")
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetItemIconRuid(any tItem)
+		-- 애장품·팬 선물의 원본 리소스를 정적 아이콘으로 변환
+		if tItem == nil then return "" end
+		local ruid = _ResourceMaster:ResolveResourceId(tItem.image or "")
+		if _ItemMaster:IsFanPresent(tItem) == false and _ItemMaster:IsCherished(tItem) == false then return ruid end
+		if ruid == "" or string.sub(ruid, 1, #self.THUMBNAIL_PREFIX) == self.THUMBNAIL_PREFIX then return ruid end
+		return self.THUMBNAIL_PREFIX .. ruid
+	end
+
+end

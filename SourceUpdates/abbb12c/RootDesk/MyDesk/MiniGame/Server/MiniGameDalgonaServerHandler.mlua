@@ -1,0 +1,154 @@
+---@description "서버 측 달고나 미니게임 관련 처리 로직"
+@Logic
+script MiniGameDalgonaServerHandler extends Logic
+
+	property string EVALUATOR_BLOCK_DRAW = "BlockDraw"
+	property string REQUEST_REJECTED_DRAW = "drawRejected"
+	property string REASON_INVALID_SELECTION = "invalidSelection"
+
+	@ExecSpace("ServerOnly")
+	method void Configure(any tSession, any preset)
+		-- 달고나 배치 및 추첨 상태 생성
+		tSession.tModeState = MiniGameDalgonaSessionState()
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RequiresPreparation()
+		-- 블록 배치 확정 전 준비 상태 유지
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetLaunchCommandPayload(any tSession)
+		-- 커맨드를 사용하지 않는 실행 정보
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetProgress(any tSession)
+		-- 기존 달고나 취소 결과의 진행률 유지
+		return 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean AcceptsClientResult(any tSession)
+		-- 달고나 결과는 서버 추첨으로만 확정
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HandlesFinishedFeedback()
+		-- 완료 응답은 추첨 결과에서 처리
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateSession(any tSession, number delta)
+		-- 달고나는 입력 요청으로 진행하며 서버 타이머 미사용
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleSelection(any tSession, string payload)
+		-- 소유권과 준비 상태 검증 후 블록 배치 확정
+		local sessionId = tSession.id
+		local preset = _MiniGameSessionService:GetMiniGameByID(tSession.miniGameId)
+		local inputRule = _MiniGameRuleRegistry:ResolveInputRule(tSession.inputType)
+		if preset == nil or inputRule == nil then
+			log_warning("[MiniGameDalgonaServerHandler] Selection 입력 규칙 없음 session=" .. tostring(sessionId))
+			return
+		end
+
+		local validation = inputRule:ValidateSelection(preset, payload)
+		if validation == nil or validation.isValid ~= true then
+			local reason = validation ~= nil and validation.reason or self.REASON_INVALID_SELECTION
+			log_warning("[MiniGameDalgonaServerHandler] Selection 배치 거절 session=" .. tostring(sessionId)
+				.. " reason=" .. tostring(reason))
+			_MiniGameManager:PushDalgonaRequestRejected(tSession.miniGameId, reason, tSession.userId)
+			return
+		end
+
+		tSession.tModeState.selection = validation.selection
+		tSession.status = _MiniGameSessionService.SESSION_STATUS_RUNNING
+		tSession.prepareElapsed = 0
+		_MiniGameManager:PushSelectionAccepted(tSession.id, tSession.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleDraw(any tSession)
+		-- 확정 배치 추첨과 기존 정산 규칙 적용
+		local sessionId = tSession.id
+		if tSession.status ~= _MiniGameSessionService.SESSION_STATUS_RUNNING
+			or tSession.gameKind ~= _EMiniGameKind.DALGONA_DRAW
+			or tSession.tModeState == nil
+			or tSession.tModeState.selection == nil
+			or tSession.tModeState.selection.isConfirmed ~= true
+			or tSession.tModeState.drawInProgress == true
+			or tSession.ruleState == nil then
+			_MiniGameManager:PushDalgonaRequestRejected(tSession.miniGameId, self.REQUEST_REJECTED_DRAW, tSession.userId)
+			return
+		end
+
+		local preset = _MiniGameSessionService:GetMiniGameByID(tSession.miniGameId)
+		local phase = preset ~= nil and _MiniGameRuleEngine:GetPhase(preset, tSession.ruleState.phaseId or "") or nil
+		local objective = nil
+		for _, candidate in ipairs(phase ~= nil and phase.objectives or {}) do
+			if candidate.evaluator == self.EVALUATOR_BLOCK_DRAW then
+				objective = candidate
+				break
+			end
+		end
+		local objectiveRule = _MiniGameRuleRegistry:ResolveObjectiveRule(self.EVALUATOR_BLOCK_DRAW)
+		local settlementHandler = tSession.settlement ~= nil
+			and _MiniGameRuleRegistry:ResolveSettlementRule(tSession.settlement.type) or nil
+		if preset == nil or objective == nil or objectiveRule == nil or settlementHandler == nil then
+			_MiniGameManager:PushDalgonaRequestRejected(tSession.miniGameId, self.REQUEST_REJECTED_DRAW, tSession.userId)
+			return
+		end
+
+		tSession.tModeState.drawInProgress = true
+		local tDrawResult = objectiveRule:CreateBlockDrawResult(tSession.ruleState, objective, tSession.tModeState.selection)
+		if tDrawResult == nil then
+			tSession.tModeState.drawInProgress = false
+			_MiniGameManager:PushDalgonaRequestRejected(tSession.miniGameId, self.REQUEST_REJECTED_DRAW, tSession.userId)
+			return
+		end
+
+		local betAmount = math.floor(tSession.settlement.amount or 0)
+		if tDrawResult.isWin == true then
+			tDrawResult.payout = math.floor(betAmount * tDrawResult.multiplier)
+		end
+		tDrawResult.netChange = tDrawResult.payout - betAmount
+		if settlementHandler:TrySettle(tSession.settlement, tDrawResult.payout, tSession.userId) == false then
+			tSession.tModeState.drawInProgress = false
+			_MiniGameManager:PushDalgonaRequestRejected(tSession.miniGameId, self.REQUEST_REJECTED_DRAW, tSession.userId)
+			return
+		end
+		log("[MiniGameDalgonaServerHandler] BlockDraw 정산 적용 완료 session=" .. tostring(sessionId)
+			.. " payout=" .. tostring(tDrawResult.payout))
+
+		tDrawResult.balance = math.floor(tSession.settlement.balance or 0)
+		if objectiveRule:CommitBlockDraw(tSession.ruleState, tDrawResult) == false then
+			log_warning("[MiniGameDalgonaServerHandler] 정산 후 BlockDraw 상태 확정 실패 session=" .. tostring(sessionId))
+			return
+		end
+
+		tSession.tModeState.tDrawResult = tDrawResult
+		local resolvedResult = _MiniGameRuleEngine:BuildResult(preset, tSession.ruleState, _MiniGameSessionService.SESSION_REASON_OBJECTIVE)
+		local tResult = MiniGameResultData()
+		tResult.success = resolvedResult ~= nil and resolvedResult.isSuccess == true
+		tResult.score = resolvedResult ~= nil and resolvedResult.score or 0
+		tResult.progress = resolvedResult ~= nil and resolvedResult.progress or 0
+		tResult.accuracy = resolvedResult ~= nil and resolvedResult.accuracy or ""
+		tResult.reason = _MiniGameSessionService.SESSION_REASON_OBJECTIVE
+
+		-- 정산 완료 UI 응답을 공통 결과 이벤트보다 먼저 전달
+		_MiniGameManager:PushDalgonaDrawResult(tSession.id, tDrawResult:ToPlainTable(), tSession.userId)
+		_MiniGameSessionService:ConfirmSessionResult(tSession, tResult)
+
+		log("[MiniGameDalgonaServerHandler] BlockDraw 정산 완료 session=" .. tostring(sessionId)
+			.. " number=" .. tostring(tDrawResult.drawNumber)
+			.. " multiplier=" .. tostring(tDrawResult.multiplier)
+			.. " payout=" .. tostring(tDrawResult.payout))
+	end
+
+end

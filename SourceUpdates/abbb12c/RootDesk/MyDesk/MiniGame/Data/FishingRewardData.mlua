@@ -1,0 +1,77 @@
+---@description "기존 낚시 저장 형식과 호환되는 공통 수량·친밀도 영속 데이터"
+@Struct
+script FishingRewardData
+	property integer version = 2
+	property integer revision = 0
+	property boolean badgeGranted = false
+	property any countsByItemId = {}
+	property table redeemedCostumeIds = {}
+	property any intimacyByCharacter = {}
+	property any pending = nil
+	property any pendingResult = nil
+
+	method table ToPlainTable()
+		-- 수량과 친밀도 및 미완료 거래를 영속 plain table로 구성
+		local intimacy = {}
+		for id, value in pairs(self.intimacyByCharacter) do intimacy[id] = value end
+		local plain = {version = self.version, revision = self.revision, badgeGranted = self.badgeGranted}
+		if next(self.countsByItemId) ~= nil then plain.countsByItemId = self.countsByItemId end
+		if next(self.redeemedCostumeIds) ~= nil then plain.redeemedCostumeIds = self.redeemedCostumeIds end
+		-- MSW JSON 변환에서 빈 테이블 타입을 추론하지 못하므로 값이 있을 때만 포함
+		if next(intimacy) ~= nil then plain.intimacyByCharacter = intimacy end
+		if self.pending ~= nil then plain.pending = self.pending end
+		if self.pendingResult ~= nil then plain.pendingResult = self.pendingResult end
+		return plain
+	end
+
+	method boolean FromPlainTable(any tPlainData)
+		-- 손상 데이터를 기본값으로 덮어쓰지 않고 로드 실패 처리
+		if type(tPlainData) ~= "table" or (tPlainData.version ~= 1 and tPlainData.version ~= 2)
+			or type(tPlainData.revision) ~= "number" or tPlainData.revision < 0 or tPlainData.revision % 1 ~= 0
+			or type(tPlainData.badgeGranted) ~= "boolean"
+			or (tPlainData.intimacyByCharacter ~= nil and type(tPlainData.intimacyByCharacter) ~= "table") then return false end
+		self.countsByItemId = {}
+		if tPlainData.version == 1 then
+			if not _ItemStorage:IsValidStackCount(tPlainData.cookies) then return false end
+			if tPlainData.cookies > 0 then self.countsByItemId[_MiniGameFishingRule.COOKIE_ID] = tPlainData.cookies end
+		else
+			local counts = tPlainData.countsByItemId
+			if counts ~= nil then
+				if not _ItemStorage:IsValidGrantCounts(counts) then return false end
+				for itemId, count in pairs(counts) do self.countsByItemId[itemId] = count end
+			end
+		end
+		self.redeemedCostumeIds = {}
+		if tPlainData.redeemedCostumeIds ~= nil then
+			if type(tPlainData.redeemedCostumeIds) ~= "table" then return false end
+			for id, owned in pairs(tPlainData.redeemedCostumeIds) do
+				if type(id) ~= "string" or id == "" or #id > 100 or owned ~= true then return false end
+				self.redeemedCostumeIds[id] = true
+			end
+		end
+		self.intimacyByCharacter = {}
+		for id, value in pairs(tPlainData.intimacyByCharacter or {}) do
+			if type(id) ~= "string" or id == "" or type(value) ~= "number" or value < 0
+				or value ~= value or value == math.huge then return false end
+			self.intimacyByCharacter[id] = value
+		end
+		if tPlainData.pending ~= nil then
+			local row = tPlainData.pending
+			if type(row) ~= "table" or type(row.id) ~= "string" or type(row.kind) ~= "string"
+				or type(row.revision) ~= "number" or row.revision ~= tPlainData.revision
+				or type(row.target) ~= "string" or type(row.score) ~= "number"
+				or type(row.itemId) ~= "string" or type(row.count) ~= "number"
+				or (row.grants ~= nil and not _ItemStorage:IsValidGrantCounts(row.grants)) then return false end
+		end
+		self.revision = tPlainData.revision
+		self.badgeGranted = tPlainData.badgeGranted
+		self.pending = tPlainData.pending
+		if tPlainData.pendingResult ~= nil then
+			local row = tPlainData.pendingResult
+			if type(row) ~= "table" or type(row.id) ~= "string" or string.match(row.id, "^[%w_%-]+$") == nil
+				or type(row.score) ~= "number" or row.score < 0 or row.score % 1 ~= 0 then return false end
+		end
+		self.pendingResult = tPlainData.pendingResult
+		return true
+	end
+end

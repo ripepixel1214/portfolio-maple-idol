@@ -1,0 +1,207 @@
+@Logic
+script ItemMaster extends Logic
+
+	property boolean IsLoaded = false
+	property string EFFECT_TRAINING_PERCENT = "trainingPercent"
+	property string EFFECT_STAGE_START_FLAT = "stageStartFlat"
+	property string EFFECT_BASE_STAT_PERCENT = "baseStatPercent"
+	property string EFFECT_BASE_STAT_FLAT = "baseStatFlat"
+	property string EFFECT_INTIMACY_ADD = "intimacyAdd"
+	property string TYPE_CONSUMABLE = "consumable"
+	property integer NIGHT_MARKET_COOKIE_GAIN = 5
+	property string STAT_ALL = "all"
+	property string TYPE_CHERISHED = "cherished"
+	property string TYPE_CHERISHED_ITEM = "cherishedItem"
+	property string TYPE_PRESENT = "present"
+	property string TYPE_FAN = "fan"
+	property string TYPE_FAN_PRESENT = "fanPresent"
+
+	-- ItemRow 목록입니다.
+	property any tItems = {}
+
+	-- { [itemId:string] = ItemRow }
+	property any tItemById = {}
+
+	-- { [type:string] = ItemRow[] }
+	property any tItemsByType = {}
+
+	-- Public API
+
+	method void OnBeginPlay()
+		-- 로직 시작 시 ItemTable을 읽어 정적 아이템 데이터를 캐싱합니다.
+		self:LoadItems()
+	end
+
+	method void LoadItems()
+		-- ItemTable의 전체 행을 읽고 sortOrder 기준으로 정렬합니다.
+		self.tItems = {}
+		self.tItemById = {}
+		self.tItemsByType = {}
+		self.IsLoaded = false
+
+		local dataSet = _DataService:GetTable("ItemTable")
+		if dataSet == nil then
+			log_warning("[ItemMaster] ItemTable not found")
+			return
+		end
+
+		for rowIndex = 1, dataSet:GetRowCount() do
+			local itemId = _DataTableUtil:SafeGetString(dataSet, rowIndex, "itemId", "")
+			if itemId ~= "" then
+				local tItem = ItemRow()
+				tItem.itemId = itemId
+				tItem.type = _DataTableUtil:SafeGetString(dataSet, rowIndex, "type", "")
+				local nameKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "nameKey", "")
+				local descriptionKey = _DataTableUtil:SafeGetString(dataSet, rowIndex, "descriptionKey", "")
+				tItem.nameKey = nameKey
+				tItem.descriptionKey = descriptionKey
+				tItem.effectType = _DataTableUtil:SafeGetString(dataSet, rowIndex, "effectType", "")
+				tItem.effectStat = _DataTableUtil:SafeGetString(dataSet, rowIndex, "effectStat", "")
+				tItem.effectValue = _DataTableUtil:SafeGetNumber(dataSet, rowIndex, "effectValue", 0)
+				tItem.name = ""
+				tItem.description = ""
+				if self:IsClient() and _LocaleTextUtil ~= nil then
+					tItem.name = _LocaleTextUtil:GetText(nameKey)
+					tItem.description = _LocaleTextUtil:GetText(descriptionKey)
+				end
+				tItem.image = _DataTableUtil:SafeGetString(dataSet, rowIndex, "image", "")
+				tItem.sortOrder = _DataTableUtil:SafeGetInteger(dataSet, rowIndex, "sortOrder", rowIndex)
+
+				table.insert(self.tItems, tItem)
+				self.tItemById[itemId] = tItem
+
+				if tItem.type ~= "" then
+					if self.tItemsByType[tItem.type] == nil then
+						self.tItemsByType[tItem.type] = {}
+					end
+					table.insert(self.tItemsByType[tItem.type], tItem)
+				end
+			end
+		end
+
+		local fishing = _MiniGameFishingRule
+		self:AddFishingItem(fishing.BADGE_ID, fishing.ITEM_TYPE_FAN_PRESENT, "낚시왕 뱃지",
+			"야시장 낚시 게임에서 고득점을 달성하면 주는 뱃지다. 날치의 눈이 섬뜩하게 느껴지는 기분 탓일까...?\n보유 효과: 모든 캐릭터의 생성 기본 능력치 +5%", fishing.BADGE_RUID, 9001)
+		self:AddFishingItem(fishing.COOKIE_ID, fishing.ITEM_TYPE_COOKIE, "야시장 쿠키",
+			"친밀도 UI에서 사용하면 선택한 캐릭터의 친밀도가 5 증가한다", fishing.COOKIE_RUID, 9002)
+		local tCookie = self.tItemById[fishing.COOKIE_ID]
+		if tCookie.effectType == "" then
+			tCookie.effectType = self.EFFECT_INTIMACY_ADD
+			tCookie.effectValue = self.NIGHT_MARKET_COOKIE_GAIN
+		end
+
+		table.sort(self.tItems, function(leftItem, rightItem)
+			return self:CompareItemSortOrder(leftItem, rightItem)
+		end)
+		for _, items in pairs(self.tItemsByType) do
+			table.sort(items, function(leftItem, rightItem)
+				return self:CompareItemSortOrder(leftItem, rightItem)
+			end)
+		end
+
+		self.IsLoaded = true
+	end
+
+	method void AddFishingItem(string itemId, string itemType, string name, string description, string image, integer order)
+		-- 원본 시트에 보상 항목이 등록되면 시트 정의 우선 사용
+		if self.tItemById[itemId] ~= nil then return end
+		local tItem = ItemRow()
+		tItem.itemId = itemId
+		tItem.type = itemType
+		tItem.name = name
+		tItem.description = description
+		if _LocaleTextUtil ~= nil then
+			tItem.name = _LocaleTextUtil:GetText("item." .. itemId .. ".name")
+			tItem.description = _LocaleTextUtil:GetText("item." .. itemId .. ".description")
+		end
+		tItem.image = image
+		tItem.sortOrder = order
+		self.tItemById[itemId] = tItem
+		table.insert(self.tItems, tItem)
+		if self.tItemsByType[itemType] == nil then self.tItemsByType[itemType] = {} end
+		table.insert(self.tItemsByType[itemType], tItem)
+	end
+
+	method any GetItems()
+		-- sortOrder 기준으로 정렬된 전체 ItemRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		return self.tItems
+	end
+
+	method any GetItemsByType(string itemType)
+		-- 지정한 type의 ItemRow 목록을 반환합니다.
+		self:EnsureLoaded()
+		if itemType == nil or itemType == "" then
+			return self.tItems
+		end
+
+		return self.tItemsByType[itemType] or {}
+	end
+
+	method any GetItemById(string itemId)
+		-- itemId에 해당하는 ItemRow를 반환합니다.
+		self:EnsureLoaded()
+		if itemId == nil or itemId == "" then
+			return nil
+		end
+
+		local tItem = self.tItemById[itemId]
+		if self:IsClient() then self:LocalizeItem(tItem) end
+		return tItem
+	end
+
+	-- Private Methods
+
+	method void EnsureLoaded()
+		-- 캐시가 비어 있으면 ItemTable을 다시 로드합니다.
+		if self.IsLoaded == false then
+			self:LoadItems()
+		end
+	end
+
+	method boolean CompareItemSortOrder(any leftItem, any rightItem)
+		-- leftItem/rightItem: ItemRow
+		-- sortOrder가 같으면 itemId로 안정적인 순서를 유지합니다.
+		if leftItem.sortOrder == rightItem.sortOrder then
+			return leftItem.itemId < rightItem.itemId
+		end
+
+		return leftItem.sortOrder < rightItem.sortOrder
+	end
+
+	method boolean IsFanPresent(any tItem)
+		-- 기존 팬 선물 타입 별칭을 하나의 판정으로 통합
+		return tItem ~= nil and (tItem.type == self.TYPE_PRESENT or tItem.type == self.TYPE_FAN or tItem.type == self.TYPE_FAN_PRESENT)
+	end
+
+	method boolean IsCherished(any tItem)
+		-- 기존 애장품 타입 별칭을 하나의 판정으로 통합
+		return tItem ~= nil and (tItem.type == self.TYPE_CHERISHED or tItem.type == self.TYPE_CHERISHED_ITEM)
+	end
+
+	method boolean IsConsumable(any tItem)
+		-- 수량형 지급 대상 판정
+		return tItem ~= nil and tItem.type == self.TYPE_CONSUMABLE
+	end
+
+	method boolean IsIntimacyItem(any tItem)
+		-- 효과가 미정인 아이템도 친밀도 소모품 목록에 포함
+		return self:IsConsumable(tItem) and tItem.effectType == self.EFFECT_INTIMACY_ADD
+	end
+
+	method integer GetIntimacyGain(string itemId)
+		-- 아이템 정의의 양수 친밀도 증가량만 사용
+		local tItem = self:GetItemById(itemId)
+		if not self:IsIntimacyItem(tItem) or not _ItemStorage:IsValidStackCount(tItem.effectValue) then return 0 end
+		return math.floor(tItem.effectValue)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void LocalizeItem(any tItem)
+		-- 언어 변경과 초기화 순서에 맞춰 이름과 설명을 조회 시 갱신
+		if tItem == nil then return end
+		if tItem.nameKey ~= "" then tItem.name = _LocaleTextUtil:GetText(tItem.nameKey) end
+		if tItem.descriptionKey ~= "" then tItem.description = _LocaleTextUtil:GetText(tItem.descriptionKey) end
+	end
+
+end

@@ -1,0 +1,209 @@
+---@description "달고나 입력 처리 및 화면 갱신 로직"
+@Logic
+script MiniGameDalgonaPresenter extends Logic
+
+	property string MINI_GAME_ID = "dalgona_challenge"
+	property any tModel = nil
+	property any view = nil
+	property any rootView = nil
+	property boolean isDebugLobby = false
+	property any progressChangedHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 로비의 보유 메소와 판돈 한도 동기화 구독
+		if self.progressChangedHandler == nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 진행 중 게임의 판돈은 유지하고 로비 잔액만 갱신
+		if self.tModel == nil or self.isDebugLobby or self.tModel.sessionId ~= ""
+			or self.tModel.pendingRequest ~= "" or self.tModel.resultShown then return end
+		local progress = _ProgressManager:ClientGetProgress()
+		self.tModel:UpdateLobbyBalance(progress ~= nil and progress.meso or 0, progress ~= nil and progress.nightMarketCoin or 0)
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- 현재 진행 잔액으로 일반 로비 Model 연결
+		local progress = _ProgressManager:ClientGetProgress()
+		self:OpenLobbyWithBalance(progress ~= nil and progress.meso or 0, progress ~= nil and progress.nightMarketCoin or 0, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenDebugLobby(integer testBalance)
+		-- 테스트용 가상 메소 잔액으로 로비 Model 연결
+		self:OpenLobbyWithBalance(testBalance, 0, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobbyWithBalance(integer mesoBalance, integer coinBalance, boolean useDebugBalance)
+		-- 선택한 View와 지정 잔액의 새 로비 Model 연결
+		if _MiniGamePlayLogic.isPlaying then return end
+		local preset = _MiniGameTable:FindMiniGame(self.MINI_GAME_ID)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then return end
+		_MiniGamePlayLogic:RetainPresentationBehavior(_MiniGameClientHandlerRegistry:Resolve(preset.gameKind))
+		_MiniGameUIRouter:SetPresentation(presentationId)
+		self.rootView = _MiniGameUIRouter.activeView
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_SELECTION)
+		self.tModel = MiniGameDalgonaModel()
+		self.tModel:Initialize(preset)
+		self.tModel:OpenLobby(mesoBalance, coinBalance)
+		self.isDebugLobby = useDebugBalance == true
+		self.view:OpenLobby()
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginSession(any preset, any tContext)
+		-- 공통 Presenter가 선택한 View에 세션 Model 연결
+		self.rootView = _MiniGameUIRouter.activeView
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_SELECTION)
+		self.tModel = MiniGameDalgonaModel()
+		self.tModel:Initialize(preset)
+		self.tModel:BeginSession(tContext)
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render()
+		-- 복사된 표시 상태만 View에 전달
+		if self.tModel ~= nil and self.view ~= nil then
+			self.view:RenderState(self.tModel:BuildViewState())
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBet(integer units)
+		-- 판돈 조작 의도를 Model에 전달
+		if self.tModel == nil then return end
+		self.tModel:SetBet(units)
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestStart()
+		-- 로비 Model의 시작 승인 후 서버 요청
+		local tModel = self.tModel
+		if tModel == nil or not tModel:TryStart() then return end
+		self:Render()
+		_MiniGameManager:RequestStartDalgona(tModel.betAmount, self.isDebugLobby, tModel.entryCurrency)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanSelectBlock(string blockId)
+		-- 드래그 시작 시 Model의 선택 가능 여부 확인
+		if self.tModel == nil then return false end
+		return self.tModel:CanSelectBlock(blockId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean PlaceBlock(string blockId, integer row, integer column)
+		-- 셀 단위 배치 의도를 Model에 전달
+		if self.tModel == nil then return false end
+		local accepted = self.tModel:PlaceBlock(blockId, row, column)
+		self:Render()
+		return accepted
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean RemoveBlock(string blockId)
+		-- 보드 밖 드롭의 배치 해제 의도 전달
+		if self.tModel == nil then return false end
+		local accepted = self.tModel:RemoveBlock(blockId)
+		self:Render()
+		return accepted
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestConfirmSelection(boolean autoDraw)
+		-- 유효 배치만 서버에 제출
+		if self.tModel == nil or not self.tModel:TryConfirm(autoDraw) then return end
+		self:Render()
+		_MiniGamePlayLogic:SubmitSelection(self.tModel.sessionId, self.tModel:BuildSelectionPayload())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestDrawSequence()
+		-- 추첨 입력을 배치 확정 또는 추첨 요청으로 연결
+		if self.tModel == nil then return end
+		if self.tModel.selectionConfirmed then
+			self:RequestDraw()
+		else
+			self:RequestConfirmSelection(true)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleSelectionAccepted(string sessionId)
+		-- 서버 확정 상태 반영 후 예약된 추첨 요청 처리
+		if self.tModel == nil or not self.tModel:AcceptSelection(sessionId) then return end
+		self:Render()
+		if self.tModel.autoDrawAfterConfirm then self:RequestDraw() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestDraw()
+		-- 중복 추첨을 잠근 뒤 기존 서버 RPC 호출
+		if self.tModel == nil or not self.tModel:TryDraw() then return end
+		self:Render()
+		_MiniGamePlayLogic:RequestDraw(self.tModel.sessionId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleRequestRejected(string miniGameId, string reason)
+		-- 현재 Model의 실패 상태와 조작 가능 여부 복구
+		if miniGameId ~= self.MINI_GAME_ID or self.tModel == nil then return end
+		if self.tModel:RejectRequest(reason) then
+			self:OnProgressChanged(nil)
+			self:Render()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyDrawResult(string sessionId, any tDrawResult)
+		-- 서버 결과를 Model에 반영한 뒤 View 갱신
+		if self.tModel == nil or not self.tModel:ApplyDrawResult(sessionId, tDrawResult) then return end
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndSession(string sessionId)
+		-- 정상 결과는 확인까지 유지, 취소 세션은 즉시 해제
+		if self.tModel == nil or self.tModel.sessionId ~= sessionId then return end
+		if not self.tModel.resultShown then self:ClearState() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 시작 요청 전 또는 결과 확인 시 화면과 보관 상태 해제
+		if self.tModel == nil then return end
+		if not self.tModel.resultShown and (self.tModel.sessionId ~= "" or self.tModel.pendingRequest ~= "") then return end
+		if self.rootView ~= nil then self.rootView:Close() end
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearState()
+		-- Model과 View 참조 해제
+		self.tModel = nil
+		self.view = nil
+		self.rootView = nil
+		self.isDebugLobby = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 보관 상태 해제
+		if self.progressChangedHandler ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+			self.progressChangedHandler = nil
+		end
+		self:ClearState()
+	end
+end

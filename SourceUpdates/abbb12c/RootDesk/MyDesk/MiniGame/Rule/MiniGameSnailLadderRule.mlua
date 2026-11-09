@@ -1,0 +1,28 @@
+---@description "달팽이 사다리 타기 진행 규칙"
+@Logic
+script MiniGameSnailLadderRule extends Logic
+	property string MINI_GAME_ID = "snail_ladder"
+	property string STAGE_LOBBY = "lobby"
+	property string STAGE_READY = "ready"
+	property string STAGE_RACING = "racing"
+	property string STAGE_SETTLING = "settling"
+	property string STAGE_RESULT = "result"
+	property integer LANE_TOP = 1
+	property integer LANE_MIDDLE = 2
+	property integer LANE_BOTTOM = 3
+	property integer CROSSING_COUNT = 3
+	property number RACE_SECONDS = 4.2
+	property number SETTLEMENT_RETRY_SECONDS = 1
+
+	method boolean IsValidLane(integer lane)
+		-- 선택한 달팽이 레인 범위 확인
+		return lane >= self.LANE_TOP and lane <= self.LANE_BOTTOM
+	end
+
+	method integer GetMultiplier(integer lane)
+		-- 오른쪽 관문에 대응하는 코인 배율 반환
+		if lane == self.LANE_TOP then return 2 end
+		if lane == self.LANE_MIDDLE then return 1 end
+		return 0
+	end
+end

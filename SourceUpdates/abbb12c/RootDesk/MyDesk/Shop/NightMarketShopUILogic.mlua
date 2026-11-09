@@ -1,0 +1,275 @@
+---@description "야시장 상점 목록과 구매 확인 및 완료 화면"
+@Logic
+script NightMarketShopUILogic extends Logic
+	property string ROOT_PATH = "/ui/NightMarketShopUI"
+	property string UI_ID = "NightMarketShopUI"
+	property string KEY_TITLE = "ui.shop.night_market.title"
+	property string KEY_LOADING = "ui.shop.night_market.loading"
+	property string KEY_UNAVAILABLE = "ui.shop.night_market.unavailable"
+	property string KEY_INSUFFICIENT = "ui.shop.night_market.insufficient"
+	property string KEY_RETRY = "ui.shop.night_market.retry_pending"
+	property string KEY_CONFIRM = "ui.common.confirm"
+	property string KEY_CANCEL = "ui.common.cancel"
+	property string KEY_CONFIRM_PURCHASE = "ui.shop.purchase_confirm"
+	property string KEY_COMPLETED = "ui.shop.package.purchase_completed"
+	property string KEY_FAILED = "ui.shop.purchase_failed"
+	property integer PRODUCT_SLOTS = 4
+	property number REQUEST_TIMEOUT = 14
+
+	property Entity root = nil
+	property Entity panel = nil
+	property Entity dialog = nil
+	property Entity confirmButton = nil
+	property Entity cancelButton = nil
+	property any rows = {}
+	property any bindings = {}
+	property any progressHandler = nil
+	property any products = {}
+	property any tSelected = nil
+	property string catalogRequestId = ""
+	property string purchaseRequestId = ""
+	property integer purchaseSequence = 0
+	property integer lastExchangeSequence = 0
+	property integer timeoutTimerId = 0
+	property boolean isOpen = false
+	property boolean isWaiting = false
+	property boolean showingResult = false
+
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		if isvalid(self.root) then return true end
+		local root = _EntityService:GetEntityByPath(self.ROOT_PATH)
+		if not isvalid(root) then return false end
+		self.root = root
+		self.panel = root:GetChildByName("Panel")
+		self.dialog = root:GetChildByName("Modal"):GetChildByName("Dialog")
+		self.confirmButton = self.dialog:GetChildByName("Confirm")
+		self.cancelButton = self.dialog:GetChildByName("Cancel")
+		self:Bind(self.panel:GetChildByName("Close"), function() self:RequestClose() end)
+		self:Bind(self.confirmButton, function() self:OnConfirm() end)
+		self:Bind(self.cancelButton, function() self:HideDialog() end)
+		for i = 1, self.PRODUCT_SLOTS do
+			local index = i
+			local row = self.panel:GetChildByName("Product" .. tostring(index))
+			self.rows[index] = row
+			self:Bind(row, function() self:SelectProduct(index) end)
+		end
+		self.progressHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, function() self:RefreshBalances() end)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Bind(Entity entity, any callback)
+		local subscription = entity:ConnectEvent(ButtonClickEvent, callback)
+		table.insert(self.bindings, {entity = entity, subscription = subscription})
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsInNightMarket()
+		local player = _UserService.LocalPlayer
+		return isvalid(player) and isvalid(player.CurrentMap) and player.CurrentMap.Name == _MiniGameManager.NIGHT_MARKET_MAP_NAME
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		if self.isOpen or not self:IsInNightMarket() or _MiniGameManager:IsNightMarketMiniGameUiBusy()
+			or not self:Initialize() then return end
+		self.isOpen = true
+		self.root.Enable = true
+		_UIVisibilityNotifierLogic:SendFrom(self, self.UI_ID, true)
+		self:HideDialog()
+		self.products = {}
+		for _, row in ipairs(self.rows) do row.Enable = false end
+		self:SetText(self.panel:GetChildByName("Title"), _LocaleTextUtil:GetText(self.KEY_TITLE))
+		self:SetText(self.panel:GetChildByName("Status"), _LocaleTextUtil:GetText(self.KEY_LOADING))
+		self:RefreshBalances()
+		self.catalogRequestId = _UtilLogic:NewGuid()
+		local requestId = self.catalogRequestId
+		self.timeoutTimerId = _TimerService:SetTimerOnce(function()
+			if requestId ~= self.catalogRequestId then return end
+			self.catalogRequestId = ""
+			self.timeoutTimerId = 0
+			self:SetText(self.panel:GetChildByName("Status"), _LocaleTextUtil:GetText(self.KEY_UNAVAILABLE))
+		end, self.REQUEST_TIMEOUT)
+		_ShopItemManager:RequestNightMarketCatalog(requestId)
+	end
+
+	@ExecSpace("Client")
+	method void ReceiveCatalog(string requestId, table products)
+		if not self.isOpen or requestId ~= self.catalogRequestId then return end
+		self.catalogRequestId = ""
+		self:ClearTimeout()
+		self.products = products
+		self:SetText(self.panel:GetChildByName("Status"), #products == 0 and _LocaleTextUtil:GetText(self.KEY_UNAVAILABLE) or "")
+		for i, row in ipairs(self.rows) do
+			local tProduct = products[i]
+			row.Enable = tProduct ~= nil
+			if tProduct ~= nil then self:RenderProduct(row, tProduct) end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderProduct(Entity row, any tProduct)
+		self:SetText(row:GetChildByName("Name"), _LocaleTextUtil:GetText(tProduct.nameKey))
+		self:SetIcon(row:GetChildByName("IconSlot"), tProduct.ruid)
+		local price = row:GetChildByName("Price")
+		self:SetText(price:GetChildByName("Amount"), tostring(tProduct.price))
+		self:SetIcon(price:GetChildByName("IconSlot"), _MiniGameSettlementRule:GetCurrencyIconRuid(tProduct.coinType))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetIcon(Entity slot, string ruid)
+		-- 야시장 코인 원본의 투명 여백을 보정해 슬롯 중심에 배치
+		local entity = slot:GetChildByName("Icon")
+		local transform = entity.UITransformComponent
+		local slotSize = slot.UITransformComponent.RectSize.x
+		local isCoin = ruid == _MiniGameSettlementRule.NIGHT_MARKET_COIN_ICON_RUID
+		local size = isCoin and slotSize * 0.85 or slotSize
+		transform.RectSize = Vector2(size, size)
+		transform.anchoredPosition = isCoin and Vector2(-slotSize * 0.58, -slotSize * 0.5) or Vector2(0, 0)
+		entity.SpriteGUIRendererComponent.ImageRUID = DataRef(ruid)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectProduct(integer index)
+		if not self.isOpen or self.isWaiting or self.tSelected ~= nil then return end
+		local tProduct = self.products[index]
+		if tProduct == nil then return end
+		self.tSelected = tProduct
+		self.dialog.Parent.Enable = true
+		self:RenderProduct(self.dialog, tProduct)
+		self:SetText(self.dialog:GetChildByName("Title"), _LocaleTextUtil:GetText(self.KEY_CONFIRM_PURCHASE))
+		self:SetText(self.confirmButton, _LocaleTextUtil:GetText(self.KEY_CONFIRM))
+		self:SetText(self.cancelButton, _LocaleTextUtil:GetText(self.KEY_CANCEL))
+		self.confirmButton.UITransformComponent.anchoredPosition = Vector2(126, -153)
+		self.confirmButton.ButtonComponent.Enable = true
+		self.cancelButton.Enable = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnConfirm()
+		if not self.isOpen or self.isWaiting or self.tSelected == nil then return end
+		if self.showingResult then
+			self:HideDialog()
+			return
+		end
+		if self.purchaseRequestId == "" then
+			self.purchaseRequestId = _UtilLogic:NewGuid()
+			self.purchaseSequence = 0
+			if self.tSelected.isExchange then
+				local progress = _ProgressManager:ClientGetProgress()
+				local sequence = progress ~= nil and progress.nightMarketCoinPurchaseSequence or 0
+				self.purchaseSequence = math.max(sequence, self.lastExchangeSequence) + 1
+			end
+		end
+		self.isWaiting = true
+		self.confirmButton.ButtonComponent.Enable = false
+		self.cancelButton.ButtonComponent.Enable = false
+		self:SetText(self.dialog:GetChildByName("Title"), _LocaleTextUtil:GetText(self.KEY_CONFIRM_PURCHASE))
+		local requestId = self.purchaseRequestId
+		self.timeoutTimerId = _TimerService:SetTimerOnce(function()
+			if requestId ~= self.purchaseRequestId then return end
+			self.timeoutTimerId = 0
+			self.isWaiting = false
+			self.confirmButton.ButtonComponent.Enable = true
+			self.cancelButton.ButtonComponent.Enable = true
+			self:SetText(self.dialog:GetChildByName("Title"), _LocaleTextUtil:GetText(self.KEY_RETRY))
+		end, self.REQUEST_TIMEOUT)
+		_ShopItemManager:RequestNightMarketPurchase(self.tSelected.id, requestId, self.purchaseSequence)
+	end
+
+	@ExecSpace("Client")
+	method void ReceivePurchase(string requestId, string status, table quote)
+		if not self.isOpen or requestId ~= self.purchaseRequestId or self.tSelected == nil then return end
+		self:ClearTimeout()
+		self.isWaiting = false
+		if status == _ShopItemManager.NIGHT_MARKET_PURCHASE_BUSY then
+			self.confirmButton.ButtonComponent.Enable = true
+			self.cancelButton.ButtonComponent.Enable = true
+			self:SetText(self.dialog:GetChildByName("Title"), _LocaleTextUtil:GetText(self.KEY_RETRY))
+			return
+		end
+		self.purchaseRequestId = ""
+		self.showingResult = true
+		self.cancelButton.Enable = false
+		self.confirmButton.ButtonComponent.Enable = true
+		self.confirmButton.UITransformComponent.anchoredPosition = Vector2(0, -153)
+		local manager = _ShopItemManager
+		local message = _LocaleTextUtil:GetText(self.KEY_FAILED)
+		if status == manager.NIGHT_MARKET_PURCHASE_SUCCESS and quote.id == self.tSelected.id then
+			self.lastExchangeSequence = math.max(self.lastExchangeSequence, quote.sequence or 0)
+			self:RenderProduct(self.dialog, quote)
+			message = _LocaleTextUtil:Format(self.KEY_COMPLETED, _LocaleTextUtil:GetText(quote.nameKey), nil, nil, nil)
+		elseif status == manager.NIGHT_MARKET_PURCHASE_INSUFFICIENT then
+			message = _LocaleTextUtil:GetText(self.KEY_INSUFFICIENT)
+		end
+		self:SetText(self.dialog:GetChildByName("Title"), message)
+		self:RefreshBalances()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HideDialog()
+		if self.isWaiting then return end
+		self.tSelected = nil
+		self.purchaseRequestId = ""
+		self.showingResult = false
+		self.cancelButton.ButtonComponent.Enable = true
+		self.dialog.Parent.Enable = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBalances()
+		if not self.isOpen then return end
+		local progress = _ProgressManager:ClientGetProgress()
+		if progress == nil then return end
+		self:SetText(self.panel:GetChildByName("Meso"):GetChildByName("Amount"), tostring(progress.meso))
+		self:SetText(self.panel:GetChildByName("Coin"):GetChildByName("Amount"), tostring(progress.nightMarketCoin))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetText(Entity entity, string value)
+		entity.TextGUIRendererComponent.Text = value
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearTimeout()
+		if self.timeoutTimerId ~= 0 then _TimerService:ClearTimer(self.timeoutTimerId) end
+		self.timeoutTimerId = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestClose()
+		if not self.isWaiting then self:Close() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		if not self.isOpen then return end
+		self:ClearTimeout()
+		self.catalogRequestId = ""
+		self.isWaiting = false
+		self:HideDialog()
+		self.root.Enable = false
+		self.isOpen = false
+		_UIVisibilityNotifierLogic:SendFrom(self, self.UI_ID, false)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		if self.isOpen and not self:IsInNightMarket() then self:Close() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		self:Close()
+		for _, binding in ipairs(self.bindings) do
+			if isvalid(binding.entity) then binding.entity:DisconnectEvent(ButtonClickEvent, binding.subscription) end
+		end
+		self.bindings = {}
+		if self.progressHandler ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressHandler)
+			self.progressHandler = nil
+		end
+		self.root = nil
+	end
+end

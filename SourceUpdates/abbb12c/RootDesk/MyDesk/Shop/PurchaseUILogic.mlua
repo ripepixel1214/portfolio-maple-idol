@@ -1,0 +1,297 @@
+@Logic
+script PurchaseUILogic extends Logic
+	property string TEXT_UI_PURCHASE_PACKAGE = "ui.purchase.package"
+	property any displayPackages = {
+		{ amount = 1, price = 132 },
+		{ amount = 7, price = 840 },
+		{ amount = 15, price = 1800 },
+		{ amount = 30, price = 3600 },
+		{ amount = 50, price = 6000 }
+	}
+	property string TEXT_UI_PURCHASE_OPEN = "ui.purchase.open"
+	property string TEXT_UI_PURCHASE_PRICE = "ui.purchase.price"
+	property string TEXT_UI_PURCHASE_CHECKING = "ui.purchase.checking"
+	property string TEXT_UI_PURCHASE_TIMEOUT = "ui.purchase.timeout"
+	property string TEXT_UI_PURCHASE_COMPLETED = "ui.purchase.payment_completed"
+	property string TEXT_UI_PURCHASE_DELIVERY_PENDING = "ui.purchase.delivery_pending"
+	property string TEXT_UI_PURCHASE_WALLET_FAILED = "ui.purchase.wallet_failed"
+	property string TEXT_UI_PURCHASE_THROTTLED = "ui.purchase.throttled"
+	property string TEXT_UI_PURCHASE_UNAVAILABLE = "ui.purchase.unavailable"
+	property string TEXT_UI_PURCHASE_PRODUCT_FAILED = "ui.purchase.product_failed"
+
+	property Entity rootGroup = "2667f135-3562-4e88-bafd-0704435b9ac1"
+	property Entity popup = "56ed4ca1-142c-48bb-9d34-3a9eb341507f"
+	property ButtonComponent openButton = "1a033267-1e50-4dd3-8a89-c2f640a5b5bd"
+	property ButtonComponent closeButton = "65c47970-779e-4f1a-a91c-07f8ae9b9dba"
+	property TextGUIRendererComponent statusText = "89ae4353-1ebc-40f0-8300-53ce44ec42b6"
+	property string productId = ""
+	property boolean isUIReady = false
+	property boolean isLoadingProduct = false
+	property boolean isRequestPending = false
+	property string authorizationRequestId = ""
+	property integer requestTimeoutTimerId = 0
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 충전 화면의 연결을 검증한 뒤 초기화
+		self.isUIReady = false
+		self.isLoadingProduct = false
+		self.isRequestPending = false
+		if isvalid(self.rootGroup) then self.rootGroup.Enable = false end
+		if isvalid(self.popup) then self.popup.Enable = false end
+		if isvalid(self.rootGroup) == false and isvalid(self.popup) == false then
+			return
+		end
+		if self:HasUIBindings() == false then
+			log_warning("[PurchaseUI] incomplete UI bindings; initialization skipped")
+			return
+		end
+		if _DiamondWalletLogic == nil or _WorldShopPurchaseLogic == nil or _LocaleTextUtil == nil then
+			log_warning("[PurchaseUI] required logic unavailable; initialization skipped")
+			return
+		end
+		if not self:BindPackageCards() then
+			log_warning("[PurchaseUI] incomplete package cards; initialization skipped")
+			return
+		end
+		self._T.openHandler = self.openButton.Entity:ConnectEvent(ButtonClickEvent, self.OnOpenClicked)
+		self._T.closeHandler = self.closeButton.Entity:ConnectEvent(ButtonClickEvent, self.OnCloseClicked)
+		self._T.walletHandler = _DiamondWalletLogic:ConnectEvent(DiamondWalletChangedEvent, self.OnWalletChanged)
+		self._T.purchaseHandler = _WorldShopPurchaseLogic:ConnectEvent(WorldShopPurchaseRequestEvent, self.OnPurchaseRequestResult)
+		self.isUIReady = true
+		self:AlignOpenButton()
+		self.rootGroup.Enable = true
+		self.openButton.Entity.Enable = true
+		self:RefreshBuyButtons()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void AlignOpenButton()
+		-- 언어별 글자 너비에 맞춰 아이콘과 텍스트를 한 묶음으로 가운데 정렬
+		local button = self.openButton.Entity
+		local icon = button:GetChildByName("Icon")
+		local label = button:GetChildByName("Label")
+		if not isvalid(icon) or not isvalid(label) then return end
+		local textRenderer = label.TextGUIRendererComponent
+		local width = math.min(label.UITransformComponent.RectSize.x,
+			textRenderer:GetPreferredWidth(_LocaleTextUtil:GetText(self.TEXT_UI_PURCHASE_OPEN)))
+		local gap = 8
+		icon.UITransformComponent.anchoredPosition = Vector2(-(width + gap) * 0.5, 0)
+		label.UITransformComponent.anchoredPosition = Vector2((icon.UITransformComponent.RectSize.x + gap) * 0.5, 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean HasUIBindings()
+		-- 삭제되거나 부분 연결된 UI를 이벤트 구독 전에 검사
+		return isvalid(self.rootGroup) and isvalid(self.popup)
+			and isvalid(self.openButton) and isvalid(self.closeButton)
+			and isvalid(self.statusText)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsUIAvailable()
+		-- 종료 후 도착하는 응답과 외부 호출의 UI 접근 차단
+		return self.isUIReady and self:HasUIBindings()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnOpenClicked(ButtonClickEvent event)
+		-- 다이아 충전 화면 열기
+		self:Open()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnCloseClicked(ButtonClickEvent event)
+		self:Close()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		if isvalid(self.popup) then self.popup.Enable = false end
+		self:EndRequest()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Open()
+		-- 준비된 충전 팝업과 상품 조회 시작
+		if self:IsUIAvailable() == false then return end
+		self.popup.Enable = true
+		if self.isLoadingProduct or self.isRequestPending then return end
+		self:LoadProducts()
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean BindPackageCards()
+		local panel = self.popup:GetChildByName("Panel")
+		if not isvalid(panel) then return false end
+		local cards = {}
+		for index, definition in ipairs(self.displayPackages) do
+			local card = panel:GetChildByName("Package" .. tostring(index))
+			if not isvalid(card) then return false end
+			local buy = card:GetChildByName("Buy")
+			local name = card:GetChildByName("Name")
+			local price = card:GetChildByName("Price")
+			local coin = card:GetChildByName("Coin")
+			if not isvalid(buy) or not isvalid(name) or not isvalid(price) or not isvalid(coin) then return false end
+			cards[index] = {
+				button = buy.ButtonComponent, name = name.TextGUIRendererComponent,
+				price = price.TextGUIRendererComponent, coin = coin,
+				amount = definition.amount, expectedPrice = definition.price, productId = ""
+			}
+			if not isvalid(cards[index].button) or not isvalid(cards[index].name) or not isvalid(cards[index].price) then return false end
+		end
+		self._T.cards = cards
+		for _, tCard in ipairs(cards) do
+			tCard.clickHandler = tCard.button.Entity:ConnectEvent(ButtonClickEvent, function() self:BuyPackage(tCard) end)
+		end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void LoadProducts()
+		-- 시안 가격과 지급량이 실제 판매 상품과 일치할 때만 결제 허용
+		self.isLoadingProduct = true
+		self.productId = ""
+		self.statusText.Text = ""
+		local cards = self._T.cards
+		local cardsByAmount = {}
+		for _, tCard in ipairs(cards) do
+			tCard.productId = ""
+			cardsByAmount[tCard.amount] = tCard
+			_LocaleTextUtil:SetLocalizedText(tCard.name, self.TEXT_UI_PURCHASE_PACKAGE, tostring(tCard.amount), nil, nil)
+			_LocaleTextUtil:SetLocalizedText(tCard.price, self.TEXT_UI_PURCHASE_PRICE, tostring(tCard.expectedPrice), nil, nil)
+			local coinTransform = tCard.coin.UITransformComponent
+			local priceTransform = tCard.price.Entity.UITransformComponent
+			local textWidth = math.min(priceTransform.RectSize.x, tCard.price:GetPreferredWidth(tCard.price.Text))
+			local gap = 7
+			coinTransform.anchoredPosition = Vector2(-(textWidth + gap) * 0.5, coinTransform.anchoredPosition.y)
+			priceTransform.anchoredPosition = Vector2((coinTransform.RectSize.x + gap) * 0.5, priceTransform.anchoredPosition.y)
+		end
+		self:RefreshBuyButtons()
+		local availableCount = 0
+		for _, tPackage in ipairs(_WorldShopPurchaseLogic:ClientGetPackageDefinitions()) do
+			local tCard = cardsByAmount[tPackage.diamondAmount]
+			if tCard ~= nil and tCard.productId == "" then
+				local ok, product = pcall(function() return _WorldShopService:GetProductAndWait(tPackage.productId) end)
+				if not self:IsUIAvailable() or self._T.cards ~= cards then return end
+				if ok and product ~= nil and product.Id == tPackage.productId
+					and product.Type == WorldShopProductType.Item and product.Price == tCard.expectedPrice then
+					tCard.productId = tPackage.productId
+					availableCount = availableCount + 1
+				end
+			end
+		end
+		self.isLoadingProduct = false
+		if self.popup.Enable and availableCount < #cards then
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_PRODUCT_FAILED, nil, nil, nil)
+		end
+		self:RefreshBuyButtons()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BuyPackage(any tCard)
+		-- UI에서 직접 지급하지 않고 기존 서버 검증 진입점 사용
+		if not self:IsUIAvailable() or not self.popup.Enable or self.isLoadingProduct or self.isRequestPending
+			or tCard.productId == "" or _DiamondWalletLogic:ClientGetBalance() == nil then return end
+		self.productId = tCard.productId
+		self.isRequestPending = true
+		self.authorizationRequestId = _UtilLogic:NewGuid()
+		_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_CHECKING, nil, nil, nil)
+		self:RefreshBuyButtons()
+		self.requestTimeoutTimerId = _TimerService:SetTimerOnce(function()
+			self:EndRequest()
+			if self:IsUIAvailable() == false then return end
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_TIMEOUT, nil, nil, nil)
+			self:RefreshBuyButtons()
+		end, 15)
+		if _WorldShopPurchaseLogic:BeginPurchase(self.productId, self.authorizationRequestId) == false then
+			self:EndRequest()
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_THROTTLED, nil, nil, nil)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanAcceptAuthorization(string productId, string requestId)
+		return self:IsUIAvailable() and self.popup.Enable and self.isRequestPending
+			and productId == self.productId and requestId == self.authorizationRequestId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnPurchaseRequestResult(WorldShopPurchaseRequestEvent event)
+		-- 현재 화면의 상품 응답만 표시
+		if self:IsUIAvailable() == false then return end
+		if event.productId ~= self.productId then return end
+		if event.status == _WorldShopPurchaseLogic.STATUS_PAYMENT_COMPLETED then
+				_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_COMPLETED, nil, nil, nil)
+			return
+		elseif event.status == _WorldShopPurchaseLogic.STATUS_DELIVERY_PENDING then
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_DELIVERY_PENDING, nil, nil, nil)
+			return
+		end
+		self:EndRequest()
+		if event.status == _WorldShopPurchaseLogic.STATUS_READY then
+			self.statusText.Text = ""
+		elseif event.status == _WorldShopPurchaseLogic.STATUS_WALLET_UNAVAILABLE then
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_WALLET_FAILED, nil, nil, nil)
+		elseif event.status == _WorldShopPurchaseLogic.STATUS_THROTTLED then
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_THROTTLED, nil, nil, nil)
+		else
+			_LocaleTextUtil:SetLocalizedText(self.statusText, self.TEXT_UI_PURCHASE_UNAVAILABLE, nil, nil, nil)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnWalletChanged(DiamondWalletChangedEvent event)
+		self:RefreshBuyButtons()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBuyButtons()
+		if not self:IsUIAvailable() then return end
+		local canBuy = not self.isLoadingProduct and not self.isRequestPending and _DiamondWalletLogic:ClientGetBalance() ~= nil
+		for _, tCard in ipairs(self._T.cards) do
+			tCard.button.Enable = canBuy and tCard.productId ~= ""
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndRequest()
+		-- 요청 타임아웃 해제와 구매 대기 상태 종료
+		if self.requestTimeoutTimerId ~= 0 then _TimerService:ClearTimer(self.requestTimeoutTimerId) end
+		self.requestTimeoutTimerId = 0
+		self.isRequestPending = false
+		self.authorizationRequestId = ""
+		self:RefreshBuyButtons()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 화면 상태 해제 후 타이머와 유효한 이벤트 구독 정리
+		self.isUIReady = false
+		self.isLoadingProduct = false
+		self.isRequestPending = false
+		if self.requestTimeoutTimerId ~= 0 then _TimerService:ClearTimer(self.requestTimeoutTimerId) end
+		self.requestTimeoutTimerId = 0
+		self:DisconnectButtonEvent(self.openButton, self._T.openHandler)
+		self:DisconnectButtonEvent(self.closeButton, self._T.closeHandler)
+		for _, tCard in ipairs(self._T.cards or {}) do
+			self:DisconnectButtonEvent(tCard.button, tCard.clickHandler)
+		end
+		self._T.cards = nil
+		if self._T.walletHandler ~= nil and _DiamondWalletLogic ~= nil then _DiamondWalletLogic:DisconnectEvent(DiamondWalletChangedEvent, self._T.walletHandler) end
+		if self._T.purchaseHandler ~= nil and _WorldShopPurchaseLogic ~= nil then _WorldShopPurchaseLogic:DisconnectEvent(WorldShopPurchaseRequestEvent, self._T.purchaseHandler) end
+		self._T.openHandler = nil
+		self._T.closeHandler = nil
+		self._T.walletHandler = nil
+		self._T.purchaseHandler = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectButtonEvent(ButtonComponent button, any eventHandler)
+		-- 이미 제거된 버튼의 Entity 접근 방지
+		if isvalid(button) and isvalid(button.Entity) and eventHandler ~= nil then
+			button.Entity:DisconnectEvent(ButtonClickEvent, eventHandler)
+		end
+	end
+
+end

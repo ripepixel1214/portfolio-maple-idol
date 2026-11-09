@@ -18,6 +18,8 @@
 
 새 게임은 종류별 서버 로직과 클라이언트 화면, 등록 정보를 추가합니다. PC의 키보드와 모바일 터치 입력은 공통 행동으로 전달하고, 실행 상태와 화면 표시를 분리했습니다.
 
+서버는 사용자가 나가거나, 맵 이동 시 취소하도록 설정된 게임에서 시작 맵을 벗어나면 세션을 정리합니다. 낚시가 정산 중이거나 판돈 예약과 정산 처리가 남은 세션이 있으면 새 게임을 열지 않습니다. [세션 시작과 소유자 검사](../Source/RootDesk/MyDesk/MiniGame/Server/MiniGameSessionService.mlua)
+
 ## RPC 요청자와 입력 검증
 
 [RequestFishingInput](../Source/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua#L5)은 MSW의 서버 실행 메서드에서 `senderUserId`로 소유 세션을 조회합니다. 활성 상태와 게임 종류를 확인한 뒤 [HandleInput](../Source/RootDesk/MyDesk/MiniGame/Server/MiniGameFishingServerHandler.mlua#L55)으로 넘겨 입력 순번과 행동, 좌표 범위를 검사합니다.
@@ -31,9 +33,13 @@
 - [Update](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingModel.mlua#L114): 변경된 조준만 예약해 0.05초 간격으로 전송합니다.
 - [Send](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingPresenter.mlua#L81): 입력을 RPC로 전달합니다. 발사와 시작 등의 행동은 이동 전송 주기와 별도로 보냅니다.
 - [ApplyState](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingModel.mlua#L75): 세션 ID와 갱신 번호를 확인해 다른 세션이나 이전 상태를 제외합니다.
-- [OnUpdate](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingPresenter.mlua#L116), [MiniGameFishingStageView](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingStageView.mlua): 입력 주기와 프레임 표시를 연결하고, 수신 상태에서 경과한 시간을 사용해 물고기의 위치를 표시합니다.
+- [OnUpdate](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingPresenter.mlua#L116)는 입력을 처리한 뒤 매 프레임 화면을 갱신합니다. [UpdatePresentation](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingStageView.mlua#L640)은 마지막으로 받은 서버 진행 시간에 수신 후 경과 시간을 더해 현재 시각을 추정합니다. 표시 시간의 진행 속도를 최대 10% 범위에서 조절해 시차를 줄이므로 상태를 받을 때마다 물고기 위치가 튀는 것을 줄일 수 있습니다.
 
 표시 개체와 적중 효과는 풀에서 재사용합니다. [Reset](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingVisual.mlua#L59)에서 표시 상태를 초기화하고, 배치 갱신이 끝난 개체를 노출하도록 구성했습니다.
+
+| 창으로 조준 | 발사 후 적중 |
+| --- | --- |
+| ![창의 발사 위치를 조준하는 장면](../Media/fishing-aim.png) | ![물고기에 창이 적중하고 점수가 표시되는 장면](../Media/fishing-throw.png) |
 
 ## 입력 기록으로 결과 재계산
 
@@ -46,7 +52,14 @@
 출시 후 커맨드 미니게임이 원활하게 동작하지 않는다는 사용자 피드백을 받아, 리소스 준비와 서버, 클라이언트의 입력 처리 로직을 개선했습니다.
 
 - [MiniGameCommandBox.BindArrowSprite](../Source/RootDesk/MyDesk/MiniGame/MiniGameCommandBox.mlua#L177): 현재 표시 코드에서는 아이콘의 리소스 바인딩과 표시 갱신을 분리합니다.
+- [MiniGameViewRegistry.GetPreloadRuids](../Source/RootDesk/MyDesk/MiniGame/Client/MiniGameViewRegistry.mlua#L53)가 수집한 리소스를 [LoadingUILogic](../Source/RootDesk/MyDesk/UI/LoadingUILogic.mlua#L201)에서 사전 로드합니다.
 - [MiniGameInputHubLogic.EmitForChannel](../Source/RootDesk/MyDesk/MiniGame/MiniGameInputHubLogic.mlua#L152): 입력을 세션, 채널과 행동을 가진 공통 이벤트로 전달합니다.
 - [MiniGameManager.RequestCommandInput](../Source/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua#L385): 세션 소유자, 허용 키와 순번을 확인하고, 누적 입력 이력에서 미처리 구간을 순서대로 반영합니다.
 
 입력 이벤트는 [MiniGamePlayLogic.OnInputEvent](../Source/RootDesk/MyDesk/MiniGame/MiniGamePlayLogic.mlua#L325)에서 게임별 클라이언트 처리로 전달하고, 커맨드 입력의 서버 판정은 [MiniGameCommandServerHandler](../Source/RootDesk/MyDesk/MiniGame/Server/MiniGameCommandServerHandler.mlua)로 연결합니다.
+
+## 야시장 시작 조건과 판돈 처리
+
+후속 구현에서는 [MiniGameManager](../SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/MiniGameManager.mlua#L92)가 로비에서 승인한 게임과 플레이어를 확인하고, 고른 재화로 참가할 수 있는지 검사합니다. [MiniGameSettlementRule](../SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Rule/MiniGameSettlementRule.mlua)은 재화별 판돈 단위와 선택 범위를 적용하고, 판돈 예약과 결과 정산을 세션 상태에 맞춰 처리합니다.
+
+낚시의 [프레임 표시](../SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingStageView.mlua#L682)와 [입력 연결](../SourceUpdates/abbb12c/RootDesk/MyDesk/MiniGame/Client/MiniGameFishingPresenter.mlua#L119)도 후속 버전에서 확인할 수 있습니다.

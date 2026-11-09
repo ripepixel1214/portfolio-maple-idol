@@ -1,0 +1,211 @@
+-- 현재 유저의 핵심 데이터 저장과 전체 저장 데이터 초기화를 조정합니다.
+@Logic
+script UserDataManager extends Logic
+
+	property boolean isResetInProgress = false
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
+	method void SaveCoreData()
+		-- 진행 전환과 이벤트 완료 시 함께 유지되어야 하는 핵심 유저 데이터를 저장합니다.
+		if self.isResetInProgress then return end
+		_CharacterManager:SaveCharactersToStorage()
+		_CharacterCostumeManager:SaveCostumesToStorage()
+		_RuntimeActorManager:SaveRuntimeActorDataToStorage()
+		_ProgressManager:SaveProgressToStorage()
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestResetAllStorageData()
+		-- 요청한 유저 본인의 전체 저장 데이터를 삭제하고 모든 런타임 캐시를 기본값으로 다시 구성합니다.
+		if self.isResetInProgress then
+			return false
+		end
+
+		local user = _UserService:GetUserEntityByUserId(senderUserId)
+		if user == nil or isvalid(user) == false then
+			return false
+		end
+
+		self.isResetInProgress = true
+		local isReset = self:ResetAllStorageData(senderUserId)
+		self.isResetInProgress = false
+		return isReset
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ServerOnly")
+	method boolean ResetAllStorageData(string userId)
+		-- 게임 진행 키만 삭제하고 유료 지갑·구매·소비 기록 보존
+		if userId == nil or userId == "" then
+			return false
+		end
+
+		if self:IsAnyStorageSaveInProgress() or _DiamondWalletLogic.busyByUserId[userId] == true
+			or _ShopItemManager.isPurchaseInProgress or next(_FishingRewardLogic.busyByUser) ~= nil then
+			log_warning("[UserDataManager] reset postponed while a storage write is in progress")
+			return false
+		end
+		if _DiamondWalletLogic:LoadForUser(userId) == false then return false end
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		local code, pages = userStorage:BatchGetAndWait(self:GetResetStorageKeys())
+		if code ~= 0 or pages == nil then return false end
+		local existingKeys = {}
+		while true do
+			local entries = pages:GetCurrentPageDatas()
+			if entries ~= nil then
+				for _, entry in ipairs(entries) do table.insert(existingKeys, entry.KeyInfo.Key) end
+			end
+			if pages.IsLastPage then break end
+			local nextCode = pages:LoadNextPageAndWait()
+			if nextCode ~= 0 then return false end
+			pages:MoveToNextPageAndWait()
+		end
+		if #existingKeys > 0 then
+			local errorCode, deletedKeys = userStorage:TransactDeleteAndWait(existingKeys)
+			if errorCode ~= 0 then
+				_DataStorageErrorUtil:LogWarning(errorCode, userId)
+				return false
+			end
+		end
+
+		self:ClearPendingGameSavesAfterReset()
+		self:ReloadAllStorageDataAfterReset(userId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method table GetResetStorageKeys()
+		-- 초기화 대상은 각 게임 저장 계층이 소유한 키의 명시적 허용 목록
+		return { _ProgressStorage.ProgressStorageKey, _CharacterStorage.charactersStorageKey,
+			_CharacterCostumeStorage.costumeStorageKey, _RuntimeActorStorage.runtimeActorsStorageKey,
+			_ActivityStorage.activityStorageKey, _TrainingCardStorage.storageKey, _ItemStorage.itemStorageKey,
+			_ShopItemStorage.shopItemStorageKey, _EventCompletionStorage.completionStorageKey,
+			_SoundStorage.soundSettingsStorageKey, _NewContentStorage.storageKey,
+			_FishingRewardStorage.STORAGE_KEY, _ShopItemStorage.CONSUMABLE_PURCHASE_KEY }
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsAnyStorageSaveInProgress()
+		-- 늦은 비동기 완료가 초기화된 진행 데이터를 되살리지 않도록 초기화 진입 차단
+		return _ProgressStorage.IsProgressSaveInProgress or _CharacterStorage.isCharactersSaveInProgress
+			or _CharacterCostumeStorage.isCostumesSaveInProgress or _RuntimeActorStorage.isRuntimeActorsSaveInProgress
+			or _ActivityStorage.isActivitiesSaveInProgress or _TrainingCardStorage.isSaveInProgress or _ItemStorage.isItemsSaveInProgress
+			or _ShopItemStorage.isShopItemsSaveInProgress or _EventCompletionStorage.isCompletionsSaveInProgress
+			or _SoundStorage.isSoundSettingsSaveInProgress or _NewContentStorage.isSaveInProgress
+			or _ItemStorage.activeOperations > 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearPendingGameSavesAfterReset()
+		-- 초기화 전에 실패하여 대기 중이던 게임 저장 스냅샷 폐기
+		_ProgressStorage.PendingProgressSaveString = ""
+		_ProgressStorage.PendingProgressSaveUserId = ""
+		_CharacterStorage.pendingCharactersString = ""
+		_CharacterStorage.pendingCharactersUserId = ""
+		_CharacterCostumeStorage.pendingCostumesString = ""
+		_CharacterCostumeStorage.pendingCostumesUserId = ""
+		_RuntimeActorStorage.pendingRuntimeActorsString = ""
+		_RuntimeActorStorage.pendingRuntimeActorsUserId = ""
+		_ActivityStorage.pendingActivitiesString = ""
+		_ActivityStorage.pendingActivitiesUserId = ""
+		_TrainingCardStorage.pendingString = ""
+		_TrainingCardStorage.pendingUserId = ""
+		_ItemStorage.pendingItemsString = ""
+		_ItemStorage.pendingItemsUserId = ""
+		_ShopItemStorage.pendingShopItemsString = ""
+		_ShopItemStorage.pendingShopItemsUserId = ""
+		_EventCompletionStorage.pendingCompletionsString = ""
+		_EventCompletionStorage.pendingCompletionsUserId = ""
+		_SoundStorage.pendingSoundSettingsString = ""
+		_SoundStorage.pendingSoundSettingsUserId = ""
+		_NewContentStorage.pendingString = ""
+		_NewContentStorage.pendingUserId = ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ReloadAllStorageDataAfterReset(string userId)
+		-- 삭제된 전체 저장소를 기본 상태로 다시 로드해 각 런타임 캐시와 클라이언트를 갱신합니다.
+		if _ProgressManager ~= nil then
+			_ProgressManager:ReloadProgressAfterStorageReset(userId)
+		end
+
+		if _CharacterManager ~= nil then
+			_CharacterManager.currentUserId = userId
+			_CharacterManager:LoadCharacters()
+			if _CharacterManager:IsCharactersLoaded() then
+				_CharacterManager:PushCharactersToClient(userId)
+				_CharacterManager:PushSelectedCharacterToClient(userId)
+			end
+		end
+
+		if _CharacterCostumeManager ~= nil then
+			_CharacterCostumeManager.currentUserId = userId
+			_CharacterCostumeManager:Load()
+			if _CharacterCostumeManager:IsCostumesLoaded() then
+				_CharacterCostumeManager:PushCostumesToClient(userId)
+			end
+		end
+
+		if _RuntimeActorManager ~= nil then
+			_RuntimeActorManager.CurrentUserId = userId
+			_RuntimeActorManager:LoadRuntimeActorDataFromStorage(userId)
+			if _RuntimeActorManager.IsRuntimeActorDataLoaded then
+				_RuntimeActorManager:PushRuntimeActorsToClient(userId)
+			end
+		end
+
+		if _ActivityManager ~= nil then
+			_ActivityManager.currentUserId = userId
+			_ActivityManager:LoadActivities()
+			if _ActivityManager:IsActivitiesLoaded() then
+				_ActivityManager:PushActivitiesToClient(userId)
+			end
+		end
+
+		if _TagTrainingManager ~= nil then
+			_TagTrainingManager.currentUserId = userId
+			_TagTrainingManager:ClearState()
+			_TagTrainingManager:LoadTrainingCards()
+		end
+
+		if _ItemManager ~= nil then
+			_ItemManager.currentUserId = userId
+			_ItemManager.tInventory = nil
+			_ItemManager:ResetIntimacyUseState(userId)
+			_ItemManager:LoadItems()
+			if _ItemManager:IsItemsLoaded() then
+				_ItemManager:PushItemsToClient(userId)
+				if _CharacterManager:CanUseCharacters(userId) then _CharacterManager:PushCharactersToClient(userId) end
+			end
+		end
+
+		if _ShopItemManager ~= nil then
+			_ShopItemManager.currentUserId = userId
+			_ShopItemManager:LoadShopItems()
+			if _ShopItemManager:IsShopItemsLoaded() then
+				_ShopItemManager:PushShopItemsToClient(userId)
+			end
+		end
+
+		if _EventCompletionManager ~= nil then
+			_EventCompletionManager.currentUserId = userId
+			_EventCompletionManager:LoadCompletions()
+			if _EventCompletionManager:IsCompletionsLoaded() then
+				_EventCompletionManager:PushCompletionsToClient(userId)
+			end
+		end
+
+		if _SoundManager ~= nil then
+			_SoundManager:LoadSoundSettingsFromStorage(userId)
+			_SoundManager:PushSoundSettingsToClient(userId)
+		end
+	end
+
+end

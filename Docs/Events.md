@@ -25,6 +25,12 @@ NPC 대화는 한 번의 입력으로 끝나지 않고 대화, 선택지, 미니
 
 세션은 `NpcEventManager`의 활성 필드 한 묶음으로 관리하도록 구현했습니다. 최근 32개 요청 ID로 중복을 확인하고, 현재 세션 상태와 진행 조건도 함께 검사하도록 했습니다. 보관 범위를 벗어난 요청은 ID 이력만으로 중복 여부를 판단할 수 없습니다. FIFO 앞 원소 삭제 시 이동할 원소 수도 보관 개수로 제한됩니다.
 
+## 대화 분기와 응답 복구
+
+후속 버전에서는 [분기 요청](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua#L975)에 세션 ID와 단계 토큰, 요청 ID를 함께 전달합니다. [NpcDialogGuard](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcDialogGuard.mlua)가 대화별로 연결된 이벤트를 찾아 검증에 사용하고, 서버는 실제로 실행한 분기에서만 보상 요청을 받아 이미 처리한 보상이 다시 지급되지 않도록 합니다.
+
+클라이언트는 [NpcRequestState](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcRequestState.mlua)에 응답을 기다리는 요청을 보관합니다. 응답이 없으면 같은 요청을 제한된 횟수만 다시 보내고, 받은 응답으로 [유실된 대화나 선택지를 복원](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua#L1156)합니다. 재시도 한도를 넘으면 세션을 닫고 조작 제한을 해제합니다.
+
 ## 이벤트 선택, 실행과 완료 기록
 
 | 흐름 | 코드 |

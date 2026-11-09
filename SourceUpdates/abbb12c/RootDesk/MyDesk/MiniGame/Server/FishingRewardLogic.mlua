@@ -1,0 +1,44 @@
+---@description "낚시 정산을 공통 인벤토리에 지급하고 미완료 결과 복구"
+@Logic
+script FishingRewardLogic extends Logic
+	property any busyByUser = {}
+
+	@ExecSpace("ServerOnly")
+	method boolean Load(string userId)
+		-- 통합 인벤토리 로드 후 남아 있는 낚시 정산 복구
+		if not _ItemManager:CanUseItems(userId) then return false end
+		local tData = _ItemManager.tInventory
+		if tData == nil then return false end
+		local pending = tData.pendingResult
+		return pending == nil or self:GrantResult(userId, pending.id, pending.score) ~= nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any GrantResult(string userId, string operationId, integer score)
+		-- 종료 점수와 지급 영수증을 같은 인벤토리 저장 키에서 확정
+		if not _ItemManager:CanUseItems(userId) or self.busyByUser[userId] then return nil end
+		local tPrevious = _ItemManager.tInventory
+		local hadBadge = tPrevious ~= nil and tPrevious.badgeGranted
+		self.busyByUser[userId] = true
+		local ok, result = pcall(function()
+			if not _FishingRewardStorage:QueueResult(userId, operationId, score) then return nil end
+			local storage = _DataStorageService:GetUserDataStorage(userId)
+			return _ItemStorage:ApplyOperation(storage, {
+				id = operationId, kind = _ItemStorage.KIND_REWARD, score = score, target = ""
+			})
+		end)
+		self.busyByUser[userId] = nil
+		if not ok or result == nil or result.receipt == nil then return nil end
+		_ItemManager:ApplyInventoryState(userId, result.tData)
+		if not hadBadge and result.receipt.itemId == _MiniGameFishingRule.BADGE_ID then
+			_ItemManager:RegisterAlbumItemAsNewContent(_MiniGameFishingRule.BADGE_ID, userId)
+			if _CharacterManager:CanUseCharacters(userId) then _CharacterManager:PushCharactersToClient(userId) end
+		end
+		return result.receipt
+	end
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 플레이 종료 시 진행 중 정산의 런타임 잠금 해제
+		self.busyByUser = {}
+	end
+end

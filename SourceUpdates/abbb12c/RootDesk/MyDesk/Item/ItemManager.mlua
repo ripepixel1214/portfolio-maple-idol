@@ -1,0 +1,652 @@
+@Logic
+script ItemManager extends Logic
+
+	property boolean isItemOwnershipLoaded = false
+	property boolean isClientItemsLoaded = false
+	property any disabledFanItemIds = {}
+	property integer revision = 0
+	property any tInventory = nil
+	property any itemCounts = {}
+	property any tIntimacyRequest = nil
+	property string USE_APPLIED = "applied"
+	property string USE_REJECTED = "rejected"
+	property string USE_RETRY = "retry"
+	property string USE_OPERATION_PREFIX = "use_"
+	property number USE_TIMEOUT = 8
+	property number lastLoadRetryAt = -5
+
+	-- ownedItemIds: { itemId:string, itemId:string, ... }
+	property any ownedItemIds = {}
+
+	-- ownedItemIdSet: { [itemId:string] = true }
+	property any ownedItemIdSet = {}
+
+	-- save/load
+	property string currentUserId = ""
+
+	property any userEnterHandler = nil
+
+	@ExecSpace("ServerOnly")
+	method void OnBeginPlay()
+		-- 유저 입장 시점에 서버 권위 아이템 소유 목록을 로드하고 클라이언트에 동기화합니다.
+		self.userEnterHandler = _UserService:ConnectEvent(UserEnterEvent, self.OnUserEnter)
+	end
+
+	method void OnEndPlay()
+		-- 클라이언트 요청 타이머와 서버 유저 이벤트 해제
+		if self:IsClient() then
+			if self.tIntimacyRequest ~= nil and self.tIntimacyRequest.timerId ~= nil then
+				_TimerService:ClearTimer(self.tIntimacyRequest.timerId)
+			end
+			self.tIntimacyRequest = nil
+			self.itemCounts = {}
+			self.isClientItemsLoaded = false
+			return
+		end
+		self.tInventory = nil
+		self.isItemOwnershipLoaded = false
+		if self.userEnterHandler ~= nil then
+			_UserService:DisconnectEvent(UserEnterEvent, self.userEnterHandler)
+			self.userEnterHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientHasItem(string itemId)
+		-- 클라이언트 로컬 캐시에 저장된 아이템 보유 여부를 반환합니다.
+		if itemId == nil or itemId == "" then
+			return false
+		end
+
+		return self.ownedItemIdSet[itemId] == true
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetOwnedItemIds()
+		-- 클라이언트 로컬 캐시에 저장된 보유 아이템 id 목록의 복사본을 반환합니다.
+		return self:CopyStringList(self.ownedItemIds)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ClientGetOwnedItems()
+		-- 클라이언트 로컬 캐시의 보유 아이템 id를 ItemMaster 정적 데이터 목록으로 변환합니다.
+		local tItems = {}
+		if _ItemMaster == nil then
+			return tItems
+		end
+
+		for _, itemId in ipairs(self.ownedItemIds) do
+			local tItem = _ItemMaster:GetItemById(itemId)
+			if tItem ~= nil then
+				table.insert(tItems, tItem)
+			end
+		end
+
+		return tItems
+	end
+
+	@ExecSpace("Server")
+	method boolean RequestUnlockItem(string itemId)
+		-- 임의 아이템 지급 RPC는 메이커 테스트에서만 허용
+		if Environment:IsMakerPlay() == false or self:CanUseItems(senderUserId) == false then return false end
+		if itemId == _MiniGameFishingRule.BADGE_ID then return false end
+		return self:UnlockItemWithCommit(itemId, senderUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnUserEnter(UserEnterEvent event)
+		-- 유저가 서버에 입장하면 아이템 소유 데이터를 로드하고 해당 클라이언트에 전송합니다.
+		if event == nil or event.UserId == nil or event.UserId == "" then
+			return
+		end
+		if self.currentUserId ~= nil and self.currentUserId ~= "" and self.currentUserId ~= event.UserId then
+			log_warning("[ERROR][ItemManager] single-user instance violation currentUserId=" .. tostring(self.currentUserId)
+				.. " enteredUserId=" .. tostring(event.UserId))
+			return
+		end
+
+		self.currentUserId = event.UserId
+		self:LoadItems()
+
+		if self:IsItemsLoaded() then
+			self:PushItemsToClient(event.UserId)
+			if _CharacterManager:CanUseCharacters(event.UserId) then _CharacterManager:PushCharactersToClient(event.UserId) end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void LoadItems()
+		-- Storage에서 보유 아이템 id 목록을 읽어 서버 권위 캐시로 보관합니다.
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ItemManager] currentUserId is required")
+			self.isItemOwnershipLoaded = false
+			return
+		end
+
+		local loadedItemIds = {}
+		if _ItemStorage ~= nil then
+			loadedItemIds = _ItemStorage:LoadItems(self.currentUserId)
+			if loadedItemIds == nil then
+				log_warning("[ItemManager] item ids are nil")
+				self.isItemOwnershipLoaded = false
+				return
+			end
+		end
+
+		self:RegisterOwnedItems(loadedItemIds)
+		self.disabledFanItemIds = self:CopyStringList(_ItemStorage.loadedDisabledFanItemIds)
+		local tLoadedInventory = _ItemStorage.tLoadedInventory
+		if self.tInventory == nil or self.tInventory.revision <= tLoadedInventory.revision then self.tInventory = tLoadedInventory end
+		self.isItemOwnershipLoaded = true
+		self.revision = self.revision + 1
+		if not _UserDataManager.isResetInProgress then
+			_FishingRewardLogic:Load(self.currentUserId)
+			if next(self.tInventory.redeemedCostumeIds) ~= nil and _ShopItemManager.currentUserId == self.currentUserId
+				and _ShopItemManager:IsShopItemsLoaded() then
+				_ShopItemManager:PushShopItemsToClient(self.currentUserId)
+			end
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsItemsLoaded()
+		-- 서버 아이템 소유 데이터 로드 여부를 반환합니다.
+		return self.isItemOwnershipLoaded
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseItems(string userId)
+		-- 요청자의 아이템 로드 상태와 초기화 진행 여부 확인
+		if _UserDataManager.isResetInProgress then return false end
+		if self:IsItemsLoaded() == false then
+			log_warning("[ItemManager] request rejected because items are not loaded")
+			return false
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ItemManager] request rejected because currentUserId is empty")
+			return false
+		end
+
+		if userId == nil or userId == "" or userId ~= self.currentUserId then
+			log_warning("[ItemManager] request rejected invalid userId=" .. tostring(userId))
+			return false
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ServerHasItem(string itemId)
+		-- 영구 보유권과 수량형 아이템을 같은 보유 조회로 제공
+		if itemId == nil or itemId == "" then return false end
+		if _ItemMaster:IsConsumable(_ItemMaster:GetItemById(itemId)) then
+			return self.tInventory ~= nil and (self.tInventory.countsByItemId[itemId] or 0) > 0
+		end
+		if self.tInventory ~= nil then
+			if itemId == _MiniGameFishingRule.BADGE_ID and self.tInventory.badgeGranted then return true end
+			if (self.tInventory.countsByItemId[itemId] or 0) > 0 then return true end
+		end
+		return self:IsItemsLoaded() and self.ownedItemIdSet[itemId] == true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ServerGetOwnedItemIds()
+		-- 영구 보유권과 보유 수량이 있는 아이템 ID 반환
+		if not self:IsItemsLoaded() then return {} end
+		local ids = {}
+		local included = {}
+		for _, itemId in ipairs(self.ownedItemIds) do
+			if not _ItemMaster:IsConsumable(_ItemMaster:GetItemById(itemId)) then
+				table.insert(ids, itemId)
+				included[itemId] = true
+			end
+		end
+		if self.tInventory == nil then return ids end
+		if self.tInventory.badgeGranted and not included[_MiniGameFishingRule.BADGE_ID] then
+			table.insert(ids, _MiniGameFishingRule.BADGE_ID)
+		end
+		local stackIds = {}
+		for itemId, count in pairs(self.tInventory.countsByItemId) do
+			if count > 0 and not included[itemId] then table.insert(stackIds, itemId) end
+		end
+		table.sort(stackIds)
+		for _, itemId in ipairs(stackIds) do table.insert(ids, itemId) end
+		return ids
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer ServerGetItemCount(string itemId)
+		-- 소모품 잔량과 영구 아이템의 0/1 보유량 조회
+		if self.tInventory ~= nil and self.tInventory.countsByItemId[itemId] ~= nil then
+			return self.tInventory.countsByItemId[itemId]
+		end
+		return self:ServerHasItem(itemId) and 1 or 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetIntimacyBonus(string characterId)
+		-- 영속 소모품 사용으로 얻은 캐릭터별 친밀도 조회
+		if self.tInventory == nil then return 0 end
+		return self.tInventory.intimacyByCharacter[characterId] or 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean UnlockItem(string itemId)
+		-- ItemMaster에 존재하는 아이템을 서버 권위 소유 목록에 추가합니다. 저장은 호출자가 결정합니다.
+		if self:IsItemsLoaded() == false then
+			return false
+		end
+
+		if itemId == nil or itemId == "" then
+			log_warning("[ItemManager] unlock itemId is empty")
+			return false
+		end
+
+		if _ItemMaster == nil or _ItemMaster:GetItemById(itemId) == nil then
+			log_warning("[ItemManager] unlock item not found itemId=" .. tostring(itemId))
+			return false
+		end
+
+		if _ItemMaster:IsConsumable(_ItemMaster:GetItemById(itemId)) then return false end
+		if self.ownedItemIdSet[itemId] == true then
+			return true
+		end
+
+		table.insert(self.ownedItemIds, itemId)
+		self.ownedItemIdSet[itemId] = true
+		self.revision = self.revision + 1
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean UnlockItemWithCommit(string itemId, string forUserId)
+		-- 최초 팬 선물 획득 전 진행 중인 육성의 기준값 확정
+		local wasOwned = self.ownedItemIdSet[itemId] == true
+		local beforeBonuses = nil
+		if not wasOwned and self:IsItemsLoaded() and _ItemMaster ~= nil
+			and _ItemMaster:IsFanPresent(_ItemMaster:GetItemById(itemId)) then
+			_TagTrainingManager:GetState()
+			beforeBonuses = _ItemEffectLogic:GetFanBaseStatBonuses()
+		end
+		local isUnlocked = self:UnlockItem(itemId)
+		if isUnlocked == false then
+			return false
+		end
+		if beforeBonuses ~= nil then self:RefreshFanBaseStatBonuses(beforeBonuses) end
+
+		self:SaveItemsToStorage()
+		if forUserId ~= nil and forUserId ~= "" then
+			self:PushItemsToClient(forUserId)
+		end
+
+		if wasOwned == false then
+			self:RegisterAlbumItemAsNewContent(itemId, forUserId)
+		end
+
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterAlbumItemAsNewContent(string itemId, string forUserId)
+		if _ItemMaster == nil or _NewContentManager == nil then
+			return
+		end
+
+		local tItem = _ItemMaster:GetItemById(itemId)
+		if tItem == nil then
+			return
+		end
+
+		local category = self:GetAlbumNewContentCategory(tItem)
+		if category == "" then
+			return
+		end
+
+		_NewContentManager:MarkNewContentEntries({
+			{
+				domain = "album",
+				category = category,
+				contentId = itemId
+			}
+		}, forUserId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetAlbumNewContentCategory(any tItem)
+		if tItem == nil then
+			return ""
+		end
+
+		local itemType = tItem.type or ""
+		if itemType == "photoCard" or itemType == "photocard" then
+			return "photoCard"
+		end
+		if itemType == "present" or itemType == "fan" or itemType == "fanPresent" then
+			return "fanPresent"
+		end
+		if itemType == "cherished" or itemType == "cherishedItem" then
+			return "cherishedItem"
+		end
+
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveItemsToStorage()
+		-- 보유 아이템과 팬 선물 설정을 같은 저장 키에 기록
+		if _ItemStorage == nil then
+			return
+		end
+
+		if self.currentUserId == nil or self.currentUserId == "" then
+			log_warning("[ItemManager] currentUserId is required")
+			return
+		end
+
+		if self:IsItemsLoaded() == false then
+			log_warning("[ItemManager] items are not loaded")
+			return
+		end
+
+		_ItemStorage:SaveItemsAsync(self.currentUserId, self:CopyStringList(self.ownedItemIds), self:CopyStringList(self.disabledFanItemIds))
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RegisterOwnedItems(any itemIds)
+		-- 로드한 보유 아이템 id 목록을 서버 권위 캐시에 등록합니다.
+		self.ownedItemIds = {}
+		self.ownedItemIdSet = {}
+
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return
+		end
+
+		for _, itemId in ipairs(itemIds) do
+			self:AddOwnedItemIdIfValid(itemId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddOwnedItemIdIfValid(string itemId)
+		-- 중복 없이 유효한 itemId만 보유 목록에 추가합니다.
+		if itemId == nil or itemId == "" then
+			return
+		end
+
+		if _ItemMaster ~= nil and _ItemMaster:GetItemById(itemId) == nil then
+			log_warning("[ItemManager] ignored unknown saved itemId=" .. tostring(itemId))
+			return
+		end
+
+		if self.ownedItemIdSet[itemId] == true then
+			return
+		end
+
+		table.insert(self.ownedItemIds, itemId)
+		self.ownedItemIdSet[itemId] = true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushItemsToClient(string forUserId)
+		-- 서버 권위 아이템 소유 목록을 지정한 클라이언트의 로컬 캐시로 전송합니다.
+		if forUserId == nil or forUserId == "" then
+			return
+		end
+
+		local counts = self.tInventory ~= nil and self.tInventory.countsByItemId or {}
+		self:SyncItems(self:ServerGetOwnedItemIds(), self:CopyStringList(self.disabledFanItemIds),
+			counts, self.revision, forUserId)
+	end
+
+	@ExecSpace("Client")
+	method void SyncItems(table itemIds, table disabledFanItemIds, table itemCounts, integer revision)
+		-- 오래된 응답을 제외하고 소유 목록·수량·효과 설정을 함께 갱신
+		if self.isClientItemsLoaded and revision < self.revision then return end
+		self.itemCounts = itemCounts
+		self:RegisterOwnedItemsClientOnly(itemIds)
+		self.disabledFanItemIds = self:CopyStringList(disabledFanItemIds)
+		self.revision = revision
+		self.isClientItemsLoaded = true
+		local event = ItemChangedEvent()
+		event.revision = revision
+		self:SendEvent(event)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RegisterOwnedItemsClientOnly(any itemIds)
+		-- 클라이언트 로컬 보유 아이템 캐시를 교체합니다.
+		self.ownedItemIds = {}
+		self.ownedItemIdSet = {}
+
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return
+		end
+
+		for _, itemId in ipairs(itemIds) do
+			if itemId ~= nil and itemId ~= "" and self.ownedItemIdSet[itemId] ~= true then
+				table.insert(self.ownedItemIds, itemId)
+				self.ownedItemIdSet[itemId] = true
+			end
+		end
+	end
+
+	method any CopyStringList(any source)
+		-- 문자열 배열 복사본을 만듭니다.
+		local copied = {}
+		if source == nil or type(source) ~= "table" then
+			return copied
+		end
+
+		for _, value in ipairs(source) do
+			if value ~= nil and value ~= "" then
+				table.insert(copied, value)
+			end
+		end
+
+		return copied
+	end
+
+	@ExecSpace("ClientOnly")
+	method integer ClientGetItemCount(string itemId)
+		-- 로드된 소모품 잔량 또는 영구 아이템의 0/1 보유량 조회
+		local count = self.itemCounts[itemId]
+		if count ~= nil then return count end
+		if _ItemMaster:IsConsumable(_ItemMaster:GetItemById(itemId)) then return 0 end
+		return self:ClientHasItem(itemId) and 1 or 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method table ClientGetIntimacyItems()
+		-- 표시 순서대로 보유한 친밀도 아이템의 UI용 목록 반환
+		local items = {}
+		for _, tDefinition in ipairs(_ItemMaster:GetItemsByType(_ItemMaster.TYPE_CONSUMABLE)) do
+			local count = self.itemCounts[tDefinition.itemId] or 0
+			if count > 0 and _ItemMaster:IsIntimacyItem(tDefinition) then
+				local tItem = _ItemMaster:GetItemById(tDefinition.itemId)
+				local gain = _ItemMaster:GetIntimacyGain(tItem.itemId)
+				table.insert(items, {itemId = tItem.itemId, name = tItem.name, description = tItem.description,
+					imageRuid = _ItemEffectLogic:GetItemIconRuid(tItem), count = count, intimacyGain = gain, canUse = gain > 0})
+			end
+		end
+		return items
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ApplyInventoryState(string userId, any tData)
+		-- 저장이 확정된 최신 수량만 현재 유저 캐시에 반영
+		if userId ~= self.currentUserId or tData == nil then return end
+		if self.tInventory ~= nil and tData.revision <= self.tInventory.revision then return end
+		self.tInventory = tData
+		self.revision = self.revision + 1
+		if self:IsItemsLoaded() then self:PushItemsToClient(userId) end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean GrantConsumablesWithCommit(string userId, string operationId, table grantCounts)
+		-- 서버에서 확정한 지급 지시를 영속 인벤토리에 중복 없이 반영
+		if userId == "" or not _ItemStorage:IsValidGrantCounts(grantCounts) or next(grantCounts) == nil then return false end
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		local result = _ItemStorage:ApplyOperation(storage, {
+			id = operationId, kind = _ItemStorage.KIND_GRANT, score = 0, target = "", grants = grantCounts
+		})
+		if result == nil or result.receipt == nil then return false end
+		self:ApplyInventoryState(userId, result.tData)
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean ClientIsIntimacyUsePending()
+		-- 친밀도 아이템 사용 응답 대기 상태 조회
+		return self.tIntimacyRequest ~= nil and self.tIntimacyRequest.pending
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean UseIntimacyItem(string itemId, string characterId)
+		-- 결과 미확정 시 같은 요청 ID를 재사용하여 중복 소비 방지
+		if itemId == "" or characterId == "" or self:ClientIsIntimacyUsePending() then return false end
+		local request = self.tIntimacyRequest
+		if request == nil then
+			if self:ClientGetItemCount(itemId) == 0 or _ItemMaster:GetIntimacyGain(itemId) <= 0 then return false end
+			request = {id = _UtilLogic:NewGuid(), itemId = itemId, characterId = characterId}
+			self.tIntimacyRequest = request
+		elseif request.itemId ~= itemId or request.characterId ~= characterId then return false end
+		request.pending = true
+		request.timerId = _TimerService:SetTimerOnce(function()
+			request.timerId = nil
+			self:ReceiveIntimacyUseResult(request.id, self.USE_RETRY)
+		end, self.USE_TIMEOUT)
+		self:RequestUseIntimacyItem(request.id, itemId, characterId)
+		return true
+	end
+
+	@ExecSpace("Server")
+	method void RequestUseIntimacyItem(string requestId, string itemId, string characterId)
+		-- 요청자와 대상 캐릭터 검증 후 서버 정의에 따라 1개 소비
+		local userId = senderUserId
+		if type(requestId) ~= "string" or #requestId > 60 or string.match(requestId, "^[%w_%-]+$") == nil then return end
+		if type(itemId) ~= "string" or type(characterId) ~= "string"
+			or #itemId > 100 or #characterId > 100 or not self:CanUseItems(userId)
+			or not _CharacterManager:CanUseCharacters(userId) then
+			self:ReceiveIntimacyUseResult(requestId, self.USE_REJECTED, userId)
+			return
+		end
+		local tBefore = _CharacterManager:ServerGetCharacterById(characterId)
+		if tBefore == nil or not tBefore.isDiscovered then
+			self:ReceiveIntimacyUseResult(requestId, self.USE_REJECTED, userId)
+			return
+		end
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		local result = _ItemStorage:ApplyOperation(storage, {id = self.USE_OPERATION_PREFIX .. requestId,
+			kind = _ItemStorage.KIND_COOKIE, score = 0, target = characterId, itemId = itemId})
+		if result == nil then
+			self:ReceiveIntimacyUseResult(requestId, self.USE_RETRY, userId)
+			return
+		end
+		self:ApplyInventoryState(userId, result.tData)
+		if result.receipt == nil then
+			self:ReceiveIntimacyUseResult(requestId, self.USE_REJECTED, userId)
+			return
+		end
+		local tAfter = _CharacterManager:ServerGetCharacterById(characterId)
+		if tAfter ~= nil then
+			_CharacterManager:QueueNewIntimacyEpisodes(characterId, tBefore.maxIntimacyReached, tAfter.maxIntimacyReached)
+			_CharacterManager:FlushPendingNewIntimacyEpisodes()
+			_CharacterManager:PushCharactersToClient(userId)
+		end
+		self:ReceiveIntimacyUseResult(requestId, self.USE_APPLIED, userId)
+	end
+
+	@ExecSpace("Client")
+	method void ResetIntimacyUseState()
+		-- 전체 데이터 초기화 시 이전 소비 요청과 재시도 대기 해제
+		local request = self.tIntimacyRequest
+		if request ~= nil and request.timerId ~= nil then _TimerService:ClearTimer(request.timerId) end
+		self.tIntimacyRequest = nil
+	end
+
+	@ExecSpace("Client")
+	method void ReceiveIntimacyUseResult(string requestId, string result)
+		-- 응답 대기 해제와 친밀도 사용 결과 이벤트 전달
+		local request = self.tIntimacyRequest
+		if request == nil or request.id ~= requestId then return end
+		if request.timerId ~= nil then _TimerService:ClearTimer(request.timerId) end
+		request.timerId = nil
+		request.pending = false
+		if result ~= self.USE_RETRY then self.tIntimacyRequest = nil end
+		local event = ItemChangedEvent()
+		event.revision = self.revision
+		event.useRequestId = requestId
+		event.usedItemId = request.itemId
+		event.useResult = result
+		self:SendEvent(event)
+	end
+
+	method boolean IsFanPresentEnabled(string itemId)
+		-- 보유한 팬 선물은 별도 OFF 기록이 없으면 기본 활성화
+		local tItem = _ItemMaster:GetItemById(itemId)
+		if _ItemMaster:IsFanPresent(tItem) == false then return false end
+		if self:IsServer() then
+			if self:IsItemsLoaded() == false or self:ServerHasItem(itemId) == false then return false end
+		elseif self:ClientHasItem(itemId) == false then return false end
+		for _, disabledId in ipairs(self.disabledFanItemIds) do if disabledId == itemId then return false end end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SetFanPresentEnabled(string itemId, boolean enabled)
+		-- 서버 보유 여부와 타입을 검증하고 명시적인 상태값으로 중복 요청의 토글 반전 방지
+		if self:IsItemsLoaded() == false or self:ServerHasItem(itemId) == false or _ItemMaster:IsFanPresent(_ItemMaster:GetItemById(itemId)) == false then return false end
+		if self:IsFanPresentEnabled(itemId) == enabled then return true end
+		_TagTrainingManager:GetState()
+		local beforeBonuses = _ItemEffectLogic:GetFanBaseStatBonuses()
+		for index = #self.disabledFanItemIds, 1, -1 do if self.disabledFanItemIds[index] == itemId then table.remove(self.disabledFanItemIds, index) end end
+		if enabled == false then table.insert(self.disabledFanItemIds, itemId) end
+		self.revision = self.revision + 1
+		self:RefreshFanBaseStatBonuses(beforeBonuses)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RefreshFanBaseStatBonuses(table beforeBonuses)
+		-- 팬 선물 보유·활성화에 따른 정률과 정액 변화만 진행 중인 육성에 반영
+		local afterBonuses = _ItemEffectLogic:GetFanBaseStatBonuses()
+		local flatDelta = afterBonuses.flat - beforeBonuses.flat
+		_TagTrainingManager:RefreshPassiveBonus(afterBonuses.percent - beforeBonuses.percent, flatDelta)
+	end
+
+	@ExecSpace("Server")
+	method void RequestSetFanPresentEnabled(string itemId, boolean enabled)
+		-- 요청자 소유 팬 선물의 효과 상태를 저장하고 최신 상태를 응답
+		if self:CanUseItems(senderUserId) == false then self:NotifyEffectResult(false, senderUserId); return end
+		local applied = self:SetFanPresentEnabled(itemId, enabled)
+		if applied then
+			self:SaveItemsToStorage()
+			_CharacterManager:SaveCharactersToStorage()
+		end
+		self:PushItemsToClient(senderUserId)
+		if _CharacterManager:CanUseCharacters(senderUserId) then _CharacterManager:PushCharactersToClient(senderUserId) end
+		self:NotifyEffectResult(applied, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestItemSnapshot()
+		-- 재시도와 늦은 초기화를 위해 보유 아이템·효과 설정 재전송
+		if senderUserId ~= self.currentUserId or _UserDataManager.isResetInProgress then return end
+		if not self:IsItemsLoaded() then
+			local now = _UtilLogic.ServerElapsedSeconds
+			if now - self.lastLoadRetryAt < 5 then return end
+			self.lastLoadRetryAt = now
+			self:LoadItems()
+		end
+		if self:IsItemsLoaded() then self:PushItemsToClient(senderUserId) end
+	end
+
+	@ExecSpace("Client")
+	method void NotifyEffectResult(boolean applied)
+		-- 서버 결과를 앨범의 대기 해제와 실패 안내에 연결
+		_SmartPhoneAlbumAppLogic:ApplyEffectResult(applied)
+	end
+
+
+end

@@ -1,0 +1,153 @@
+---@description "럭키 큐브 서버 추첨과 선택 검증 로직"
+@Logic
+script MiniGameLuckyCubeServerHandler extends Logic
+	@ExecSpace("ServerOnly")
+	method void Configure(any tSession, any preset)
+		-- 세션별 주사위와 선택 상태 분리
+		local tState = MiniGameLuckyCubeState()
+		tState.bet = tSession.settlement.amount
+		tState.entryCurrency = tSession.settlement.inputCurrency
+		tState.entryAmount = tSession.settlement.debitAmount or tSession.settlement.amount
+		tState.isDebug = tSession.settlement.isDebug == true
+		if tState.isDebug then
+			local entry = preset.settlementRule
+			tState.mesoBalance = math.floor(_MiniGameSettlementRule.DEBUG_TEST_BALANCE * entry.entryMeso / entry.entryCoin)
+		end
+		tSession.tModeState = tState
+		self:RefreshBalances(tSession)
+		tState.coinBalanceBeforeRound = tState.coinBalance
+		tState.coinChange = 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method void RefreshBalances(any tSession)
+		-- 두 재화의 서버 확정 잔액과 한 판 코인 순변화를 같은 스냅샷에 반영
+		local tState = tSession.tModeState
+		tState.coinBalance = math.max(0, math.floor(tSession.settlement.balance or 0))
+		if not tState.isDebug then
+			local progress = _ProgressManager:ServerGetProgress()
+			if progress ~= nil then
+				tState.mesoBalance = math.max(0, math.floor(progress.meso or 0))
+				tState.coinBalance = math.max(0, math.floor(progress.nightMarketCoin or 0))
+			end
+		end
+		tState.coinChange = tState.coinBalance - tState.coinBalanceBeforeRound
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RequiresPreparation()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetLaunchCommandPayload(any tSession)
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetProgress(any tSession)
+		return tSession.tModeState ~= nil and tSession.tModeState.revealed / 3 or 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean AcceptsClientResult(any tSession)
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HandlesFinishedFeedback()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushState(any tSession)
+		-- 미공개 숫자를 제외한 단계별 상태 전달
+		self:RefreshBalances(tSession)
+		tSession.tModeState.revision = tSession.tModeState.revision + 1
+		_MiniGameManager:PushLuckyCubeState(tSession.id, tSession.tModeState:ToPlainTable(), tSession.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleChoice(any tSession, string choice)
+		-- 허용된 족보와 단계만 승인, 변경 선택 확정 후 재변경 차단
+		local rule = _MiniGameLuckyCubeRule
+		local tState = tSession.tModeState
+		if tState == nil or rule:FindChoice(choice) == nil then return end
+		if tState.stage == rule.STAGE_READY then
+			tState.stage = rule.STAGE_PENDING
+			if not _MiniGameSettlementRule:TryReserve(tSession.settlement, tSession.userId) then
+				tState.stage = rule.STAGE_READY
+				self:PushState(tSession)
+				return
+			end
+			tState.initialChoice = choice
+			tState.choice = choice
+			if tState.isDebug and tState.entryCurrency == _MiniGameSettlementRule.CURRENCY_MESO then
+				tState.mesoBalance = math.max(0, tState.mesoBalance - tState.entryAmount)
+			end
+			tState.first = _UtilLogic:RandomIntegerRange(1, 6)
+			tState.second = _UtilLogic:RandomIntegerRange(1, 6)
+			tState.third = _UtilLogic:RandomIntegerRange(1, 6)
+			tState.stage = rule.STAGE_ROLLING
+			tState.elapsed = 0
+			tSession.status = _MiniGameSessionService.SESSION_STATUS_RUNNING
+			log("[LuckyCube] 판돈 차감 session=" .. tSession.id .. " bet=" .. tostring(tState.bet))
+		elseif tState.stage == rule.STAGE_DECISION then
+			tState.choice = choice
+			tState.stage = rule.STAGE_ROLLING
+			tState.elapsed = 0
+		else
+			return
+		end
+		self:PushState(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateSession(any tSession, number delta)
+		-- 서버 시간으로 주사위 공개와 선택 대기 진행
+		local tState = tSession.tModeState
+		local rule = _MiniGameLuckyCubeRule
+		if tState == nil then return end
+		if tState.stage ~= rule.STAGE_ROLLING then return end
+		tState.elapsed = tState.elapsed + math.max(0, delta)
+		if tState.elapsed < rule.ROLL_SECONDS then return end
+		tState.elapsed = 0
+		tState.revealed = tState.revealed + 1
+		if tState.revealed == 2 then
+			tState.stage = rule.STAGE_DECISION
+		elseif tState.revealed == 3 then
+			self:Finish(tSession)
+			return
+		end
+		self:PushState(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Finish(any tSession)
+		-- 서버 족보 판정과 배당 지급 후 공통 결과 이벤트 발송
+		local tState = tSession.tModeState
+		local rule = _MiniGameLuckyCubeRule
+		tState.stage = rule.STAGE_PENDING
+		tState.isWin = rule:IsWin(tState.choice, tState.first, tState.second, tState.third)
+		tState.multiplierTenths = rule:GetMultiplierTenths(tState.choice, tState.initialChoice)
+		tState.payout = tState.isWin and rule:GetPayout(tState.bet, tState.multiplierTenths) or 0
+		if not _MiniGameSettlementRule:TrySettle(tSession.settlement, tState.payout, tSession.userId) then
+			log_error("[LuckyCube] 배당 정산 실패 session=" .. tSession.id)
+			_MiniGameSessionService:AbortSession(tSession, _MiniGameSessionService.SESSION_REASON_CANCEL)
+			return
+		end
+		tState.stage = rule.STAGE_RESULT
+		self:PushState(tSession)
+		local tResult = MiniGameResultData()
+		tResult.success = tState.isWin
+		tResult.score = tState.payout
+		tResult.progress = 1
+		tResult.reason = _MiniGameSessionService.SESSION_REASON_OBJECTIVE
+		_MiniGameSessionService:ConfirmSessionResult(tSession, tResult)
+		log("[LuckyCube] 정산 완료 session=" .. tSession.id
+			.. " choice=" .. tState.choice
+			.. " dice=" .. tostring(tState.first) .. "," .. tostring(tState.second) .. "," .. tostring(tState.third)
+			.. " sum=" .. tostring(tState.first + tState.second + tState.third)
+			.. " win=" .. tostring(tState.isWin) .. " payout=" .. tostring(tState.payout))
+	end
+end

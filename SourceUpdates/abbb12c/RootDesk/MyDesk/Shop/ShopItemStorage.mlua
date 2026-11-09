@@ -1,0 +1,500 @@
+-- ShopItemManager가 사용하는 서버 권위 상점 구매 소유 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script ShopItemStorage extends Logic
+
+	property string shopItemStorageKey = "shopItemOwnershipData"
+	property string CONSUMABLE_PURCHASE_KEY = "pendingShopConsumableGrant"
+
+	property integer currentSaveVersion = 1
+	property string INITIALIZATION_MEMORY_NAME = "ShopOwnershipInitialization"
+	property string INITIALIZATION_VARIABLE_PREFIX = "Init_"
+	property any initializationMemory = nil
+
+	property string loadedShopItemsString = ""
+
+	property boolean canSaveShopItems = false
+
+	property boolean isShopItemsSaveInProgress = false
+
+	property string pendingShopItemsUserId = ""
+
+	property string pendingShopItemsString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadShopItems(string userId)
+		-- UserDataStorage에서 상점 구매 소유 저장 문자열을 읽고, 없으면 빈 목록을 반환합니다.
+		if userId == nil or userId == "" then
+			log_warning("[ShopItemStorage] userId is required")
+			self.loadedShopItemsString = ""
+			self.canSaveShopItems = false
+			return nil
+		end
+
+		if not _DiamondWalletLogic:WaitForShopRecovery(userId) then
+			self.canSaveShopItems = false
+			return nil
+		end
+		local userStorage = _DataStorageService:GetUserDataStorage(userId)
+		if not self:RecoverConsumablePurchase(userStorage) then
+			self.canSaveShopItems = false
+			return nil
+		end
+		local errorCode, storedShopItemsString = userStorage:GetAndWait(self.shopItemStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(errorCode) then
+			self.loadedShopItemsString = ""
+			self.canSaveShopItems = true
+			return {}
+		end
+
+		if _DataStorageErrorUtil:IsOk(errorCode) == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.loadedShopItemsString = ""
+			self.canSaveShopItems = false
+			return nil
+		end
+
+		if storedShopItemsString == nil or storedShopItemsString == "" then
+			self.loadedShopItemsString = ""
+			self.canSaveShopItems = true
+			return {}
+		end
+
+		local loadedShopItemIds = self:CreateShopItemIdsFromString(storedShopItemsString)
+		if loadedShopItemIds == nil then
+			log_warning("[ShopItemStorage] shop item load failed invalid save string, userId=" .. tostring(userId))
+			self.loadedShopItemsString = storedShopItemsString
+			self.canSaveShopItems = false
+			return nil
+		end
+
+		self.loadedShopItemsString = storedShopItemsString
+		self.canSaveShopItems = true
+		return loadedShopItemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveShopItemsAsync(string userId, any shopItemIds)
+		-- 보유 상점 아이템 id 목록을 v1 저장 문자열로 바꿔 비동기 저장을 요청합니다.
+		if self.canSaveShopItems == false then
+			log_warning("[ShopItemStorage] shop item save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[ShopItemStorage] userId is required")
+			return
+		end
+
+		local shopItemsString = self:CreateShopItemsStringFromShopItemIds(shopItemIds)
+		if shopItemsString == "" then
+			log_warning("[ShopItemStorage] shopItemIds are invalid")
+			return
+		end
+
+		-- 저장 중 원래 값으로 되돌린 요청도 최신 스냅샷으로 보존
+		self.pendingShopItemsUserId = userId
+		self.pendingShopItemsString = shopItemsString
+		if self.isShopItemsSaveInProgress then return end
+		self:CheckPendingShopItemsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveShopItemsStringAsync(string userId, string shopItemsString)
+		-- 직렬화된 상점 소유 문자열을 UserDataStorage에 비동기로 저장합니다.
+		self.isShopItemsSaveInProgress = true
+
+		local ok, errorMessage = pcall(function()
+			local userStorage = _DataStorageService:GetUserDataStorage(userId)
+			userStorage:SetAsync(self.shopItemStorageKey, shopItemsString, function(errorCode, key)
+				self:OnShopItemsSaveCompleted(userId, shopItemsString, errorCode)
+			end)
+		end)
+		if not ok then
+			log_error("[ShopItemStorage] save exception userId=" .. tostring(userId) .. " error=" .. tostring(errorMessage))
+			self:OnShopItemsSaveCompleted(userId, shopItemsString, -1)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnShopItemsSaveCompleted(string userId, string shopItemsString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청이 있으면 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+			self.isShopItemsSaveInProgress = false
+			-- 자동 반복 재시도 없이 최신 실패 데이터를 다음 저장 요청까지 유지
+			if self.pendingShopItemsString == "" then
+				self.pendingShopItemsUserId = userId
+				self.pendingShopItemsString = shopItemsString
+			end
+			return
+		else
+			self.loadedShopItemsString = shopItemsString
+		end
+
+		self.isShopItemsSaveInProgress = false
+		self:CheckPendingShopItemsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingShopItemsSave()
+		-- 대기 중인 최신 상점 소유 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if not self.canSaveShopItems or self.isShopItemsSaveInProgress or self.pendingShopItemsString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingShopItemsUserId
+		local pendingShopItemsString = self.pendingShopItemsString
+		self.pendingShopItemsUserId = ""
+		self.pendingShopItemsString = ""
+
+		if pendingShopItemsString == self.loadedShopItemsString then
+			return
+		end
+
+		self:SaveShopItemsStringAsync(pendingUserId, pendingShopItemsString)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean WaitForPendingShopItemsSave()
+		-- 기존 소유 목록 저장이 끝난 뒤 구매의 원자적 저장 진입
+		if not self.canSaveShopItems then return false end
+		if not self.isShopItemsSaveInProgress then self:CheckPendingShopItemsSave() end
+		local deadline = _UtilLogic.ServerElapsedSeconds + _ProgressStorage.CONFIRMED_SAVE_WAIT_SECONDS
+		while self.isShopItemsSaveInProgress do
+			if _UtilLogic.ServerElapsedSeconds >= deadline then return false end
+			wait(0.1)
+		end
+		return self.canSaveShopItems and self.pendingShopItemsString == ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean SavePurchaseConfirmed(string userId, string progressString, table shopItemIds)
+		-- 잔액과 치장 소유권을 한 번에 저장하고 불명 결과는 재조회로만 판정
+		if userId == nil or userId == "" or userId ~= _ShopItemManager.currentUserId
+			or userId ~= _ProgressManager.currentUserId or progressString == ""
+			or not _ProgressManager.confirmedCurrencyWrite
+			or not _DiamondWalletLogic:IsInitializedForUser(userId) then return false end
+		local shopItemsString = self:CreateShopItemsStringFromShopItemIds(shopItemIds)
+		local characterIds = _ShopItemManager.purchaseCharacterIds or {}
+		local charactersString = ""
+		if #characterIds > 0 then
+			if not _CharacterStorage:WaitForPendingCharactersSave() then return false end
+			charactersString = _CharacterStorage:CreateShopCharacterSnapshot(characterIds)
+			if charactersString == "" then return false end
+		end
+		if shopItemsString == "" or not self:WaitForPendingShopItemsSave()
+			or not _ProgressStorage:WaitForPendingProgressSave() then return false end
+
+		self.isShopItemsSaveInProgress = true
+		if charactersString ~= "" then _CharacterStorage.isCharactersSaveInProgress = true end
+		_ProgressStorage.IsProgressSaveInProgress = true
+		local ok, confirmed = pcall(function()
+			local storage = _DataStorageService:GetUserDataStorage(userId)
+			local keyValues = {
+				[_ProgressStorage.ProgressStorageKey] = progressString,
+				[self.shopItemStorageKey] = shopItemsString
+			}
+			if charactersString ~= "" then keyValues[_CharacterStorage.charactersStorageKey] = charactersString end
+			local grants = _ShopItemManager.purchaseConsumableGrants
+			if next(grants) ~= nil then
+				keyValues[self.CONSUMABLE_PURCHASE_KEY] = _HttpService:JSONEncode({
+					id = _ShopItemManager.purchaseOperationId, grants = grants
+				})
+			end
+			local code, savedKeys = storage:TransactSetAndWait(keyValues)
+			if code == 0 then return true end
+			_DataStorageErrorUtil:LogWarning(code, userId)
+			return self:AreValuesStored(storage, keyValues)
+		end)
+		self.isShopItemsSaveInProgress = false
+		_ProgressStorage.IsProgressSaveInProgress = false
+		if charactersString ~= "" then _CharacterStorage.isCharactersSaveInProgress = false end
+		if not ok or not confirmed then
+			-- 늦게 완료될 수 있는 저장을 이전 캐시로 되돌리는 요청 금지
+			self.canSaveShopItems = false
+			_ProgressStorage.CanSaveProgress = false
+			if charactersString ~= "" then
+				_CharacterStorage.canSaveCharacters = false
+				_CharacterManager.isCharacterArchiveLoaded = false
+			end
+			log_warning("[ShopItemStorage] purchase confirmation failed; writes blocked until reload userId=" .. tostring(userId))
+			return false
+		end
+		self.loadedShopItemsString = shopItemsString
+		if charactersString ~= "" then _CharacterStorage.loadedCharactersString = charactersString end
+		_ProgressStorage.LastLoadedProgressString = progressString
+		log("[ShopItemStorage] purchase durable itemCount=" .. tostring(#shopItemIds))
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsPurchaseSnapshotStored(any storage, string progressString, string shopItemsString)
+		-- 기존 호출부의 구매 스냅샷 검증 경로 유지
+		return self:AreValuesStored(storage, {
+			[_ProgressStorage.ProgressStorageKey] = progressString,
+			[self.shopItemStorageKey] = shopItemsString })
+	end
+	@ExecSpace("ServerOnly")
+	method any CreateShopItemIdsFromString(string shopItemsString)
+		-- 저장 문자열을 보유 상점 아이템 id 목록으로 복원합니다.
+		local ok, tFlatPlainTable = pcall(function()
+			return _UtilLogic:StringToTable(shopItemsString)
+		end)
+
+		if ok == false or tFlatPlainTable == nil then
+			log_warning("[ShopItemStorage] shop item save string parse failed")
+			return nil
+		end
+
+		return self:CreateShopItemIdsFromFlatPlainTable(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateShopItemsStringFromShopItemIds(any shopItemIds)
+		-- 보유 상점 아이템 id 목록을 DataStorage에 넣을 v1 저장 문자열로 만듭니다.
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return ""
+		end
+
+		local normalizedShopItemIds = self:CreateNormalizedShopItemIds(shopItemIds)
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.shopItemCount = #normalizedShopItemIds
+
+		for index, shopItemId in ipairs(normalizedShopItemIds) do
+			local suffix = tostring(index)
+			tFlatPlainTable["shopItemId" .. suffix] = shopItemId
+		end
+
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateShopItemIdsFromFlatPlainTable(any tFlatPlainTable)
+		-- 문자열에서 복원한 flat plain table의 버전을 확인하고 보유 상점 아이템 id 목록으로 정규화합니다.
+		if tFlatPlainTable == nil or type(tFlatPlainTable) ~= "table" then
+			return nil
+		end
+
+		local saveVersion = self:NormalizeInteger(tFlatPlainTable.saveVersion, 0, 0)
+		if saveVersion == 0 or saveVersion == 1 then
+			return self:CreateShopItemIdsFromFlatPlainTableV1(tFlatPlainTable)
+		end
+
+		log_warning("[ShopItemStorage] unsupported shop item saveVersion=" .. tostring(saveVersion))
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateShopItemIdsFromFlatPlainTableV1(any tFlatPlainTable)
+		-- v1 flat plain table을 보유 상점 아이템 id 목록으로 정규화합니다.
+		local shopItemCount = self:NormalizeInteger(tFlatPlainTable.shopItemCount, 0, 0)
+		local shopItemIds = {}
+
+		for index = 1, shopItemCount do
+			local shopItemId = self:NormalizeString(tFlatPlainTable["shopItemId" .. tostring(index)], "")
+			self:AddShopItemIdIfValid(shopItemIds, shopItemId)
+		end
+
+		return shopItemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateNormalizedShopItemIds(any shopItemIds)
+		-- 서버 권위 보유 상점 아이템 id 목록에서 빈 값과 중복을 제거한 목록을 만듭니다.
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return nil
+		end
+
+		local normalizedShopItemIds = {}
+
+		for _, shopItemId in ipairs(shopItemIds) do
+			self:AddShopItemIdIfValid(normalizedShopItemIds, shopItemId)
+		end
+
+		return normalizedShopItemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddShopItemIdIfValid(any shopItemIds, string shopItemId)
+		-- 저장 목록에 빈 값과 중복을 제외한 shopItemId만 추가합니다.
+		if shopItemIds == nil or type(shopItemIds) ~= "table" then
+			return
+		end
+
+		local normalizedShopItemId = self:NormalizeString(shopItemId, "")
+		if normalizedShopItemId == "" then
+			return
+		end
+
+		for _, ownedShopItemId in ipairs(shopItemIds) do
+			if ownedShopItemId == normalizedShopItemId then
+				return
+			end
+		end
+
+		table.insert(shopItemIds, normalizedShopItemId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean AreValuesStored(any storage, table keyValues)
+		-- 원자적 저장 결과가 불명확할 때 모든 대상 키 재조회
+		local keys = {}
+		for key, _ in pairs(keyValues) do table.insert(keys, key) end
+		local code, pages = storage:BatchGetAndWait(keys)
+		if code ~= 0 or pages == nil then return false end
+		local stored = {}
+		while true do
+			for _, entry in ipairs(pages:GetCurrentPageDatas() or {}) do stored[entry.KeyInfo.Key] = entry.Value end
+			if pages.IsLastPage then break end
+			if pages:LoadNextPageAndWait() ~= 0 then return false end
+			pages:MoveToNextPageAndWait()
+		end
+		for key, value in pairs(keyValues) do if stored[key] ~= value then return false end end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean PrepareDiamondShopPurchase(string userId, table characterIds)
+		-- 첫 구매의 빈 저장 키만 생성하고 기존 키는 덮어쓰지 않음
+		if not self:WaitForPendingShopItemsSave() then return false end
+		if #characterIds > 0 and not _CharacterStorage:WaitForPendingCharactersSave() then return false end
+		if self.initializationMemory == nil then
+			local code, memory = _WorldInstanceService:GetSharedMemory(self.INITIALIZATION_MEMORY_NAME)
+			if code ~= SharedMemoryResultCode.OK then return false end
+			self.initializationMemory = memory
+		end
+		local variableName = self.INITIALIZATION_VARIABLE_PREFIX .. userId
+		if #variableName > 100 or string.match(variableName, "^[%w_%-]+$") == nil then return false end
+		local claim = self.initializationMemory:CreateVariableAndWait(variableName, _UtilLogic:NewGuid())
+		if claim.Code ~= SharedMemoryResultCode.OK then return false end
+		local isSeedWriteUncertain = false
+		local ok, initialized = pcall(function()
+			local storage = _DataStorageService:GetUserDataStorage(userId)
+			local seeds = { [self.shopItemStorageKey] = self:CreateShopItemsStringFromShopItemIds(_ShopItemManager.ownedShopItemIds) }
+			if #characterIds > 0 then
+				seeds[_CharacterStorage.charactersStorageKey] = _CharacterStorage:CreateShopCharacterSnapshot({})
+			end
+			for key, seed in pairs(seeds) do
+				if seed == "" then return false end
+				local code, raw = storage:GetAndWait(key)
+				if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and (raw == nil or raw == "")) then
+					isSeedWriteUncertain = true
+					local saved = storage:SetAndWait(key, seed)
+					if saved ~= 0 and not self:AreValuesStored(storage, { [key] = seed }) then return false end
+					isSeedWriteUncertain = false
+				elseif code ~= 0 or type(raw) ~= "string" then
+					return false
+				end
+			end
+			return true
+		end)
+		if isSeedWriteUncertain then
+			_DiamondWalletLogic:BlockPendingShopWrites(userId)
+			log_warning("[ShopItemStorage] initialization write unknown; lock retained until session ends user=" .. userId)
+			return false
+		end
+		local release = self.initializationMemory:ReleaseVariableAndWait(variableName)
+		if release ~= SharedMemoryResultCode.OK then log_warning("[ShopItemStorage] initialization lock release failed") end
+		return ok and initialized
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RecoverConsumablePurchase(any storage)
+		-- 재화 차감과 함께 저장된 지급 지시를 재접속·재시도 때 복구
+		local code, raw = storage:GetAndWait(self.CONSUMABLE_PURCHASE_KEY)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and (raw == nil or raw == "")) then return true end
+		if code ~= 0 then return false end
+		local ok, purchase = pcall(function() return _HttpService:JSONDecode(raw) end)
+		if not ok or type(purchase) ~= "table" or type(purchase.id) ~= "string"
+			or not _ItemStorage:IsValidGrantCounts(purchase.grants) then return false end
+		if not _ItemManager:GrantConsumablesWithCommit(storage.UserId, purchase.id, purchase.grants) then return false end
+		local cleared = storage:UpdateAndWait(self.CONSUMABLE_PURCHASE_KEY, raw, "")
+		if cleared == 0 then return true end
+		local readCode, latest = storage:GetAndWait(self.CONSUMABLE_PURCHASE_KEY)
+		return _DataStorageErrorUtil:IsNotFound(readCode) or (readCode == 0 and (latest == nil or latest == ""))
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean DeliverDiamondShopPurchase(any storage, DiamondWalletOperationData tOperation)
+		-- 차감과 함께 영속된 지급 지시를 멱등 CAS로 복구
+		local userId = storage.UserId
+		if _ShopItemManager.currentUserId == userId then
+			if self.isShopItemsSaveInProgress or self.pendingShopItemsString ~= "" then return false end
+			if #tOperation.characterIds > 0 and (_CharacterStorage.isCharactersSaveInProgress
+				or _CharacterStorage.pendingCharactersString ~= "") then return false end
+		end
+		if #tOperation.characterIds > 0 and not self:ApplyDiamondGrantToKey(storage,
+			_CharacterStorage.charactersStorageKey, tOperation, true) then return false end
+		if #tOperation.shopItemIds > 0 and not self:ApplyDiamondGrantToKey(storage, self.shopItemStorageKey, tOperation, false) then return false end
+		return next(tOperation.consumableGrants) == nil
+			or _ItemManager:GrantConsumablesWithCommit(userId, tOperation.operationId, tOperation.consumableGrants)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean ApplyDiamondGrantToKey(any storage, string key, DiamondWalletOperationData tOperation, boolean isCharacter)
+		-- 경합 및 시간 초과 시 최신 저장을 다시 읽고 동일 보유 표식 재적용
+		for attempt = 1, _DiamondWalletStorage.MAX_ATTEMPTS do
+			local code, raw = storage:GetAndWait(key)
+			if code ~= 0 or type(raw) ~= "string" or raw == "" then return false end
+			local nextRaw = ""
+			if isCharacter then
+				nextRaw = _CharacterStorage:UnlockShopCharactersInString(raw, tOperation.characterIds)
+			else
+				local ids = self:CreateShopItemIdsFromString(raw)
+				if ids == nil then return false end
+				for _, id in ipairs(tOperation.shopItemIds) do self:AddShopItemIdIfValid(ids, id) end
+				nextRaw = self:CreateShopItemsStringFromShopItemIds(ids)
+			end
+			if nextRaw == "" then return false end
+			local savedCode = 0
+			if raw ~= nextRaw then savedCode = storage:UpdateAndWait(key, raw, nextRaw) end
+			if savedCode == 0 then
+				if _ShopItemManager.currentUserId == storage.UserId then
+					if isCharacter then _CharacterStorage.loadedCharactersString = nextRaw
+					else self.loadedShopItemsString = nextRaw end
+				end
+				return true
+			end
+			if savedCode ~= _DiamondWalletStorage.UPDATE_CONFLICT_CODE and savedCode ~= _DataStorageErrorUtil.TimedOut then return false end
+		end
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsShopInitializationReady(string userId)
+		-- 불명확한 최초 저장의 늦은 완료와 후속 구매 충돌 방지
+		if self.initializationMemory == nil then
+			local code, memory = _WorldInstanceService:GetSharedMemory(self.INITIALIZATION_MEMORY_NAME)
+			if code ~= SharedMemoryResultCode.OK then return false end
+			self.initializationMemory = memory
+		end
+		local variableName = self.INITIALIZATION_VARIABLE_PREFIX .. userId
+		if #variableName > 100 or string.match(variableName, "^[%w_%-]+$") == nil then return false end
+		local result = self.initializationMemory:GetVariableAndWait(variableName)
+		return result.Code == SharedMemoryResultCode.NotFound
+	end
+
+end

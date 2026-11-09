@@ -1,0 +1,394 @@
+---@description "미니게임의 시작 비용 검증과 결과 정산을 유형별로 처리"
+@Logic
+script MiniGameSettlementRule extends Logic
+
+	property string AMOUNT_MODE_FIXED = "Fixed"
+	property string CURRENCY_MESO = "meso"
+	property string CURRENCY_NIGHT_MARKET_COIN = "nightMarketCoin"
+	property string STATUS_VALIDATED = "validated"
+	property string STATUS_SETTLED = "settled"
+	property string STATUS_CANCELLED = "cancelled"
+	property string STATUS_RESERVED = "reserved"
+	property string STATUS_PROCESSING = "processing"
+	property string TEXT_UI_ENTRY_BALANCE = "ui.dalgona.balance"
+	property string ENTRY_CURRENCY_ICON_SLOT = "IconSlot"
+	property string ENTRY_CURRENCY_ICON = "Icon"
+	property string ENTRY_CURRENCY_AMOUNT = "Amount"
+	property string ENTRY_CURRENCY_LABEL = "Label"
+	property string ENTRY_CURRENCY_BALANCE_ROW = "EntryBalance"
+	property integer DEBUG_TEST_BALANCE = 1000
+	property string MESO_ICON_RUID = "224bf515c09b4be4b9874aa6e868312c"
+	property string NIGHT_MARKET_COIN_ICON_RUID = "d731d51e16e44eff8bf68becf3bb7f2a"
+
+	method boolean Supports(integer settlementType)
+		-- 공통 정산 규칙이 인식하는 유형 여부 확인
+		return _EMiniGameSettlementType:IsValid(settlementType)
+	end
+
+	method string GetBetCurrency(integer settlementType)
+		-- 베팅 유형에 대응하는 재화 키 반환
+		if settlementType == _EMiniGameSettlementType.MesoBet then
+			return self.CURRENCY_MESO
+		end
+		if settlementType == _EMiniGameSettlementType.CoinBet then
+			return self.CURRENCY_NIGHT_MARKET_COIN
+		end
+		return ""
+	end
+
+	method boolean IsValidBetCurrencies(integer settlementType, string inputCurrency, string outputCurrency)
+		-- 메소 배당과 메소 입장 후 코인 배당 계약 구분
+		if settlementType == _EMiniGameSettlementType.MesoBet then
+			return inputCurrency == outputCurrency
+				and (inputCurrency == self.CURRENCY_MESO or inputCurrency == self.CURRENCY_NIGHT_MARKET_COIN)
+		end
+		if settlementType == _EMiniGameSettlementType.CoinBet then
+			return (inputCurrency == self.CURRENCY_MESO or inputCurrency == self.CURRENCY_NIGHT_MARKET_COIN)
+				and outputCurrency == self.CURRENCY_NIGHT_MARKET_COIN
+		end
+		return false
+	end
+
+	method string GetCurrencyLabelKey(string currency)
+		return currency == self.CURRENCY_NIGHT_MARKET_COIN and "ui.currency.night_market_coin" or "ui.currency.meso"
+	end
+
+	method string GetCurrencyIconRuid(string currency)
+		return currency == self.CURRENCY_NIGHT_MARKET_COIN and self.NIGHT_MARKET_COIN_ICON_RUID or self.MESO_ICON_RUID
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetEntryCurrencyRow(Entity row, string currency, integer amount)
+		-- 판돈과 보유량 행에 현재 재화 아이콘과 수량 표시
+		if not isvalid(row) then return end
+		local iconSlot = row:GetChildByName(self.ENTRY_CURRENCY_ICON_SLOT)
+		local iconEntity = iconSlot:GetChildByName(self.ENTRY_CURRENCY_ICON)
+		local icon = iconEntity.SpriteGUIRendererComponent
+		local ruid = self:GetCurrencyIconRuid(currency)
+		if icon.ImageRUID.DataId ~= ruid then
+			-- 야시장 코인 원본의 오른쪽 위 치우침과 크기 보정
+			local coin = currency == self.CURRENCY_NIGHT_MARKET_COIN
+			local size = coin and 34 or 40
+			local offset = coin and -20 or 0
+			iconEntity.UITransformComponent.RectSize = Vector2(size, size)
+			iconEntity.UITransformComponent.anchoredPosition = Vector2(offset, offset)
+			icon.ImageRUID = DataRef(ruid)
+		end
+		row:GetChildByName(self.ENTRY_CURRENCY_AMOUNT).TextGUIRendererComponent.Text = tostring(amount)
+		local label = row:GetChildByName(self.ENTRY_CURRENCY_LABEL)
+		if isvalid(label) then
+			if row.Name == self.ENTRY_CURRENCY_BALANCE_ROW then
+				local text = _LocaleTextUtil:Format(self.TEXT_UI_ENTRY_BALANCE, "", "", nil, nil)
+				label.TextGUIRendererComponent.Text = string.gsub(text, "%s+$", "")
+			else
+				label.TextGUIRendererComponent.Text = self:GetEntryCostLabel()
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetEntryCostLabel()
+		-- 공용 소모 라벨의 지원 언어별 표기
+		local locale = string.lower(_LocalizationService.CurrentLocaleId or "")
+		local language = string.sub(locale, 1, 2)
+		if language == "ko" then return "소모" end
+		if language == "zh" then return "消耗" end
+		return "Cost"
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetBetSliderInput(Entity track)
+		return track:GetChildByName("Input")
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RefreshBetSliderFill(Entity track, SliderComponent slider)
+		-- 채움 오른쪽 경계를 손잡이의 최대 위치에 맞춘 고정 너비 사용
+		local fill = track:GetChildByName("Fill")
+		local trackWidth = track.UITransformComponent.RectSize.x
+		local fillTransform = fill.UITransformComponent
+		local fillWidth = fillTransform.RectSize.x
+		local handleInset = (trackWidth - fillWidth) * 0.5 - fillTransform.anchoredPosition.x
+		local travel = trackWidth - handleInset * 2
+		local span = slider.MaxValue - slider.MinValue
+		local ratio = span > 0 and math.max(0, math.min(1, (slider.Value - slider.MinValue) / span)) or 0
+		fill.SpriteGUIRendererComponent.FillAmount = (fillWidth - travel * (1 - ratio)) / fillWidth
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBetSliderCurrency(SliderComponent slider, string currency)
+		local ruid = self:GetCurrencyIconRuid(currency)
+		if slider.HandleImageRUID.DataId ~= ruid then slider.HandleImageRUID = ruid end
+	end
+
+	method string ResolveEntryCurrency(any rule, integer mesoBalance)
+		-- 최소 메소 판돈을 낼 수 있을 때 메소 우선
+		if rule.allowCoinFallback == true and mesoBalance < rule.entryMeso then
+			return self.CURRENCY_NIGHT_MARKET_COIN
+		end
+		return rule.inputCurrency
+	end
+
+	method integer GetAffordableStake(any rule, string currency, integer mesoBalance, integer coinBalance)
+		if currency == self.CURRENCY_MESO then return math.floor(mesoBalance * rule.entryCoin / rule.entryMeso) end
+		return coinBalance
+	end
+
+	method integer GetEntryDebit(any rule, string currency, integer stake)
+		if currency == self.CURRENCY_MESO and rule.entryCoin ~= nil then return math.floor(stake * rule.entryMeso / rule.entryCoin) end
+		return stake
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateState(any preset, integer betAmount, string userId, boolean isBettingRequest)
+		-- 프리셋 정산 규칙과 서버 권위 잔액을 기준으로 세션 정산 상태 생성
+		if preset == nil then
+			return nil
+		end
+
+		local rule = preset.settlementRule or {}
+		local settlementType = rule.type or _EMiniGameSettlementType.None
+		if self:Supports(settlementType) == false then
+			return nil
+		end
+
+		local requiresBet = _EMiniGameSettlementType:IsBetting(settlementType)
+		if requiresBet ~= isBettingRequest then
+			log_warning("[MiniGameSettlementRule] start request mismatch type="
+				.. _EMiniGameSettlementType:ToName(settlementType))
+			return nil
+		end
+
+		if settlementType == _EMiniGameSettlementType.None then
+			return {
+				type = settlementType,
+				status = self.STATUS_VALIDATED,
+				amount = 0,
+				inputCurrency = "",
+				outputCurrency = ""
+			}
+		end
+
+		if _ProgressManager:CanUseProgress(userId) == false then
+			return nil
+		end
+
+		local amount = self:ResolveAmount(rule, betAmount)
+		if self:IsValidAmount(rule, amount) == false then
+			log_warning("[MiniGameSettlementRule] invalid amount type=" .. _EMiniGameSettlementType:ToName(settlementType)
+				.. " amount=" .. tostring(amount))
+			return nil
+		end
+
+		local progress = _ProgressManager:ServerGetProgress()
+		if progress == nil then
+			return nil
+		end
+
+		local inputCurrency = self:ResolveEntryCurrency(rule, progress.meso or 0) or ""
+		local outputCurrency = rule.outputCurrency or ""
+		if settlementType == _EMiniGameSettlementType.MesoBet and rule.allowCoinFallback == true then outputCurrency = inputCurrency end
+		if requiresBet and not self:IsValidBetCurrencies(settlementType, inputCurrency, outputCurrency) then return nil end
+		local debitAmount = self:GetEntryDebit(rule, inputCurrency, amount)
+		if settlementType == _EMiniGameSettlementType.MesoBet then amount = debitAmount end
+
+		local balance = 0
+		if inputCurrency == self.CURRENCY_MESO or inputCurrency == self.CURRENCY_NIGHT_MARKET_COIN then
+			balance = _ProgressManager:GetCurrencyBalance(inputCurrency)
+			if balance == nil then
+				return nil
+			end
+			if debitAmount > balance then
+				log_warning("[MiniGameSettlementRule] insufficient currency user=" .. tostring(userId)
+					.. " currency=" .. inputCurrency
+					.. " amount=" .. tostring(amount)
+					.. " balance=" .. tostring(balance))
+				return nil
+			end
+		end
+
+		if outputCurrency ~= "" then balance = _ProgressManager:GetCurrencyBalance(outputCurrency) end
+		if balance == nil then return nil end
+		return {
+			type = settlementType,
+			status = self.STATUS_VALIDATED,
+			amount = amount,
+			debitAmount = debitAmount,
+			inputCurrency = inputCurrency,
+			outputCurrency = outputCurrency,
+			creditAmount = 0,
+			balance = balance
+		}
+	end
+
+	method integer ResolveAmount(any rule, integer betAmount)
+		-- 고정 비용과 사용자 선택 판돈을 공통 금액으로 변환
+		if rule.amountMode == self.AMOUNT_MODE_FIXED then
+			return math.floor(rule.amount or 0)
+		end
+
+		return math.floor(betAmount or 0)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateDebugState(any preset, integer betAmount)
+		-- F6, F7 테스트용 가상 잔액 정산 상태 생성
+		if preset == nil then return nil end
+		if Environment:IsMakerPlay() and preset.gameKind == _EMiniGameKind.FISHING then
+			return {type = _EMiniGameSettlementType.FixedEntry, status = self.STATUS_VALIDATED,
+				amount = _MiniGameFishingRule.ENTRY_MESO, inputCurrency = self.CURRENCY_MESO,
+				outputCurrency = "", balance = _MiniGameFishingRule.ENTRY_MESO, isDebug = true}
+		end
+		local rule = preset.settlementRule or {}
+		local settlementType = rule.type or _EMiniGameSettlementType.None
+		local betCurrency = self:GetBetCurrency(settlementType)
+		if betCurrency == "" or not self:IsValidBetCurrencies(settlementType, rule.inputCurrency, rule.outputCurrency) then return nil end
+		local amount = self:ResolveAmount(rule, betAmount)
+		if self:IsValidAmount(rule, amount) == false then return nil end
+		local debitAmount = self:GetEntryDebit(rule, rule.inputCurrency, amount)
+		if settlementType == _EMiniGameSettlementType.MesoBet then amount = debitAmount end
+		return {
+			type = settlementType,
+			status = self.STATUS_VALIDATED,
+			amount = amount,
+			inputCurrency = rule.inputCurrency,
+			outputCurrency = rule.outputCurrency,
+			debitAmount = debitAmount,
+			creditAmount = 0,
+			balance = self.DEBUG_TEST_BALANCE,
+			isDebug = true
+		}
+	end
+
+	method boolean IsValidAmount(any rule, integer amount)
+		-- 최소값, 상한과 증가 단위를 기준으로 정산 금액 검증
+		if rule == nil or amount == nil then
+			return false
+		end
+
+		local minAmount = math.floor(rule.min or 0)
+		local amountStep = math.floor(rule.step or 1)
+		if amount < minAmount or amountStep <= 0 then
+			return false
+		end
+		if rule.max ~= nil and amount > math.floor(rule.max) then
+			return false
+		end
+
+		return (amount - minAmount) % amountStep == 0
+	end
+
+	method integer GetBetUnitCount(any rule, integer maximumAmount)
+		-- 잔액과 프리셋 상한 안에서 선택 가능한 최소 판돈 기준 단위 수 산출
+		if rule == nil then return 0 end
+		local minimum = math.floor(rule.min or 0)
+		local step = math.floor(rule.step or 1)
+		local maximum = math.floor(maximumAmount or 0)
+		if rule.max ~= nil then maximum = math.min(maximum, math.floor(rule.max)) end
+		if step <= 0 or maximum < minimum then return 0 end
+		return math.floor((maximum - minimum) / step) + 1
+	end
+
+	method integer GetBetAmountFromUnits(any rule, integer units)
+		-- 슬라이더 첫 단위를 최소 판돈에 대응시켜 금액으로 변환
+		if rule == nil or units < 1 then return 0 end
+		local step = math.floor(rule.step or 1)
+		if step <= 0 then return 0 end
+		return math.floor(rule.min or 0) + (units - 1) * step
+	end
+
+	method integer GetBetUnitsFromAmount(any rule, integer amount)
+		-- 유효한 판돈을 최소 판돈 기준 슬라이더 단위로 변환
+		if not self:IsValidAmount(rule, amount) then return 0 end
+		return math.floor((amount - math.floor(rule.min or 0)) / math.floor(rule.step or 1)) + 1
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TrySettle(any settlementState, integer creditAmount, string userId)
+		-- 검증된 정산 상태를 결과 금액으로 한 번만 반영
+		if settlementState == nil or (settlementState.status ~= self.STATUS_VALIDATED
+			and settlementState.status ~= self.STATUS_RESERVED) then
+			return false
+		end
+
+		if creditAmount == nil or creditAmount < 0 then
+			return false
+		end
+
+		local betCurrency = (self:GetBetCurrency(settlementState.type) ~= "" and settlementState.outputCurrency or "")
+		if betCurrency == "" then
+			log_warning("[MiniGameSettlementRule] settlement not implemented type="
+				.. _EMiniGameSettlementType:ToName(settlementState.type))
+			return false
+		end
+		if not self:IsValidBetCurrencies(settlementState.type, settlementState.inputCurrency, settlementState.outputCurrency) then
+			return false
+		end
+
+		local previousStatus = settlementState.status
+		if settlementState.inputCurrency ~= settlementState.outputCurrency and previousStatus ~= self.STATUS_RESERVED then return false end
+		local debit = previousStatus == self.STATUS_RESERVED and 0 or settlementState.amount
+		settlementState.status = self.STATUS_PROCESSING
+		if settlementState.isDebug == true then
+			settlementState.balance = math.max(0, math.floor(settlementState.balance or 0)
+				- debit + creditAmount)
+		elseif debit > 0 or creditAmount > 0 then
+			local isApplied = _ProgressManager:TryApplyCurrencyTransaction(
+				betCurrency,
+				debit,
+				creditAmount,
+				userId
+			)
+			if isApplied == false then
+				settlementState.status = previousStatus
+				return false
+			end
+		end
+		if settlementState.isDebug ~= true then
+			settlementState.balance = _ProgressManager:GetCurrencyBalance(betCurrency)
+		end
+
+		settlementState.creditAmount = creditAmount
+		settlementState.status = self.STATUS_SETTLED
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean TryReserve(any settlementState, string userId)
+		-- 결과 확정 전 판돈 선차감, 정산 중복 차감 방지
+		if settlementState == nil or settlementState.status ~= self.STATUS_VALIDATED then return false end
+		local betCurrency = (self:GetBetCurrency(settlementState.type) ~= "" and settlementState.outputCurrency or "")
+		if betCurrency == "" or not self:IsValidBetCurrencies(settlementState.type,
+			settlementState.inputCurrency, settlementState.outputCurrency) then return false end
+		local debitAmount = settlementState.debitAmount or settlementState.amount
+		settlementState.status = self.STATUS_PROCESSING
+		if settlementState.isDebug ~= true
+			and not _ProgressManager:TryApplyCurrencyTransaction(
+				settlementState.inputCurrency, debitAmount, 0, userId) then
+			settlementState.status = self.STATUS_VALIDATED
+			return false
+		end
+		if settlementState.isDebug == true then
+			if settlementState.inputCurrency == settlementState.outputCurrency then
+				settlementState.balance = settlementState.balance - debitAmount
+			end
+		else
+			settlementState.balance = _ProgressManager:GetCurrencyBalance(betCurrency)
+		end
+		settlementState.status = self.STATUS_RESERVED
+		log("[MiniGameEntry] currency=" .. settlementState.inputCurrency .. " debit=" .. tostring(debitAmount)
+			.. " stake=" .. tostring(settlementState.amount) .. " output=" .. settlementState.outputCurrency)
+		return true
+	end
+
+	method void Cancel(any settlementState)
+		-- 미정산 상태를 자산 변동 없이 취소
+		if settlementState == nil or (settlementState.status ~= self.STATUS_VALIDATED
+			and settlementState.status ~= self.STATUS_RESERVED) then
+			return
+		end
+
+		settlementState.status = self.STATUS_CANCELLED
+	end
+
+end

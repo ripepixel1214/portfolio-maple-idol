@@ -1,0 +1,588 @@
+-- ItemManager가 사용하는 서버 권위 아이템 소유 데이터를 UserDataStorage에서 불러오거나 저장합니다.
+@Logic
+script ItemStorage extends Logic
+
+	property string itemStorageKey = "itemOwnershipData"
+
+	property integer currentSaveVersion = 2
+	property integer INVENTORY_VERSION = 1
+	property integer MAX_STACK_COUNT = 2147483647
+	property integer MAX_INVENTORY_BYTES = 50000
+	property any tLoadedInventory = nil
+	-- 구버전 거래의 중복 지급 방지를 위한 영수증 키 호환
+	property string RECEIPT_PREFIX = "fishingTxn_"
+	property string RECEIPT_TAG = "fishing_transaction"
+	property string INITIALIZATION_MEMORY = "FishingRewardInitialization"
+	property string INITIALIZATION_PREFIX = "Init_"
+	property string KIND_REWARD = "reward"
+	property string KIND_COOKIE = "cookie"
+	property string KIND_GRANT = "inventoryGrant"
+	property string KIND_DRAW_EXCHANGE = "drawExchange"
+	property integer CONFLICT_CODE = 2000000
+	property integer MAX_ATTEMPTS = 6
+	property any initializationMemory = nil
+	property integer activeOperations = 0
+
+	property string loadedItemsString = ""
+	property any loadedDisabledFanItemIds = {}
+
+	property boolean canSaveItems = false
+
+	property boolean isItemsSaveInProgress = false
+
+	property string pendingItemsUserId = ""
+
+	property string pendingItemsString = ""
+
+	@ExecSpace("ServerOnly")
+	method any LoadItems(string userId)
+		-- 일반 보유권과 수량형 인벤토리를 같은 저장 키에서 복원
+		self.canSaveItems = false
+		self.tLoadedInventory = nil
+		self.loadedDisabledFanItemIds = {}
+		self.loadedItemsString = ""
+		if userId == nil or userId == "" then return nil end
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		local read = _ItemStorage:LoadOrCreate(storage)
+		if read == nil then return nil end
+		self.loadedItemsString = read.ownership
+		self.loadedDisabledFanItemIds = read.disabledIds
+		self.tLoadedInventory = read.tData
+		self.canSaveItems = true
+		return read.itemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ReadInventory(any storage)
+		-- 기존 flat 보유 데이터와 신규 인벤토리 저장 형식을 구분
+		local code, raw = storage:GetAndWait(self.itemStorageKey)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and (raw == nil or raw == "")) then
+			return {missing = true}
+		end
+		if code ~= 0 then
+			_DataStorageErrorUtil:LogWarning(code, storage.UserId)
+			return nil
+		end
+		local ownership = raw
+		local tData = nil
+		if string.sub(raw, 1, 1) == "{" then
+			local ok, payload = pcall(function() return _HttpService:JSONDecode(raw) end)
+			if ok and type(payload) == "table" and payload.inventoryVersion ~= nil then
+				if payload.inventoryVersion ~= self.INVENTORY_VERSION or type(payload.ownership) ~= "string" then return nil end
+				ownership = payload.ownership
+				tData = FishingRewardData()
+				if not tData:FromPlainTable(payload.inventory) or not self:MergeAlbumFragmentCounts(tData.countsByItemId) then return nil end
+			end
+		end
+		local decoded = self:DecodeOwnership(ownership)
+		if decoded == nil then return nil end
+		return {raw = raw, ownership = ownership, itemIds = decoded.itemIds, disabledIds = decoded.disabledIds, tData = tData}
+	end
+
+	@ExecSpace("ServerOnly")
+	method string EncodeInventory(string ownership, any tData)
+		-- 소유권 직렬화와 수량·친밀도·정산 상태를 하나의 값으로 저장
+		local raw = _HttpService:JSONEncode({inventoryVersion = self.INVENTORY_VERSION,
+			ownership = ownership, inventory = tData:ToPlainTable()})
+		if #raw > self.MAX_INVENTORY_BYTES then
+			log_warning("[Inventory] 저장 크기 초과")
+			return ""
+		end
+		return raw
+	end
+
+	method boolean IsValidStackCount(any count)
+		-- 저장과 상품 지급에 공통 적용하는 수량 범위
+		return type(count) == "number" and count >= 0 and count <= self.MAX_STACK_COUNT and count % 1 == 0
+	end
+
+	method boolean IsValidGrantCounts(any counts)
+		-- 영속 지급 지시의 아이템 ID와 양수 정수 수량 검증
+		if type(counts) ~= "table" then return false end
+		for id, count in pairs(counts) do
+			if type(id) ~= "string" or id == "" or #id > 100 or not self:IsValidStackCount(count) or count == 0 then return false end
+		end
+		return true
+	end
+
+	method boolean MatchesGrantCounts(any left, any right)
+		-- 동일 거래 재실행에서 지급 항목과 수량 비교
+		for id, count in pairs(left) do if right[id] ~= count then return false end end
+		for id, count in pairs(right) do if left[id] ~= count then return false end end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method any LoadOrCreate(any storage)
+		-- 초기화 중 전체 데이터 삭제와의 경합 방지
+		self.activeOperations = self.activeOperations + 1
+		local ok, result = pcall(function() return self:LoadOrCreateInternal(storage) end)
+		self.activeOperations = self.activeOperations - 1
+		if not ok then
+			log_error("[Inventory] 초기화 예외 " .. tostring(result))
+			return nil
+		end
+		return result
+	end
+
+	@ExecSpace("ServerOnly")
+	method any LoadOrCreateInternal(any storage)
+		-- 이전 표식과 전체 수량을 같은 키에서 한 번에 확정
+		local read = _ItemStorage:ReadInventory(storage)
+		if read == nil or read.tData ~= nil then return read end
+		if self.initializationMemory == nil then
+			local code, memory = _WorldInstanceService:GetSharedMemory(self.INITIALIZATION_MEMORY)
+			if code ~= SharedMemoryResultCode.OK then return nil end
+			self.initializationMemory = memory
+		end
+		local variable = self.INITIALIZATION_PREFIX .. storage.UserId
+		if #variable > 100 or string.match(variable, "^[%w_%-]+$") == nil then return nil end
+		local claim = self.initializationMemory:CreateVariableAndWait(variable, _UtilLogic:NewGuid())
+		if claim.Code ~= SharedMemoryResultCode.OK then
+			for attempt = 1, self.MAX_ATTEMPTS do
+				local latest = self:ReadInventory(storage)
+				if latest == nil or latest.tData ~= nil then return latest end
+				wait(0.2)
+			end
+			return nil
+		end
+		local uncertainSeed = false
+		local ok, result = pcall(function()
+			local latest = _ItemStorage:ReadInventory(storage)
+			if latest == nil or latest.tData ~= nil then return latest end
+			local tData = _FishingRewardStorage:ReadLegacy(storage)
+			if tData == nil then return nil end
+			local permanentIds = {}
+			for _, itemId in ipairs(latest.itemIds or {}) do
+				if _ItemMaster:IsConsumable(_ItemMaster:GetItemById(itemId)) then
+					if tData.countsByItemId[itemId] == nil then tData.countsByItemId[itemId] = 1 end
+				else table.insert(permanentIds, itemId) end
+			end
+			if not self:MergeAlbumFragmentCounts(tData.countsByItemId) then return nil end
+			local ownership = self:CreateItemsStringFromItemIds(permanentIds, latest.disabledIds or {})
+			local raw = _ItemStorage:EncodeInventory(ownership, tData)
+			if raw == "" then return nil end
+			if latest.missing then
+				uncertainSeed = true
+				if storage:SetAndWait(_ItemStorage.itemStorageKey, raw) == 0 then uncertainSeed = false end
+			else
+				storage:UpdateAndWait(_ItemStorage.itemStorageKey, latest.raw, raw)
+			end
+			local migrated = _ItemStorage:ReadInventory(storage)
+			if migrated ~= nil and migrated.tData ~= nil then
+				uncertainSeed = false
+				return migrated
+			end
+			return nil
+		end)
+		if not uncertainSeed then self.initializationMemory:ReleaseVariableAndWait(variable) end
+		if not ok or result == nil then
+			log_warning("[Inventory] 인벤토리 초기화 또는 이전 확인 실패")
+			return nil
+		end
+		return result
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ReadReceipt(any storage, string id)
+		local code, raw = storage:GetAndWait(self.RECEIPT_PREFIX .. id)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and raw == nil) then return false end
+		if code ~= 0 then return nil end
+		local ok, row = pcall(function() return _HttpService:JSONDecode(raw) end)
+		if not ok or type(row) ~= "table" or row.id ~= id or type(row.revision) ~= "number" then return nil end
+		return row
+	end
+
+	@ExecSpace("ServerOnly")
+	method any FindReceipt(any storage, string id)
+		-- 이미 확정된 거래의 복구 표식이나 보관 영수증 조회
+		local read = _ItemStorage:ReadInventory(storage)
+		if read == nil then return nil end
+		local pending = read.tData ~= nil and read.tData.pending or nil
+		if pending ~= nil and pending.id == id then return pending end
+		return self:ReadReceipt(storage, id)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean Finalize(any storage, any read)
+		-- 수량과 함께 저장된 복구 표식은 영수증 확인 후에만 제거
+		local pending = read.tData.pending
+		if pending == nil then return true end
+		local receipt = self:ReadReceipt(storage, pending.id)
+		if receipt == nil then return false end
+		if receipt == false then
+			local keyInfo = DataStorageKeyInfo()
+			keyInfo.Key = self.RECEIPT_PREFIX .. pending.id
+			keyInfo.Tag = self.RECEIPT_TAG
+			storage:SetByInfoAndWait(keyInfo, _HttpService:JSONEncode(pending))
+			receipt = self:ReadReceipt(storage, pending.id)
+		end
+		if receipt == nil or receipt == false or receipt.revision ~= pending.revision
+			or receipt.kind ~= pending.kind or receipt.target ~= pending.target or receipt.score ~= pending.score
+			or receipt.itemId ~= pending.itemId or receipt.count ~= pending.count
+			or not self:MatchesReceiptGrants(receipt, pending) then return false end
+		local tNext = FishingRewardData()
+		if not tNext:FromPlainTable(read.tData:ToPlainTable()) then return false end
+		tNext.pending = nil
+		local raw = _ItemStorage:EncodeInventory(read.ownership, tNext)
+		if raw == "" then return false end
+		local code = storage:UpdateAndWait(_ItemStorage.itemStorageKey, read.raw, raw)
+		return code == 0 or code == self.CONFLICT_CODE
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean MatchesReceiptGrants(any left, any right)
+		-- 보상과 소비의 구버전 영수증 및 다중 지급 영수증 비교
+		local leftCounts = left.grants or {}
+		local rightCounts = right.grants or {}
+		return _ItemStorage:IsValidGrantCounts(leftCounts) and _ItemStorage:IsValidGrantCounts(rightCounts)
+			and _ItemStorage:MatchesGrantCounts(leftCounts, rightCounts)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyOperation(any storage, any tOperation)
+		-- 지급·사용 중 저장 데이터 초기화 차단
+		self.activeOperations = self.activeOperations + 1
+		local ok, result = pcall(function() return self:ApplyOperationInternal(storage, tOperation) end)
+		self.activeOperations = self.activeOperations - 1
+		if not ok then
+			log_error("[Inventory] 거래 처리 예외 " .. tostring(result))
+			return nil
+		end
+		return result
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyOperationInternal(any storage, any tOperation)
+		-- 기존 영수증을 먼저 확인하고 최신 인벤토리에서 한 번만 수량 변경
+		local id = tOperation.id
+		local kind = tOperation.kind
+		if storage == nil or type(id) ~= "string" or #id > 70 or string.match(id, "^[%w_%-]+$") == nil
+			or (kind ~= self.KIND_REWARD and kind ~= self.KIND_COOKIE and kind ~= self.KIND_GRANT and kind ~= self.KIND_DRAW_EXCHANGE) then return nil end
+		for attempt = 1, self.MAX_ATTEMPTS do
+			local read = self:LoadOrCreate(storage)
+			if read == nil then return nil end
+			local tData = read.tData
+			local receipt = tData.pending ~= nil and tData.pending.id == id and tData.pending or self:ReadReceipt(storage, id)
+			if receipt == nil then return nil end
+			if receipt ~= false then
+				if receipt.kind ~= kind or receipt.score ~= tOperation.score or receipt.target ~= tOperation.target
+					or (kind == self.KIND_COOKIE and receipt.itemId ~= tOperation.itemId)
+					or not self:MatchesReceiptGrants(receipt, tOperation) then return nil end
+				if receipt.revision > tData.revision then return nil end
+				self:Finalize(storage, read)
+				return {tData = tData, receipt = receipt}
+			end
+			if tData.pending ~= nil then
+				if not self:Finalize(storage, read) then return nil end
+			else
+				local tNext = FishingRewardData()
+				if not tNext:FromPlainTable(tData:ToPlainTable()) then return nil end
+				local row = self:ApplyToSnapshot(tNext, tOperation)
+				if row == nil then return {rejected = true, tData = tData} end
+				tNext.revision = row.revision
+				tNext.pending = row
+				local raw = _ItemStorage:EncodeInventory(read.ownership, tNext)
+				if raw == "" then return nil end
+				local code = storage:UpdateAndWait(_ItemStorage.itemStorageKey, read.raw, raw)
+				if code == 0 then
+					self:Finalize(storage, {tData = tNext, ownership = read.ownership, raw = raw})
+					log("[Inventory] 거래 저장 완료 kind=" .. kind .. " id=" .. id
+						.. " item=" .. row.itemId .. " count=" .. tostring(row.count))
+					return {tData = tNext, receipt = row}
+				end
+				if code ~= self.CONFLICT_CODE and code ~= _DataStorageErrorUtil.TimedOut then
+					_DataStorageErrorUtil:LogWarning(code, storage.UserId)
+					return nil
+				end
+			end
+		end
+		return nil
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ApplyToSnapshot(any tData, any tOperation)
+		-- 쿠키 차감과 친밀도 가산을 동일 저장 값에서 처리
+		local id, kind = tOperation.id, tOperation.kind
+		local row = {id = id, kind = kind, target = tOperation.target, score = tOperation.score,
+			revision = tData.revision + 1, itemId = "", count = 0}
+		if kind == self.KIND_REWARD then
+			if not _ItemStorage:IsValidStackCount(tOperation.score) then return nil end
+			local pending = tData.pendingResult
+			if pending == nil or pending.id ~= id or pending.score ~= row.score then return nil end
+			tData.pendingResult = nil
+			local rank = _MiniGameFishingRule:RankForScore(row.score)
+			if rank == 1 and not tData.badgeGranted then
+				tData.badgeGranted = true
+				row.itemId = _MiniGameFishingRule.BADGE_ID
+				row.count = 1
+			else
+				row.itemId = _MiniGameFishingRule.COOKIE_ID
+				row.count = _MiniGameFishingRule:CookiesForRank(rank)
+				if not self:AddCounts(tData.countsByItemId, {[row.itemId] = row.count}) then return nil end
+			end
+		elseif kind == self.KIND_GRANT then
+			if not self:AddCounts(tData.countsByItemId, tOperation.grants) then return nil end
+			row.grants = tOperation.grants
+		elseif kind == self.KIND_DRAW_EXCHANGE then
+			-- 앨범 조각 잔액과 교환 치장 보유권을 동일 인벤토리 CAS로 저장
+			local cost = _ShopItemMaster:GetDrawExchangeCost(row.target)
+			local fragmentId = _ShopItemMaster.ALBUM_FRAGMENT_ITEM_ID
+			local balance = tData.countsByItemId[fragmentId] or 0
+			if cost <= 0 or cost ~= row.score or balance < cost or tData.redeemedCostumeIds[row.target] then return nil end
+			local remaining = balance - cost
+			tData.countsByItemId[fragmentId] = remaining > 0 and remaining or nil
+			tData.redeemedCostumeIds[row.target] = true
+			row.itemId = fragmentId
+			row.count = -cost
+		else
+			local itemId, target = tOperation.itemId, tOperation.target
+			local count = tData.countsByItemId[itemId] or 0
+			local gain = _ItemMaster:GetIntimacyGain(itemId)
+			if target == "" or count < 1 or gain <= 0 then return nil end
+			if count == 1 then tData.countsByItemId[itemId] = nil
+			else tData.countsByItemId[itemId] = count - 1 end
+			tData.intimacyByCharacter[target] = (tData.intimacyByCharacter[target] or 0) + gain
+			row.itemId = itemId
+			row.count = -1
+		end
+		return row
+	end
+
+	method boolean MergeAlbumFragmentCounts(any counts)
+		-- 이전 재화 수량을 합산하고 구버전 영수증은 원형 보존
+		local legacyId = _ShopItemMaster.LEGACY_DRAW_POINTS_ITEM_ID
+		local legacyCount = counts[legacyId]
+		if legacyCount == nil then return true end
+		local fragmentId = _ShopItemMaster.ALBUM_FRAGMENT_ITEM_ID
+		local total = (counts[fragmentId] or 0) + legacyCount
+		if not self:IsValidStackCount(total) then return false end
+		counts[fragmentId] = total
+		counts[legacyId] = nil
+		return true
+	end
+
+	method boolean AddCounts(any counts, any grants)
+		-- 양수 지급 수량과 합산 결과의 정수 범위 검사
+		if not _ItemStorage:IsValidGrantCounts(grants) or next(grants) == nil then return false end
+		for itemId, count in pairs(grants) do
+			-- 미완료 이전 거래도 지급 대상만 통합하고 비교용 영수증은 유지
+			local grantId = itemId == _ShopItemMaster.LEGACY_DRAW_POINTS_ITEM_ID and _ShopItemMaster.ALBUM_FRAGMENT_ITEM_ID or itemId
+			local total = (counts[grantId] or 0) + count
+			if not _ItemStorage:IsValidStackCount(total) then return false end
+			counts[grantId] = total
+		end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 초기화 메모리 참조와 런타임 거래 카운터 해제
+		self.activeOperations = 0
+		if self.initializationMemory ~= nil then
+			_WorldInstanceService:ReleaseSharedMemoryAndWait(self.INITIALIZATION_MEMORY)
+			self.initializationMemory = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveItemsAsync(string userId, any itemIds, table disabledFanItemIds)
+		-- 보유 목록과 팬 선물 설정의 최신 저장 요청을 병합
+		if self.canSaveItems == false then
+			log_warning("[ItemStorage] item save skipped because storage load failed")
+			return
+		end
+
+		if userId == nil or userId == "" then
+			log_warning("[ItemStorage] userId is required")
+			return
+		end
+
+		local itemsString = self:CreateItemsStringFromItemIds(itemIds, disabledFanItemIds)
+		if itemsString == "" then
+			log_warning("[ItemStorage] itemIds are invalid")
+			return
+		end
+
+		if self.isItemsSaveInProgress then
+			self.pendingItemsUserId = userId
+			self.pendingItemsString = itemsString
+			return
+		end
+		if itemsString == self.loadedItemsString then return end
+
+		self:SaveItemsStringAsync(userId, itemsString, 1)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void SaveItemsStringAsync(string userId, string itemsString, integer attempt)
+		-- 수량 변경과 경합하면 최신 인벤토리를 다시 읽어 소유권만 병합
+		self.isItemsSaveInProgress = true
+		local storage = _DataStorageService:GetUserDataStorage(userId)
+		local read = _ItemStorage:LoadOrCreate(storage)
+		local desired = self:DecodeOwnership(itemsString)
+		if read == nil or desired == nil then
+			self.isItemsSaveInProgress = false
+			log_warning("[Inventory] 보유권 저장 읽기 실패")
+			self:CheckPendingItemsSave()
+			return
+		end
+		for _, id in ipairs(desired.itemIds) do self:AddItemIdIfValid(read.itemIds, id) end
+		local ownership = self:CreateItemsStringFromItemIds(read.itemIds, desired.disabledIds)
+		if ownership == read.ownership then
+			self:OnItemsSaveCompleted(userId, itemsString, 0)
+			return
+		end
+		local raw = self:EncodeInventory(ownership, read.tData)
+		if raw == "" then
+			self.isItemsSaveInProgress = false
+			self:CheckPendingItemsSave()
+			return
+		end
+		storage:UpdateAsync(self.itemStorageKey, read.raw, raw, function(errorCode, key, storedValue)
+			if attempt < _ItemStorage.MAX_ATTEMPTS
+				and (errorCode == _ItemStorage.CONFLICT_CODE or errorCode == _DataStorageErrorUtil.TimedOut) then
+				self:SaveItemsStringAsync(userId, itemsString, attempt + 1)
+				return
+			end
+			self:OnItemsSaveCompleted(userId, itemsString, errorCode)
+		end)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnItemsSaveCompleted(string userId, string itemsString, integer errorCode)
+		-- 비동기 저장 완료 결과를 반영하고 대기 중인 최신 저장 요청이 있으면 이어서 처리합니다.
+		local isSaved = _DataStorageErrorUtil:IsOk(errorCode)
+		if isSaved == false then
+			_DataStorageErrorUtil:LogWarning(errorCode, userId)
+		else
+			self.loadedItemsString = itemsString
+		end
+
+		self.isItemsSaveInProgress = false
+		self:CheckPendingItemsSave()
+	end
+
+	@ExecSpace("ServerOnly")
+	method void CheckPendingItemsSave()
+		-- 대기 중인 최신 아이템 저장 요청이 있으면 이어서 비동기 저장합니다.
+		if self.pendingItemsString == "" then
+			return
+		end
+
+		local pendingUserId = self.pendingItemsUserId
+		local pendingItemsString = self.pendingItemsString
+		self.pendingItemsUserId = ""
+		self.pendingItemsString = ""
+
+		if pendingItemsString == self.loadedItemsString then
+			return
+		end
+
+		self:SaveItemsStringAsync(pendingUserId, pendingItemsString, 1)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any DecodeOwnership(string itemsString)
+		-- 기존 버전의 영구 아이템과 팬 선물 OFF 목록 파싱
+		local ok, plain = pcall(function() return _UtilLogic:StringToTable(itemsString) end)
+		if not ok or type(plain) ~= "table" or not self:IsValidStackCount(tonumber(plain.itemCount)) or tonumber(plain.itemCount) > 1000 then
+			log_warning("[ItemStorage] item save string parse failed")
+			return nil
+		end
+		local version = tonumber(plain.saveVersion) or 0
+		if version ~= 0 and version ~= 1 and version ~= 2 then return nil end
+		local itemIds = {}
+		for i = 1, tonumber(plain.itemCount) do
+			self:AddItemIdIfValid(itemIds, self:NormalizeString(plain["itemId" .. tostring(i)], ""))
+		end
+		local disabledIds = {}
+		local disabledCount = math.min(1000, self:NormalizeInteger(plain.disabledFanCount, 0, 0))
+		for i = 1, disabledCount do
+			self:AddItemIdIfValid(disabledIds, self:NormalizeString(plain["disabledFanId" .. tostring(i)], ""))
+		end
+		return {itemIds = itemIds, disabledIds = disabledIds}
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateItemsStringFromItemIds(any itemIds, table disabledFanItemIds)
+		-- 보유 목록과 팬 선물 OFF 목록을 같은 flat 저장 문자열로 변환
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return ""
+		end
+
+		local normalizedItemIds = self:CreateNormalizedItemIds(itemIds)
+		local tFlatPlainTable = {}
+		tFlatPlainTable.saveVersion = self.currentSaveVersion
+		tFlatPlainTable.itemCount = #normalizedItemIds
+
+		for index, itemId in ipairs(normalizedItemIds) do
+			local suffix = tostring(index)
+			tFlatPlainTable["itemId" .. suffix] = itemId
+		end
+
+		local disabledIds = self:CreateNormalizedItemIds(disabledFanItemIds)
+		tFlatPlainTable.disabledFanCount = #disabledIds
+		for index, itemId in ipairs(disabledIds) do tFlatPlainTable["disabledFanId" .. tostring(index)] = itemId end
+		return _UtilLogic:TableToString(tFlatPlainTable)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any CreateNormalizedItemIds(any itemIds)
+		-- 서버 권위 보유 아이템 id 목록에서 빈 값과 중복을 제거한 목록을 만듭니다.
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return nil
+		end
+
+		local normalizedItemIds = {}
+
+		for _, itemId in ipairs(itemIds) do
+			self:AddItemIdIfValid(normalizedItemIds, itemId)
+		end
+
+		return normalizedItemIds
+	end
+
+	@ExecSpace("ServerOnly")
+	method void AddItemIdIfValid(any itemIds, string itemId)
+		-- 저장 목록에 빈 값과 중복을 제외한 itemId만 추가합니다.
+		if itemIds == nil or type(itemIds) ~= "table" then
+			return
+		end
+
+		local normalizedItemId = self:NormalizeString(itemId, "")
+		if normalizedItemId == "" then
+			return
+		end
+
+		for _, ownedItemId in ipairs(itemIds) do
+			if ownedItemId == normalizedItemId then
+				return
+			end
+		end
+
+		table.insert(itemIds, normalizedItemId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string NormalizeString(any value, string defaultValue)
+		-- 문자열 값이 없으면 기본값을 반환합니다.
+		if value == nil or value == "" then
+			return defaultValue
+		end
+
+		return tostring(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method integer NormalizeInteger(any value, integer defaultValue, integer minValue)
+		-- 숫자 값이 없거나 범위를 벗어나면 안전한 정수로 보정합니다.
+		local numberValue = tonumber(value)
+		if numberValue == nil then
+			return defaultValue
+		end
+
+		return math.floor(_MathUtil:ClampMin(numberValue, minValue))
+	end
+
+end

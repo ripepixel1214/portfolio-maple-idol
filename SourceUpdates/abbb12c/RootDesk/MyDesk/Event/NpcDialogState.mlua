@@ -1,0 +1,52 @@
+@Struct
+script NpcDialogState
+	property string rootEventId = ""
+	property string dialogId = ""
+	property table lineEventIds = {}
+	property integer nextLineEventIndex = 1
+	property string choiceEventId = ""
+	property table choiceEventIds = {}
+	property table executedEventIds = {}
+	property table receipts = {}
+	property table rewardClaims = {}
+	property string pendingMiniGameEventId = ""
+
+	method void SetDialog(string nextDialogId, any eventIds)
+		-- 서버가 연 대화의 이벤트 순서를 교체하고 이전 선택지 폐기
+		self.dialogId = nextDialogId
+		self.lineEventIds = eventIds
+		self.nextLineEventIndex = 1
+		self.choiceEventId = ""
+		self.choiceEventIds = {}
+	end
+
+	method boolean ConsumeEvent(string eventId, string requestId)
+		-- 현재 대화의 다음 이벤트 또는 표시된 선택지만 1회 예약
+		if eventId == "" or requestId == "" or self.receipts[requestId] ~= nil
+			or self.executedEventIds[eventId] == true or self.pendingMiniGameEventId ~= "" then return false end
+		if self.choiceEventId ~= "" then
+			local allowed = false
+			for _, choiceId in ipairs(self.choiceEventIds) do
+				if choiceId == eventId then allowed = true end
+			end
+			if not allowed then return false end
+			self.choiceEventId = ""
+			self.choiceEventIds = {}
+		else
+			if self.lineEventIds[self.nextLineEventIndex] ~= eventId then return false end
+			self.nextLineEventIndex += 1
+		end
+		self.executedEventIds[eventId] = true
+		self.receipts[requestId] = { eventId = eventId, finished = false, success = false }
+		return true
+	end
+
+	method boolean IsComplete()
+		-- 미처리 대화 이벤트와 선택지 및 미니게임이 없는 경우만 완료 허용
+		for _, tReceipt in pairs(self.receipts) do
+			if not tReceipt.finished then return false end
+		end
+		return self.nextLineEventIndex > #self.lineEventIds
+			and self.choiceEventId == "" and self.pendingMiniGameEventId == ""
+	end
+end

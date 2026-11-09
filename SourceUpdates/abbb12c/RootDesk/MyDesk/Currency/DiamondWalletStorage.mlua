@@ -1,0 +1,404 @@
+@Logic
+script DiamondWalletStorage extends Logic
+
+	property string WALLET_KEY = "diamondWallet"
+	property string PURCHASE_RECORD_PREFIX = "diamondPurchase_"
+	property string GAME_RECORD_PREFIX = "diamondOperation_"
+	property string HISTORY_TAG = "diamondLedger"
+	property string INITIALIZATION_MEMORY_NAME = "DiamondWalletInitialization"
+	property string INITIALIZATION_VARIABLE_PREFIX = "Init_"
+	property string LEGACY_INITIALIZATION_KEY = "diamondWalletInitializationId"
+	property string KIND_PURCHASE = "purchase"
+	property string KIND_GAME = "game"
+	property string REASON_OK = "ok"
+	property string REASON_SHOP_PURCHASE = "shop_purchase"
+	property string REASON_MISSING = "missing"
+	property string REASON_INVALID_DATA = "invalid_data"
+	property string REASON_STORAGE_FAILED = "storage_failed"
+	property string REASON_INITIALIZATION_PENDING = "initialization_pending"
+	property string REASON_INVALID_OPERATION = "invalid_operation"
+	property string REASON_ID_CONFLICT = "operation_id_conflict"
+	property string REASON_INSUFFICIENT_BALANCE = "insufficient_balance"
+	property string REASON_PENDING_JOURNAL = "pending_journal"
+	property string REASON_CONFLICT = "write_conflict"
+	property number MAX_SAFE_AMOUNT = 9007199254740991
+	property integer MAX_VALUE_BYTES = 4000
+	property integer MAX_ATTEMPTS = 6
+	property integer UPDATE_CONFLICT_CODE = 2000000
+	property any initializationMemory = nil
+
+	@ExecSpace("ServerOnly")
+	method boolean IsValidAmount(any value)
+		-- 부호·소수·정수 정밀도 범위 검증
+		return type(value) == "number" and value == value and value >= 0
+			and value <= self.MAX_SAFE_AMOUNT and value == math.floor(value)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsValidOperation(DiamondWalletOperationData tOperation)
+		-- 서버 거래 및 보관 기록의 필수 필드 검증
+		if tOperation == nil or type(tOperation.operationId) ~= "string" or tOperation.operationId == ""
+			or type(tOperation.reason) ~= "string" or tOperation.reason == ""
+			or self:IsValidAmount(tOperation.debit) == false or self:IsValidAmount(tOperation.credit) == false
+			or (tOperation.debit == 0 and tOperation.credit == 0) then return false end
+		if tOperation.kind ~= self.KIND_GAME and tOperation.kind ~= self.KIND_PURCHASE then return false end
+		if tOperation.kind == self.KIND_PURCHASE and (tOperation.debit ~= 0
+			or tOperation.productId == "" or self:IsValidAmount(tOperation.orderNumber) == false) then return false end
+		if not self:IsValidGrantIds(tOperation.shopItemIds) or not self:IsValidGrantIds(tOperation.characterIds)
+			or not _ItemStorage:IsValidGrantCounts(tOperation.consumableGrants) then return false end
+		if tOperation.kind == self.KIND_GAME and tOperation.productId ~= "" then
+			if tOperation.reason ~= self.REASON_SHOP_PURCHASE or #tOperation.productId > 100
+				or #tOperation.characterIds > 0 then return false end
+			local grantCount = #tOperation.shopItemIds
+			for _ in pairs(tOperation.consumableGrants) do grantCount = grantCount + 1 end
+			if grantCount ~= 1 then return false end
+		end
+		if tOperation:HasShopGrants() then
+			if tOperation.kind ~= self.KIND_GAME or tOperation.reason ~= self.REASON_SHOP_PURCHASE
+				or tOperation.debit <= 0 or tOperation.credit ~= 0 then return false end
+		elseif #tOperation.characterIds > 0 or tOperation.reason == self.REASON_SHOP_PURCHASE then return false end
+		return string.len(self:GetOperationKey(tOperation)) <= 100
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetOperationKey(DiamondWalletOperationData tOperation)
+		-- 구매 ID와 게임 거래 ID의 저장 이름 공간 분리
+		local prefix = tOperation.kind == self.KIND_PURCHASE and self.PURCHASE_RECORD_PREFIX or self.GAME_RECORD_PREFIX
+		return prefix .. tOperation.operationId
+	end
+
+	@ExecSpace("ServerOnly")
+	method DiamondWalletResultData CreateResult(boolean success, string reason, any tWallet, string rawData)
+		-- 저장 계층의 로드 및 거래 결과 구성
+		local tResult = DiamondWalletResultData()
+		tResult.success = success
+		tResult.reason = reason
+		tResult.tWallet = tWallet
+		tResult.rawData = rawData or ""
+		return tResult
+	end
+
+	@ExecSpace("ServerOnly")
+	method any DecodeWallet(string rawData)
+		-- 기존 유료 데이터의 JSON 및 스키마 검증
+		local ok, tPlainData = pcall(function() return _HttpService:JSONDecode(rawData) end)
+		if ok == false then return nil end
+		local tWallet = DiamondWalletData()
+		if tWallet:FromPlainTable(tPlainData) == false then return nil end
+		return tWallet
+	end
+
+	@ExecSpace("ServerOnly")
+	method DiamondWalletResultData ReadWallet(any userStorage)
+		-- 누락과 저장 오류를 구분하고 손상 데이터 보존
+		local code, rawData = userStorage:GetAndWait(self.WALLET_KEY)
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and rawData == nil) then
+			return self:CreateResult(false, self.REASON_MISSING, nil, "")
+		end
+		if code ~= 0 then
+			_DataStorageErrorUtil:LogWarning(code, userStorage.UserId)
+			return self:CreateResult(false, self.REASON_STORAGE_FAILED, nil, "")
+		end
+		local tWallet = self:DecodeWallet(rawData)
+		if tWallet == nil then return self:CreateResult(false, self.REASON_INVALID_DATA, nil, rawData) end
+		return self:CreateResult(true, self.REASON_OK, tWallet, rawData)
+	end
+
+	@ExecSpace("ServerOnly")
+	method DiamondWalletResultData LoadOrCreateWallet(any userStorage)
+		-- 최초 생성만 인스턴스 간 잠금 사용, 이후 거래는 저장소 CAS 사용
+		local tResult = self:ReadWallet(userStorage)
+		if tResult.reason ~= self.REASON_MISSING then return tResult end
+		local variableName = self.INITIALIZATION_VARIABLE_PREFIX .. userStorage.UserId
+		if string.len(variableName) > 100 or string.match(variableName, "^[%w_%-]+$") == nil then
+			return self:CreateResult(false, self.REASON_INVALID_DATA, nil, "")
+		end
+		if self.initializationMemory == nil then
+			local code, memory = _WorldInstanceService:GetSharedMemory(self.INITIALIZATION_MEMORY_NAME)
+			if code ~= SharedMemoryResultCode.OK then
+				return self:CreateResult(false, self.REASON_STORAGE_FAILED, nil, "")
+			end
+			self.initializationMemory = memory
+		end
+		local claim = self.initializationMemory:CreateVariableAndWait(variableName, _UtilLogic:NewGuid())
+		if claim.Code ~= SharedMemoryResultCode.OK then
+			local tLatest = self:ReadWallet(userStorage)
+			if tLatest.success then return tLatest end
+			return self:CreateResult(false, self.REASON_INITIALIZATION_PENDING, nil, "")
+		end
+		local ok, tCreatedResult = pcall(function() return self:CreateWalletUnderInitializationLock(userStorage) end)
+		local releaseCode = self.initializationMemory:ReleaseVariableAndWait(variableName)
+		if releaseCode ~= SharedMemoryResultCode.OK then
+			log_warning("[DiamondWallet] initialization lock release failed user=" .. userStorage.UserId)
+		end
+		if ok == false then
+			log_error("[DiamondWallet] initialization failed: " .. tostring(tCreatedResult))
+			return self:CreateResult(false, self.REASON_STORAGE_FAILED, nil, "")
+		end
+		return tCreatedResult
+	end
+
+	@ExecSpace("ServerOnly")
+	method DiamondWalletResultData CreateWalletUnderInitializationLock(any userStorage)
+		-- 영구 생성 표식을 먼저 저장하여 실패·서버 종료 후 초기 잔액 덮어쓰기 방지
+		local tLatest = self:ReadWallet(userStorage)
+		if tLatest.reason ~= self.REASON_MISSING then return tLatest end
+		local progressKey = _ProgressStorage.ProgressStorageKey
+		local code, legacyRaw = userStorage:GetAndWait(progressKey)
+		if code ~= 0 and _DataStorageErrorUtil:IsNotFound(code) == false then
+			return self:CreateResult(false, self.REASON_STORAGE_FAILED, nil, "")
+		end
+		local tLegacyData = nil
+		local hasLegacyRecord = legacyRaw ~= nil and legacyRaw ~= ""
+		if hasLegacyRecord then
+			local ok, decoded = pcall(function() return _UtilLogic:StringToTable(legacyRaw) end)
+			if ok == false or type(decoded) ~= "table" or decoded.eCurrentStep == nil
+				or _ProgressStorage:DecodeProgressData(legacyRaw) == nil then
+				return self:CreateResult(false, self.REASON_INVALID_DATA, nil, "")
+			end
+			tLegacyData = decoded
+			local saveVersion = tLegacyData.saveVersion == nil and 0 or tonumber(tLegacyData.saveVersion)
+			if self:IsValidAmount(saveVersion) == false then
+				return self:CreateResult(false, self.REASON_INVALID_DATA, nil, "")
+			end
+			if tLegacyData[self.LEGACY_INITIALIZATION_KEY] ~= nil or saveVersion >= 8 then
+				log_error("[DiamondWallet] missing wallet after initialization attempt; preserve storage and inspect user=" .. userStorage.UserId)
+				return self:CreateResult(false, self.REASON_INITIALIZATION_PENDING, nil, "")
+			end
+		else
+			tLegacyData = _ProgressStorage:CreateDefaultProgress():ToPlainTable()
+			tLegacyData.saveVersion = _ProgressStorage.currentSaveVersion
+		end
+		local legacyBalance = tLegacyData.diamond == nil and 0 or tonumber(tLegacyData.diamond)
+		if self:IsValidAmount(legacyBalance) == false then
+			return self:CreateResult(false, self.REASON_INVALID_DATA, nil, "")
+		end
+		local initializationId = _UtilLogic:NewGuid()
+		tLegacyData[self.LEGACY_INITIALIZATION_KEY] = initializationId
+		local markedProgress = _UtilLogic:TableToString(tLegacyData)
+		local markerCode = 0
+		if hasLegacyRecord then
+			markerCode = userStorage:UpdateAndWait(progressKey, legacyRaw, markedProgress)
+		else
+			markerCode = userStorage:SetAndWait(progressKey, markedProgress)
+		end
+		if markerCode ~= 0 then
+			return self:CreateResult(false, self.REASON_INITIALIZATION_PENDING, nil, "")
+		end
+		local tWallet = DiamondWalletData()
+		tWallet.balance = legacyBalance
+		tWallet.migratedLegacyBalance = legacyBalance
+		tWallet.migrationCompleted = true
+		tWallet.initializationId = initializationId
+		local rawData = _HttpService:JSONEncode(tWallet:ToPlainTable())
+		local saveCode = userStorage:SetAndWait(self.WALLET_KEY, rawData)
+		if saveCode == 0 then
+			log("[DiamondWallet] initialized user=" .. userStorage.UserId .. " migrated=" .. tostring(legacyBalance))
+			return self:CreateResult(true, self.REASON_OK, tWallet, rawData)
+		end
+		_DataStorageErrorUtil:LogWarning(saveCode, userStorage.UserId)
+		-- 시간 초과 후 반영 여부만 재조회, 최초 Set 재실행 금지
+		return self:ReadWallet(userStorage)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean MatchesOperation(DiamondWalletOperationData tStored, DiamondWalletOperationData tRequested)
+		-- 재구매 상품 설정 변경과 무관하게 이미 지급된 구매의 동일성 판정
+		if tStored.operationId ~= tRequested.operationId or tStored.kind ~= tRequested.kind then return false end
+		if tRequested.kind == self.KIND_PURCHASE then
+			return tStored.productId == tRequested.productId and tStored.orderNumber == tRequested.orderNumber
+		end
+		return tStored.productId == tRequested.productId and tStored.debit == tRequested.debit
+			and tStored.credit == tRequested.credit and tStored.reason == tRequested.reason
+			and self:MatchesGrantIds(tStored.shopItemIds, tRequested.shopItemIds)
+			and self:MatchesGrantIds(tStored.characterIds, tRequested.characterIds)
+			and _ItemStorage:MatchesGrantCounts(tStored.consumableGrants, tRequested.consumableGrants)
+	end
+
+	@ExecSpace("ServerOnly")
+	method any ReadOperation(any userStorage, DiamondWalletOperationData tOperation)
+		-- 거래별 별도 키 조회, 기록 삭제 없이 중복 지급 방지
+		local code, rawData = userStorage:GetAndWait(self:GetOperationKey(tOperation))
+		if _DataStorageErrorUtil:IsNotFound(code) or (code == 0 and rawData == nil) then return false end
+		if code ~= 0 then return nil end
+		local ok, tPlainData = pcall(function() return _HttpService:JSONDecode(rawData) end)
+		local tStored = DiamondWalletOperationData()
+		if ok == false or tStored:FromPlainTable(tPlainData) == false then return nil end
+		return tStored
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean FinalizePendingOperation(any userStorage, DiamondWalletResultData tReadResult)
+		-- 별도 기록 보관이 확인된 거래만 지갑의 복구 표식에서 제거
+		local tWallet = tReadResult.tWallet
+		local tPending = tWallet.tPendingOperation
+		if tPending == nil then return true end
+		local tStored = self:ReadOperation(userStorage, tPending)
+		if tStored == nil then return false end
+		if tStored ~= false and (not self:MatchesOperation(tStored, tPending)
+			or tStored.revision ~= tPending.revision or tStored.afterBalance ~= tPending.afterBalance) then return false end
+		if tPending:HasShopGrants() and not _ShopItemStorage:DeliverDiamondShopPurchase(userStorage, tPending) then return false end
+		if tStored == false then
+			local recordRaw = _HttpService:JSONEncode(tPending:ToPlainTable())
+			local keyInfo = DataStorageKeyInfo()
+			keyInfo.Key = self:GetOperationKey(tPending)
+			keyInfo.Tag = self.HISTORY_TAG
+			local code = userStorage:SetByInfoAndWait(keyInfo, recordRaw)
+			if code ~= 0 then
+				-- 기록 저장 결과가 불확실하면 지갑의 원본 표식 유지
+				tStored = self:ReadOperation(userStorage, tPending)
+				if tStored == nil or tStored == false then return false end
+			else
+				tStored = tPending
+			end
+		end
+		if self:MatchesOperation(tStored, tPending) == false or tStored.revision ~= tPending.revision
+			or tStored.afterBalance ~= tPending.afterBalance then return false end
+		local tCleared = DiamondWalletData()
+		if tCleared:FromPlainTable(tWallet:ToPlainTable()) == false then return false end
+		tCleared.tPendingOperation = nil
+		local rawData = _HttpService:JSONEncode(tCleared:ToPlainTable())
+		local code = userStorage:UpdateAndWait(self.WALLET_KEY, tReadResult.rawData, rawData)
+		local completed = code == 0 or code == self.UPDATE_CONFLICT_CODE
+		if completed then
+			tWallet.tPendingOperation = nil
+			if code == 0 then tReadResult.rawData = rawData end
+			if tPending:HasShopGrants() and _ShopItemManager.currentUserId == userStorage.UserId
+				and _ShopItemManager:IsShopItemsLoaded() and not _ShopItemManager.isPurchaseInProgress then
+				_ShopItemManager:ApplyConfirmedShopGrants(tPending.shopItemIds, tPending.characterIds, userStorage.UserId)
+			end
+		end
+		return completed
+	end
+
+	@ExecSpace("ServerOnly")
+	method DiamondWalletResultData ApplyOperation(any userStorage, DiamondWalletOperationData tOperation)
+		-- 잔액과 거래 ID를 한 번의 CAS로 확정하고 저장 경합 시 최신 값으로 재검증
+		if tOperation == nil or tOperation.operationId == "" or string.len(self:GetOperationKey(tOperation)) > 100 then
+			return self:CreateResult(false, self.REASON_INVALID_OPERATION, nil, "")
+		end
+		for attempt = 1, self.MAX_ATTEMPTS do
+			local tRead = self:LoadOrCreateWallet(userStorage)
+			if tRead.success == false then return tRead end
+			local tWallet = tRead.tWallet
+			local tPending = tWallet.tPendingOperation
+			local tStored = tPending
+			if tPending ~= nil and tPending.operationId == tOperation.operationId and tPending.kind == tOperation.kind then
+				tStored = tPending
+			else
+				tStored = self:ReadOperation(userStorage, tOperation)
+				if tStored == nil then return self:CreateResult(false, self.REASON_STORAGE_FAILED, nil, "") end
+			end
+			if tStored ~= false then
+				-- 재시도에서는 확정된 보상을 다시 비교하지 않고 같은 상품 구매인지 확인
+				local isDraw = tOperation.kind == self.KIND_GAME and tOperation.productId ~= ""
+				local matches = self:MatchesOperation(tStored, tOperation)
+				if isDraw then
+					matches = tStored.operationId == tOperation.operationId and tStored.kind == tOperation.kind
+						and tStored.productId == tOperation.productId and tStored.debit == tOperation.debit
+						and tStored.reason == self.REASON_SHOP_PURCHASE and tOperation.reason == tStored.reason
+						and tStored.credit == tOperation.credit
+				end
+				if not matches then
+					return self:CreateResult(false, self.REASON_ID_CONFLICT, nil, "")
+				end
+				if tStored.revision > tWallet.revision then continue end
+				tRead.alreadyApplied = true
+				local finalized = self:FinalizePendingOperation(userStorage, tRead)
+				if tStored:HasShopGrants() and not finalized then
+					tRead.success = false
+					tRead.reason = self.REASON_PENDING_JOURNAL
+				end
+				if tRead.success and isDraw then
+					tOperation.shopItemIds = tStored.shopItemIds
+					tOperation.consumableGrants = tStored.consumableGrants
+				end
+				return tRead
+			end
+			if self:IsValidOperation(tOperation) == false then
+				return self:CreateResult(false, self.REASON_INVALID_OPERATION, nil, "")
+			end
+			if tPending ~= nil then
+				if self:FinalizePendingOperation(userStorage, tRead) == false then
+					return self:CreateResult(false, self.REASON_PENDING_JOURNAL, nil, "")
+				end
+				continue
+			end
+			if tWallet.balance < tOperation.debit then
+				return self:CreateResult(false, self.REASON_INSUFFICIENT_BALANCE, tWallet, tRead.rawData)
+			end
+			local remaining = tWallet.balance - tOperation.debit
+			if tOperation.credit > self.MAX_SAFE_AMOUNT - remaining or tWallet.revision >= self.MAX_SAFE_AMOUNT then
+				return self:CreateResult(false, self.REASON_INVALID_OPERATION, tWallet, tRead.rawData)
+			end
+			local tNext = DiamondWalletData()
+			tNext:FromPlainTable(tWallet:ToPlainTable())
+			tNext.balance = remaining + tOperation.credit
+			tNext.revision = tWallet.revision + 1
+			tOperation.beforeBalance = tWallet.balance
+			tOperation.afterBalance = tNext.balance
+			tOperation.revision = tNext.revision
+			-- JSONDecode의 날짜 토큰 자동 변환을 피하도록 UTC 접두사 사용
+			tOperation.createdAt = "UTC:" .. DateTime.UtcNow:ToFormattedString("yyyy-MM-ddTHH:mm:ss.fffZ")
+			tNext.tPendingOperation = tOperation
+			local nextRaw = _HttpService:JSONEncode(tNext:ToPlainTable())
+			if string.len(nextRaw) > self.MAX_VALUE_BYTES then
+				return self:CreateResult(false, self.REASON_INVALID_OPERATION, nil, "")
+			end
+			local code = userStorage:UpdateAndWait(self.WALLET_KEY, tRead.rawData, nextRaw)
+			if code == 0 then
+				local tCommitted = self:CreateResult(true, self.REASON_OK, tNext, nextRaw)
+				log("[DiamondWallet] committed kind=" .. tOperation.kind .. " id=" .. tOperation.operationId
+					.. " balance=" .. tostring(tNext.balance) .. " revision=" .. tostring(tNext.revision))
+				-- 보관 실패에도 잔액과 구매 ID는 지갑에 함께 영속, 다음 거래·입장에서 복구
+				if self:FinalizePendingOperation(userStorage, tCommitted) == false then
+					log_warning("[DiamondWallet] journal pending id=" .. tOperation.operationId)
+					if tOperation:HasShopGrants() then
+						tCommitted.success = false
+						tCommitted.reason = self.REASON_PENDING_JOURNAL
+					end
+				end
+				return tCommitted
+			end
+			if code ~= self.UPDATE_CONFLICT_CODE and code ~= _DataStorageErrorUtil.TimedOut then
+				_DataStorageErrorUtil:LogWarning(code, userStorage.UserId)
+				return self:CreateResult(false, self.REASON_STORAGE_FAILED, nil, "")
+			end
+			-- 시간 초과도 새 잔액과 동일 거래 ID 재조회 후에만 재시도
+		end
+		return self:CreateResult(false, self.REASON_CONFLICT, nil, "")
+	end
+
+	@ExecSpace("ServerOnly")
+	method void OnEndPlay()
+		-- 인스턴스가 보유한 초기 생성 메모리 참조 해제
+		if self.initializationMemory ~= nil then
+			_WorldInstanceService:ReleaseSharedMemoryAndWait(self.INITIALIZATION_MEMORY_NAME)
+			self.initializationMemory = nil
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean IsValidGrantIds(any ids)
+		-- 영속 지급 목록의 밀집 배열·중복·문자열 크기 검증
+		if type(ids) ~= "table" or #ids > 40 then return false end
+		local seen = {}
+		local count = 0
+		for index, id in pairs(ids) do
+			if type(index) ~= "number" or index < 1 or index > #ids or index ~= math.floor(index)
+				or type(id) ~= "string" or id == "" or #id > 100 or seen[id] then return false end
+			seen[id] = true
+			count = count + 1
+		end
+		return count == #ids
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean MatchesGrantIds(table stored, table requested)
+		-- 동일 거래 ID에 다른 지급 대상 재사용 금지
+		if #stored ~= #requested then return false end
+		for index, id in ipairs(stored) do if requested[index] ~= id then return false end end
+		return true
+	end
+
+end

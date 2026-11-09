@@ -26,6 +26,12 @@
 
 유료 재화 충전은 지갑 반영 후 성공을 반환하고 남은 거래 기록을 이후 복구합니다. 상점 구매는 상품 지급과 기록 확인까지 완료 조건에 포함합니다. 저장이나 지급을 확인하지 못하면 복구 정보를 유지하고 다음 거래나 로드에서 이어갑니다.
 
+## 수량형 상품 지급과 구매 재시도
+
+[DiamondWalletOperationData](../SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/DiamondWalletOperationData.mlua)는 지급할 아이템이나 캐릭터 목록이 비어 있으면 해당 필드를 직렬화에서 생략합니다. 수량형 상품을 구매할 때는 차감액과 지급할 아이템별 수량을 같은 거래에 기록합니다.
+
+저장이 끝난 구매 요청이 다시 오면 [ApplyOperation](../SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/DiamondWalletStorage.mlua#L275)이 이미 처리한 거래를 찾아 남은 처리를 이어갑니다. 확률형 상품의 응답에는 저장된 지급 목록을 사용해 재시도에도 같은 구매 결과를 반환합니다. [DeliverDiamondShopPurchase](../SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/ShopItemStorage.mlua#L441)는 캐릭터와 상품 보유 정보를 반영한 뒤 같은 거래 ID로 수량형 지급을 요청합니다. [ItemStorage](../SourceUpdates/abbb12c/RootDesk/MyDesk/Item/ItemStorage.mlua)가 지급 내역을 대조해 같은 수량을 다시 더하지 않도록 합니다.
+
 ## 일반 상점과 검증 코드
 
 일반 상점 구매는 [ShopItemStorage](../Source/RootDesk/MyDesk/Shop/ShopItemStorage.mlua)의 `TransactSetAndWait` 경로에서 잔액과 상품 보유 정보, 필요한 캐릭터 데이터를 묶어 저장합니다. 유료 지갑의 조건부 갱신과 미완료 거래 복구는 별도 경로입니다.

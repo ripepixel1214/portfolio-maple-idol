@@ -1,0 +1,391 @@
+---@description "미니게임 클라이언트, 서버 통신 매니저 로직"
+@Logic
+script MiniGameManager extends Logic
+	@ExecSpace("Server")
+	method void RequestFishingInput(string sessionId, table plain)
+		local tSession = _MiniGameSessionService:GetOwnedSession(sessionId, senderUserId)
+		if not _MiniGameSessionService:IsActiveSession(tSession) or tSession.gameKind ~= _EMiniGameKind.FISHING then return end
+		_MiniGameFishingServerHandler:HandleInput(tSession, plain)
+	end
+
+	@ExecSpace("Client")
+	method void PushFishingState(string sessionId, table plain)
+		if _MiniGamePlayLogic.sessionId ~= sessionId or not _MiniGamePlayLogic.isPlaying then return end
+		local tState = MiniGameFishingState()
+		tState:FromPlainTable(plain)
+		_MiniGameFishingPresenter:ApplyState(sessionId, tState)
+	end
+
+	@ExecSpace("Server")
+	method void RequestStartFishing(boolean debugMode)
+		if debugMode and (not Environment:IsMakerPlay() or not _MiniGameDebugLogic.isDebugMode) then return end
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = _MiniGameFishingRule.MINI_GAME_ID
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = _EMiniGameContextType.Standalone
+		tStartOptions.isDebugRequest = debugMode
+		if self:CreateMiniGameSession(tStartOptions) == "" then self:PushFishingRejected(senderUserId) end
+	end
+
+	@ExecSpace("Client")
+	method void PushFishingRejected()
+		_MiniGameFishingPresenter:HandleRejected(_MiniGameFishingRule.MINI_GAME_ID)
+	end
+
+	-- 기존 외부 API 및 클라이언트 RPC 전용 창구
+	property string REQUEST_REJECTED_START = "startRejected"
+	property string MINI_GAME_DALGONA_CHALLENGE = "dalgona_challenge"
+	property string NIGHT_MARKET_MAP_NAME = "Map_NightMarket"
+	property any nightMarketLobbyByUser = {}
+
+	method boolean IsNightMarketMiniGame(string miniGameId)
+		-- 야시장 이벤트 승인이 필요한 로비형 미니게임 판정
+		return miniGameId == self.MINI_GAME_DALGONA_CHALLENGE
+			or miniGameId == _MiniGameLuckyCubeRule.MINI_GAME_ID
+			or miniGameId == _MiniGameFishingRule.MINI_GAME_ID
+			or miniGameId == _MiniGameSnailLadderRule.MINI_GAME_ID
+	end
+
+	method boolean CanAffordNightMarketLobby(string miniGameId, integer mesoBalance, integer coinBalance)
+		-- 게임별 입장 재화와 럭키 큐브 코인 대체 입장 조건 확인
+		if miniGameId == _MiniGameFishingRule.MINI_GAME_ID then
+			return mesoBalance >= _MiniGameFishingRule.ENTRY_MESO
+		end
+		if miniGameId ~= self.MINI_GAME_DALGONA_CHALLENGE
+			and miniGameId ~= _MiniGameLuckyCubeRule.MINI_GAME_ID
+			and miniGameId ~= _MiniGameSnailLadderRule.MINI_GAME_ID then return true end
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil or preset.settlementRule == nil then return false end
+		local rule = preset.settlementRule
+		local settlement = _MiniGameSettlementRule
+		local currency = settlement:ResolveEntryCurrency(rule, mesoBalance)
+		return settlement:GetBetUnitCount(rule, settlement:GetAffordableStake(rule, currency, mesoBalance, coinBalance)) > 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanUseNightMarketLobby(string userId)
+		-- 외출 진행 소유권과 야시장 접근 조건 검증
+		if userId == nil or userId == "" or _OutdoorMapTransitionLogic == nil
+			or not _OutdoorMapTransitionLogic:CanUseOutdoorProgress(userId) then return false end
+		local user = _UserService:GetUserEntityByUserId(userId)
+		return isvalid(user) and isvalid(user.CurrentMap)
+			and user.CurrentMap.Name == self.NIGHT_MARKET_MAP_NAME
+			and _OutdoorMapTransitionLogic:CanAccessOutdoorMap(userId, user.CurrentMap.Name)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean OpenEventNightMarketLobby(any tEvent, string userId)
+		-- EventExecutor가 확인한 이벤트로 로비 승인 후 소유 클라이언트에 전달
+		if tEvent == nil or not self:IsNightMarketMiniGame(tEvent.miniGameId)
+			or not self:CanUseNightMarketLobby(userId)
+			or _MiniGameSessionService:GetActiveSessionForUser(userId) ~= nil then return false end
+		if not self:CanAffordNightMarketLobby(tEvent.miniGameId,
+			_ProgressManager:GetCurrencyBalance(_ProgressManager.CURRENCY_MESO) or 0,
+			_ProgressManager:GetCurrencyBalance(_ProgressManager.CURRENCY_NIGHT_MARKET_COIN) or 0) then return false end
+		local user = _UserService:GetUserEntityByUserId(userId)
+		self.nightMarketLobbyByUser[userId] = { miniGameId = tEvent.miniGameId, mapId = user.CurrentMap.Id }
+		self:PushEventNightMarketLobby(tEvent.miniGameId, user.CurrentMap.Id, userId)
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean CanStartNightMarketMiniGame(string userId, string miniGameId)
+		-- 이벤트 승인 게임과 현재 외출 권한 및 시작 맵 재검증
+		local tLobby = self.nightMarketLobbyByUser[userId]
+		if tLobby == nil or tLobby.miniGameId ~= miniGameId then return false end
+		if not self:CanUseNightMarketLobby(userId) then
+			self:ClearNightMarketLobby(userId)
+			return false
+		end
+		if not self:CanAffordNightMarketLobby(miniGameId,
+			_ProgressManager:GetCurrencyBalance(_ProgressManager.CURRENCY_MESO) or 0,
+			_ProgressManager:GetCurrencyBalance(_ProgressManager.CURRENCY_NIGHT_MARKET_COIN) or 0) then
+			self:ClearNightMarketLobby(userId)
+			return false
+		end
+		local user = _UserService:GetUserEntityByUserId(userId)
+		if user.CurrentMap.Id ~= tLobby.mapId then
+			self:ClearNightMarketLobby(userId)
+			return false
+		end
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method void ClearNightMarketLobby(string userId)
+		-- 이탈 사용자의 로비 승인 정리
+		self.nightMarketLobbyByUser[userId] = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsNightMarketMiniGameUiBusy()
+		-- 실행 중 게임과 야시장 로비 및 결과 화면의 재진입 차단
+		return (_MiniGamePlayLogic ~= nil and _MiniGamePlayLogic.isPlaying == true)
+			or (_MiniGameDalgonaPresenter ~= nil and _MiniGameDalgonaPresenter.tModel ~= nil)
+			or (_MiniGameLuckyCubePresenter ~= nil and _MiniGameLuckyCubePresenter.tModel ~= nil)
+			or (_MiniGameFishingPresenter ~= nil and _MiniGameFishingPresenter.tModel ~= nil)
+			or (_MiniGameSnailLadderPresenter ~= nil and _MiniGameSnailLadderPresenter.tModel ~= nil)
+	end
+
+	@ExecSpace("Client")
+	method void PushEventNightMarketLobby(string miniGameId, string mapId)
+		-- 승인된 맵의 안내 대화를 닫고 공통 처리기를 통해 로비 표시
+		local user = _UserService.LocalPlayer
+		if not isvalid(user) or not isvalid(user.CurrentMap)
+			or user.CurrentMap.Id ~= mapId or self:IsNightMarketMiniGameUiBusy() then return end
+		local progress = _ProgressManager:ClientGetProgress()
+		if not self:CanAffordNightMarketLobby(miniGameId, progress ~= nil and progress.meso or 0,
+			progress ~= nil and progress.nightMarketCoin or 0) then return end
+		if _DialogUILogic ~= nil and _DialogUILogic:IsDialogOpen() then _DialogUILogic:Close() end
+		_MiniGamePlayLogic:OpenLobby(miniGameId)
+	end
+
+	method void OnEndPlay()
+		-- 월드 종료 시 서버와 클라이언트 야시장 로비 승인 정리
+		self.nightMarketLobbyByUser = {}
+	end
+
+	@ExecSpace("Server")
+	method void RequestStartSnailLadder(integer lane, boolean debugRequest, integer betAmount, string expectedCurrency)
+		-- 달팽이 선택과 표시 판돈을 서버에서 재검증
+		local rule = _MiniGameSnailLadderRule
+		if not rule:IsValidLane(lane) then return end
+		if debugRequest and (not Environment:IsMakerPlay() or not _MiniGameDebugLogic.isDebugMode) then return end
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = rule.MINI_GAME_ID
+		tStartOptions.betAmount = betAmount
+		tStartOptions.expectedCurrency = expectedCurrency
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = _EMiniGameContextType.Standalone
+		tStartOptions.isBettingRequest = true
+		tStartOptions.isDebugRequest = debugRequest
+		tStartOptions.cancelOnMapChange = false
+		local sessionId = self:CreateMiniGameSession(tStartOptions)
+		if sessionId == "" then
+			self:PushDalgonaRequestRejected(rule.MINI_GAME_ID, self.REQUEST_REJECTED_START, senderUserId)
+			return
+		end
+		local tSession = _MiniGameSessionService:GetOwnedSession(sessionId, senderUserId)
+		if _MiniGameSessionService:IsActiveSession(tSession) then
+			_MiniGameSnailLadderServerHandler:HandleChoice(tSession, lane)
+		end
+	end
+	@ExecSpace("Server")
+	method void RequestStartLuckyCube(integer betAmount, string choice, boolean debugRequest, string expectedCurrency)
+		-- 최초 선택 검증 후 서버 베팅 세션 생성
+		if _MiniGameLuckyCubeRule:FindChoice(choice) == nil then return end
+		if debugRequest and (not Environment:IsMakerPlay() or not _MiniGameDebugLogic.isDebugMode) then return end
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = _MiniGameLuckyCubeRule.MINI_GAME_ID
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = _EMiniGameContextType.Standalone
+		tStartOptions.betAmount = betAmount
+		tStartOptions.expectedCurrency = expectedCurrency
+		tStartOptions.isBettingRequest = true
+		tStartOptions.isDebugRequest = debugRequest
+		local sessionId = self:CreateMiniGameSession(tStartOptions)
+		if sessionId == "" then
+			self:PushDalgonaRequestRejected(tStartOptions.miniGameId, self.REQUEST_REJECTED_START, senderUserId)
+			return
+		end
+		local tSession = _MiniGameSessionService:GetOwnedSession(sessionId, senderUserId)
+		if _MiniGameSessionService:IsActiveSession(tSession) then _MiniGameLuckyCubeServerHandler:HandleChoice(tSession, choice) end
+	end
+
+	@ExecSpace("Server")
+	method void RequestSnailLadderChoice(string sessionId, integer lane)
+		-- 요청자 소유권과 달팽이 사다리 세션 검증
+		local tSession = _MiniGameSessionService:GetOwnedSession(sessionId, senderUserId)
+		if not _MiniGameSessionService:IsActiveSession(tSession)
+			or tSession.gameKind ~= _EMiniGameKind.SNAIL_LADDER then return end
+		_MiniGameSnailLadderServerHandler:HandleChoice(tSession, lane)
+	end
+	@ExecSpace("Server")
+	method void RequestLuckyCubeChoice(string sessionId, string choice)
+		-- RPC 요청자 소유권과 럭키 큐브 실행 상태 검증
+		local tSession = _MiniGameSessionService:GetOwnedSession(sessionId, senderUserId)
+		if not _MiniGameSessionService:IsActiveSession(tSession)
+			or tSession.gameKind ~= _EMiniGameKind.LUCKY_CUBE then return end
+		_MiniGameLuckyCubeServerHandler:HandleChoice(tSession, choice)
+	end
+
+	@ExecSpace("Client")
+	method void PushSnailLadderState(string sessionId, table tPlainState)
+		-- 현재 세션의 서버 경로와 결과 상태만 반영
+		if not _MiniGamePlayLogic.isPlaying or _MiniGamePlayLogic.sessionId ~= sessionId then return end
+		_MiniGameSnailLadderPresenter:ApplyState(sessionId, MiniGameSnailLadderState():FromPlainTable(tPlainState))
+	end
+	@ExecSpace("Client")
+	method void PushLuckyCubeState(string sessionId, table tPlainState)
+		-- 현재 세션의 서버 주사위 상태만 반영
+		if not _MiniGamePlayLogic.isPlaying or _MiniGamePlayLogic.sessionId ~= sessionId then return end
+		_MiniGameLuckyCubePresenter:ApplyState(sessionId, MiniGameLuckyCubeState():FromPlainTable(tPlainState))
+	end
+
+	@ExecSpace("Server")
+	method void RequestStartMiniGame(string miniGameId, integer contextType, string contextId)
+		-- 클라이언트는 독립 실행만 요청, 콘텐츠 문맥은 서버 호출자로 제한
+		if contextType ~= _EMiniGameContextType.Standalone then return end
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = miniGameId
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = contextType
+		tStartOptions.contextId = contextId or ""
+		self:CreateMiniGameSession(tStartOptions)
+	end
+
+	@ExecSpace("Server")
+	method void RequestStartDalgona(integer betAmount, boolean debugRequest, string expectedCurrency)
+		-- 판돈 검증 후 블록 배치 세션 시작
+		if _MiniGameSessionService:GetActiveSessionForUser(senderUserId) ~= nil
+			or (debugRequest and (not Environment:IsMakerPlay() or not _MiniGameDebugLogic.isDebugMode)) then
+			self:PushDalgonaRequestRejected(self.MINI_GAME_DALGONA_CHALLENGE, self.REQUEST_REJECTED_START, senderUserId)
+			return
+		end
+		local tStartOptions = MiniGameStartOptions()
+		tStartOptions.miniGameId = self.MINI_GAME_DALGONA_CHALLENGE
+		tStartOptions.ownerUserId = senderUserId
+		tStartOptions.contextType = _EMiniGameContextType.Standalone
+		tStartOptions.betAmount = betAmount
+		tStartOptions.expectedCurrency = expectedCurrency
+		tStartOptions.isBettingRequest = true
+		tStartOptions.isDebugRequest = debugRequest
+		if self:CreateMiniGameSession(tStartOptions) == "" then
+			self:PushDalgonaRequestRejected(tStartOptions.miniGameId, self.REQUEST_REJECTED_START, senderUserId)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void DeliverSessionStart(any tSession)
+		-- 소유 클라이언트 한 명에게만 실행 Struct를 plain table로 전달
+		if tSession == nil or tSession.userId == "" then return end
+		local tLaunchContext = _MiniGameSessionService:BuildLaunchContext(tSession)
+		self:PushSessionStarted(tLaunchContext:ToPlainTable(), tSession.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void DeliverSessionActivation(any tSession)
+		-- 소유 클라이언트에 입력 시작 허용 전달
+		if tSession == nil or tSession.userId == nil or tSession.userId == "" then
+			return
+		end
+
+		self:PushSessionActivated(tSession.id, tSession.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PublishMiniGameResult(any tSession)
+		-- 세션 식별 정보를 포함한 서버 확정 결과 발송
+		if tSession == nil then
+			return
+		end
+
+		local miniGameResultEvent = MiniGameResultEvent()
+		miniGameResultEvent.isSuccess = tSession.resultType == _EMiniGameResultType.Success
+		miniGameResultEvent.sessionId = tSession.id
+		miniGameResultEvent.miniGameId = tSession.miniGameId
+		miniGameResultEvent.userId = tSession.userId
+		miniGameResultEvent.contextType = tSession.contextType
+		miniGameResultEvent.contextId = tSession.contextId
+		miniGameResultEvent.resultType = tSession.resultType
+		miniGameResultEvent.score = tSession.score or 0
+		miniGameResultEvent.progress = tSession.progress or 0
+		miniGameResultEvent.reason = tSession.endReason or ""
+		self:SendEvent(miniGameResultEvent)
+	end
+
+	@ExecSpace("Client")
+	method void PushSessionStarted(table tPlainLaunch)
+		-- RPC 실행 정보를 복원한 뒤 클라이언트 Presenter 시작
+		local tLaunchContext = MiniGameLaunchContext():FromPlainTable(tPlainLaunch)
+		_MiniGamePlayLogic:BeginSession(tLaunchContext)
+	end
+
+	@ExecSpace("Client")
+	method void PushSessionActivated(string sessionId)
+		-- 서버 준비 완료를 현재 클라이언트 세션에 반영
+		_MiniGamePlayLogic:HandleSessionActivated(sessionId)
+	end
+
+	@ExecSpace("Client")
+	method void PushCommandFeedback(string sessionId, table tPlainFeedback)
+		-- 서버 커맨드 판정 결과를 현재 세션에 반영
+		local tFeedback = MiniGameCommandFeedbackData():FromPlainTable(tPlainFeedback)
+		_MiniGamePlayLogic:ApplyCommandFeedback(sessionId, tFeedback)
+	end
+
+	@ExecSpace("Client")
+	method void PushSelectionAccepted(string sessionId)
+		-- 서버 배치 확정 결과를 전용 UI에 전달
+		_MiniGamePlayLogic:HandleSelectionAccepted(sessionId)
+	end
+
+	@ExecSpace("Client")
+	method void PushDalgonaRequestRejected(string miniGameId, string reason)
+		-- 시작, 배치, 추첨 거절 사유를 전용 UI에 전달
+		_MiniGamePlayLogic:HandleDalgonaRejected(miniGameId, reason)
+	end
+
+	@ExecSpace("Client")
+	method void PushDalgonaDrawResult(string sessionId, table tPlainDrawResult)
+		-- 서버 추첨 결과 구조체 복원 후 전용 UI 반영
+		local tDrawResult = MiniGameDrawResultData():FromPlainTable(tPlainDrawResult)
+		_MiniGamePlayLogic:HandleDrawResult(sessionId, tDrawResult)
+	end
+
+	@ExecSpace("Client")
+	method void PushValidatedMiniGameResult(string sessionId, table tPlainResult)
+		-- 서버 재계산 결과만 현재 클라이언트 세션에 반영
+		local tResult = MiniGameResultData():FromPlainTable(tPlainResult)
+		_MiniGamePlayLogic:HandleValidatedResult(sessionId, tResult)
+	end
+
+	@ExecSpace("Client")
+	method void PushSessionStopped(string sessionId, string reason)
+		-- 현재 세션과 일치하는 서버 종료 요청만 반영
+		_MiniGamePlayLogic:HandleSessionStopped(sessionId, reason)
+	end
+
+	@ExecSpace("ServerOnly")
+	method string CreateMiniGameSession(any tStartOptions)
+		-- 기존 서버 콘텐츠 호출 API를 공통 콘텐츠 창구로 전달
+		return _MiniGameContentService:Start(tStartOptions, nil)
+	end
+
+	@ExecSpace("Server")
+	method void RequestInputReady(string sessionId)
+		-- 엔진이 확인한 RPC 요청자를 서버 내부 처리에 전달
+		_MiniGameSessionService:HandleInputReady(sessionId, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestSubmitSelection(string sessionId, string payload)
+		-- 엔진이 확인한 RPC 요청자를 서버 내부 처리에 전달
+		_MiniGameSessionService:HandleSelection(sessionId, payload, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestBlockDraw(string sessionId)
+		-- 엔진이 확인한 RPC 요청자를 서버 내부 처리에 전달
+		_MiniGameSessionService:HandleDraw(sessionId, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestCommandInput(string sessionId, integer inputSequence, string keyName, string inputHistoryPayload)
+		-- 엔진이 확인한 RPC 요청자를 서버 내부 처리에 전달
+		_MiniGameSessionService:HandleCommandInput(sessionId, inputSequence, keyName, inputHistoryPayload, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestCancelMiniGame(string sessionId)
+		-- 엔진이 확인한 RPC 요청자를 서버 내부 처리에 전달
+		_MiniGameSessionService:HandleCancel(sessionId, senderUserId)
+	end
+
+	@ExecSpace("Server")
+	method void RequestSubmitMiniGameResult(string sessionId, table tPlainResult)
+		-- 엔진이 확인한 RPC 요청자를 서버 내부 처리에 전달
+		_MiniGameSessionService:HandleClientResult(sessionId, tPlainResult, senderUserId)
+	end
+
+end

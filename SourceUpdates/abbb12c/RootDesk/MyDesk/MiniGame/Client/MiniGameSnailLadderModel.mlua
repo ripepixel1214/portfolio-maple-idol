@@ -1,0 +1,70 @@
+---@description "달팽이 사다리 클라이언트 입력과 표시 상태"
+@Struct
+script MiniGameSnailLadderModel
+	property string sessionId = ""
+	property any tState = nil
+	property boolean requestPending = false
+	property any settlementRule = nil
+	property integer mesoBalance = 0
+
+	method void OpenLobby(integer mesoBalance, integer coinBalance, boolean debugMode)
+		self.sessionId = ""
+		self.settlementRule = _MiniGameTable:FindMiniGame(_MiniGameSnailLadderRule.MINI_GAME_ID).settlementRule
+		self.tState = MiniGameSnailLadderState()
+		self.tState.stage = _MiniGameSnailLadderRule.STAGE_LOBBY
+		self.tState.isDebug = debugMode
+		self.requestPending = false
+		self:UpdateLobbyBalances(mesoBalance, coinBalance)
+	end
+
+	method void UpdateLobbyBalances(integer mesoBalance, integer coinBalance)
+		if self.tState.stage ~= _MiniGameSnailLadderRule.STAGE_LOBBY or self.requestPending then return end
+		self.mesoBalance = mesoBalance
+		self.tState.balance = coinBalance
+		local settlement = _MiniGameSettlementRule
+		self.tState.entryCurrency = settlement:ResolveEntryCurrency(self.settlementRule, mesoBalance)
+		self:SetBet(settlement:GetBetUnitsFromAmount(self.settlementRule, self.tState.bet))
+	end
+
+	method integer GetBetUnitCount()
+		local settlement = _MiniGameSettlementRule
+		return settlement:GetBetUnitCount(self.settlementRule, settlement:GetAffordableStake(self.settlementRule,
+			self.tState.entryCurrency, self.mesoBalance, self.tState.balance))
+	end
+
+	method void SetBet(integer units)
+		if self.tState.stage ~= _MiniGameSnailLadderRule.STAGE_LOBBY or self.requestPending then return end
+		local settlement = _MiniGameSettlementRule
+		self.tState.bet = settlement:GetBetAmountFromUnits(self.settlementRule, math.min(self:GetBetUnitCount(), math.max(1, units)))
+		self.tState.entryAmount = settlement:GetEntryDebit(self.settlementRule, self.tState.entryCurrency, self.tState.bet)
+	end
+
+	method boolean TryChoose(integer lane)
+		-- 중복 입력과 부족 잔액을 차단하고 서버 응답 대기
+		local rule = _MiniGameSnailLadderRule
+		if self.tState == nil or self.requestPending or not rule:IsValidLane(lane) then return false end
+		if self.tState.stage ~= rule.STAGE_LOBBY and self.tState.stage ~= rule.STAGE_READY then return false end
+		if not _MiniGameSettlementRule:IsValidAmount(self.settlementRule, self.tState.bet) then return false end
+		self.tState.selectedLane = lane
+		self.requestPending = true
+		return true
+	end
+
+	method boolean ApplyState(string targetSessionId, any tState)
+		-- 다른 세션과 역순 상태 갱신 폐기
+		if self.tState == nil or self.sessionId ~= targetSessionId or tState == nil then return false end
+		if tState.revision <= self.tState.revision then return false end
+		self.tState = tState
+		self.requestPending = false
+		return true
+	end
+
+	method boolean CanClose()
+		-- 배팅 및 결과 처리 중 화면 종료 차단
+		local rule = _MiniGameSnailLadderRule
+		return self.tState ~= nil and not self.requestPending
+			and (self.tState.stage == rule.STAGE_LOBBY
+				or self.tState.stage == rule.STAGE_READY
+				or self.tState.stage == rule.STAGE_RESULT)
+	end
+end

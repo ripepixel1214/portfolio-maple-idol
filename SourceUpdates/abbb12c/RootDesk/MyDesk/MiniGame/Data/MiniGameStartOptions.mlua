@@ -1,0 +1,17 @@
+---@description "미니게임 시작 설정"
+@Struct
+script MiniGameStartOptions
+
+	property string miniGameId = ""
+	property string ownerUserId = ""
+	property integer contextType = 0
+	property string contextId = ""
+	property string presentationActorId = ""
+	property integer betAmount = 0
+	property string expectedCurrency = ""
+	property boolean isBettingRequest = false
+	property boolean isDebugRequest = false
+	-- 서버 콘텐츠가 맵을 넘어 유지해야 할 때만 명시적으로 해제
+	property boolean cancelOnMapChange = true
+
+end

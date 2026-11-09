@@ -1,0 +1,673 @@
+---@description "클라이언트 측 미니게임 진행 관리 로직"
+@Logic
+script MiniGamePlayLogic extends Logic
+
+	-- 기존 RPC 진입점을 유지하는 클라이언트 Presenter
+	property any tModel = nil
+	property any tBehavior = nil
+	property any tRetainedBehavior = nil
+	property any activeInputConfig = {}
+	property string COMMAND_KEY_UP = "Up"
+	property string COMMAND_KEY_DOWN = "Down"
+	property string COMMAND_KEY_LEFT = "Left"
+	property string COMMAND_KEY_RIGHT = "Right"
+	property string RESULT_REASON_OBJECTIVE = "objective"
+	property string RESULT_REASON_COMPLETE = "complete"
+	property string RESULT_REASON_CANCEL = "cancel"
+	property string RESULT_REASON_MAP_CHANGE = "mapChange"
+	property string RESULT_REASON_RESTART = "restart"
+	property string RESULT_REASON_TIMEOUT = "timeout"
+	property number RESULT_RESPONSE_TIMEOUT_SECONDS = 15
+	property string INTERACTION_GATE_HOLDER = "minigame"
+	property boolean isPlaying = false
+	property boolean inputReady = false
+	property string sessionId = ""
+	property string lastLaunchedSessionId = ""
+	property string miniGameId = ""
+	property integer contextType = -1
+	property string contextId = ""
+	property string presentationActorId = ""
+	property integer betAmount = 0
+	property integer balance = 0
+	property string startMapName = ""
+	property string presentationMapName = ""
+	property boolean cancelOnMapChange = true
+	property string presentationId = ""
+	property any inputEventHandler = nil
+	property boolean gateHeld = false
+	property string pendingPresentationSessionId = ""
+	property boolean awaitingResult = false
+	property number resultWaitElapsed = 0
+
+	-- Public API
+
+	@ExecSpace("ClientOnly")
+	method boolean OpenLobby(string miniGameId)
+		-- 공통 프리셋과 capability 검증 후 승인된 실제 로비 표시
+		if _MiniGameManager:IsNightMarketMiniGameUiBusy() then return false end
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil then return false end
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(preset.gameKind)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if tBehavior == nil or type(tBehavior.openLobby) ~= "function"
+			or not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then return false end
+		tBehavior.openLobby()
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean OpenDebugLobby(string miniGameId, integer testMesoBalance)
+		-- Maker 전용 공통 진입점에서 프리셋과 View 계약 검증 후 로비 초기화
+		if not Environment:IsMakerPlay() or _MiniGameDebugLogic == nil or not _MiniGameDebugLogic.isDebugMode then return false end
+		if self.isPlaying then
+			log_warning("[MiniGamePlay] 진행 중에는 디버그 로비 전환 불가")
+			return false
+		end
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil then
+			log_warning("[MiniGamePlay] 디버그 프리셋 누락 game=" .. tostring(miniGameId))
+			return false
+		end
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(preset.gameKind)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if tBehavior == nil or type(tBehavior.openDebugLobby) ~= "function" then
+			log_warning("[MiniGamePlay] 디버그 로비 처리기 누락 game=" .. miniGameId)
+			return false
+		end
+		if not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then
+			log_warning("[MiniGamePlay] 디버그 UI 연결 실패 game=" .. miniGameId .. " presentation=" .. presentationId)
+			return false
+		end
+		tBehavior.openDebugLobby(math.max(0, testMesoBalance))
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginSession(any tLaunchContext)
+		-- 서버 시작 정보로 Model 생성 후 표시 Context를 선택한 View에 전달
+		if tLaunchContext == nil or tLaunchContext.sessionId == "" or tLaunchContext.miniGameId == "" then
+			return
+		end
+		-- 이미 처리한 서버 실행 통지의 중복 시작 방지
+		if tLaunchContext.sessionId ~= nil
+			and tLaunchContext.sessionId ~= ""
+			and tLaunchContext.sessionId == self.lastLaunchedSessionId then
+			return
+		end
+		self.lastLaunchedSessionId = tLaunchContext.sessionId or ""
+
+		if self.isPlaying == true then
+			self:StopSession(self.RESULT_REASON_RESTART)
+		end
+
+		local foundPreset = _MiniGameTable:FindMiniGame(tLaunchContext.miniGameId)
+		if foundPreset == nil then
+			log_warning("[MiniGamePlay] 알 수 없는 미니게임 id=" .. tostring(tLaunchContext.miniGameId))
+			return
+		end
+
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(foundPreset.gameKind)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(foundPreset.presentations)
+		if tBehavior == nil or _MiniGameUIRouter:CanPresent(presentationId, foundPreset.gameKind) == false then
+			log_warning("[MiniGamePresenter] 처리기 또는 필수 View 기능 누락")
+			_MiniGameManager:RequestCancelMiniGame(tLaunchContext.sessionId)
+			return
+		end
+		self:RetainPresentationBehavior(nil)
+		self.tBehavior = tBehavior
+		if tBehavior.reset ~= nil then tBehavior.reset() end
+		self.sessionId = tLaunchContext.sessionId
+		self.miniGameId = tLaunchContext.miniGameId
+		self.contextType = tLaunchContext.contextType
+		self.contextId = tLaunchContext.contextId or ""
+		self.presentationActorId = tLaunchContext.presentationActorId or ""
+		self.betAmount = tLaunchContext.betAmount or 0
+		self.balance = tLaunchContext.balance or 0
+		self.startMapName = self:GetCurrentMapName()
+		self.presentationMapName = self.startMapName
+		self.cancelOnMapChange = tLaunchContext.cancelOnMapChange ~= false
+		self.presentationId = presentationId
+		self.tModel = MiniGameClientModel()
+		self.tModel:Initialize(foundPreset, tLaunchContext)
+		self.inputReady = false
+		self.isPlaying = true
+		if tBehavior.usesInputHub then
+			self.inputEventHandler = _MiniGameInputHubLogic:ConnectEvent(MiniGameInputEvent, self.OnInputEvent)
+		end
+		self:HoldMovementGate()
+
+		local config = self:BuildInputConfig(foundPreset)
+		if tBehavior.configureInput ~= nil then tBehavior.configureInput(self, config) end
+		self.activeInputConfig = config
+		local skin = foundPreset.skin or {}
+		local instruction = _LocaleTextUtil:GetText(skin.instructionKey or "")
+		if tBehavior.buildInstruction ~= nil then instruction = tBehavior.buildInstruction(self, instruction) end
+		_MiniGameUIRouter:SetPresentation(self.presentationId)
+		local tViewContext = MiniGameViewContext()
+		tViewContext.sessionId = self.sessionId
+		tViewContext.gameKind = foundPreset.gameKind
+		tViewContext.inputType = self.tModel.inputType
+		tViewContext.title = _LocaleTextUtil:GetText(skin.titleKey or "")
+		tViewContext.instruction = instruction
+		tViewContext.presentationActorId = self.presentationActorId
+		tViewContext.betAmount = self.betAmount
+		tViewContext.balance = self.balance
+		tViewContext.mesoBalance = tLaunchContext.mesoBalance
+		tViewContext.coinBalance = tLaunchContext.coinBalance
+		tViewContext.isDebug = tLaunchContext.isDebug
+		tViewContext.entryCurrency = tLaunchContext.entryCurrency
+		tViewContext.entryAmount = tLaunchContext.entryAmount
+		_MiniGameUIRouter:OpenForSession(tViewContext)
+		if tBehavior.prepareView ~= nil then tBehavior.prepareView(self, tViewContext) end
+		if tBehavior.isViewReady ~= nil and tBehavior.isViewReady(self) == false then
+			self.pendingPresentationSessionId = self.sessionId
+		else
+			self:StartSessionPresentation(self.sessionId, config)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompletePendingPresentation()
+		-- 선택한 처리기의 View 준비 완료 후 세션 활성화
+		if self.pendingPresentationSessionId == "" then return end
+		if self.tBehavior.isViewReady ~= nil and self.tBehavior.isViewReady(self) == false then return end
+		local targetSessionId = self.pendingPresentationSessionId
+		self.pendingPresentationSessionId = ""
+		self:StartSessionPresentation(targetSessionId, self.activeInputConfig)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartSessionPresentation(string targetSessionId, any inputConfig)
+		-- 처리기별 활성화 절차 후 공통 입력과 화면 표시
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.startPresentation ~= nil and self.tBehavior.startPresentation(self, targetSessionId, inputConfig) == true then
+			return
+		end
+		self:GetViewCapability(_MiniGameViewRegistry.CAP_STAGE):SelectStage(self.tModel.inputType, self.tModel.useGauge)
+		if self.tBehavior.usesInputHub then
+			if _MiniGameInputHubLogic:IsRunning() == false then
+				_MiniGameInputHubLogic:StartInputs(targetSessionId, self:BuildInputChannelConfigs(inputConfig))
+			end
+			_MiniGameInputHubLogic:EnableInputs()
+		end
+		self:CompleteInputReady(targetSessionId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleSessionActivated(string targetSessionId)
+		-- 활성 세션의 서버 승인만 처리기에 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.activate == nil then return end
+		self.tBehavior.activate(self)
+		self:StartSessionPresentation(targetSessionId, self.activeInputConfig)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CompleteInputReady(string targetSessionId)
+		-- 서버 활성화 완료 후 입력과 완성 UI 표시
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then
+			return
+		end
+
+		self.inputReady = true
+		self:PushHud()
+		_MiniGameUIRouter:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyCommandFeedback(string targetSessionId, any tFeedback)
+		-- 기존 RPC 진입점을 유지하고 처리기에 서버 피드백 위임
+		if self.isPlaying == false or self.sessionId ~= targetSessionId or tFeedback == nil then return end
+		if self.tBehavior.commandFeedback ~= nil then self.tBehavior.commandFeedback(self, tFeedback) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any BuildInputConfig(any presetData)
+		-- 프리셋을 런타임 입력 설정으로 변환, 키 이름 [->] KeyboardKey 해석
+		local source = presetData.inputConfig or {}
+		local config = {}
+
+		if source.targetKeyName ~= nil then
+			config.targetKeyName = source.targetKeyName
+			config.targetKey = self:ResolveKey(source.targetKeyName)
+		end
+		if source.perfectWindow ~= nil then
+			config.perfectWindow = source.perfectWindow
+		end
+		if source.goodWindow ~= nil then
+			config.goodWindow = source.goodWindow
+		end
+		if source.timings ~= nil then
+			config.timings = source.timings
+		end
+		if source.gaugePerInput ~= nil then
+			config.gaugePerInput = source.gaugePerInput
+		end
+		if source.moveEpsilon ~= nil then
+			config.moveEpsilon = source.moveEpsilon
+		end
+		if source.resetOnError ~= nil then
+			config.resetOnError = source.resetOnError
+		end
+		if source.swipeMinDistance ~= nil then
+			config.swipeMinDistance = source.swipeMinDistance
+		end
+		if source.sequenceNames ~= nil then
+			config.sequenceNames = source.sequenceNames
+			config.sequence = self:ResolveKeySequence(source.sequenceNames)
+		end
+
+		return config
+	end
+
+	@ExecSpace("ClientOnly")
+	method any BuildInputChannelConfigs(any primaryRuntimeConfig)
+		-- 프리셋 채널 설정에 현재 게임의 동적 입력값을 병합
+		local channels = {}
+		local sourceChannels = self.tModel.preset ~= nil and self.tModel.preset.inputChannels or nil
+		if sourceChannels == nil then
+			return channels
+		end
+
+		for _, sourceChannel in ipairs(sourceChannels) do
+			local config = {}
+			for key, value in pairs(sourceChannel.config or {}) do
+				config[key] = value
+			end
+			if sourceChannel.id == _MiniGameInputHubLogic.DEFAULT_CHANNEL_ID then
+				for key, value in pairs(primaryRuntimeConfig or {}) do
+					config[key] = value
+				end
+			end
+			table.insert(channels, {
+				id = sourceChannel.id,
+				adapter = sourceChannel.adapter,
+				config = config
+			})
+		end
+
+		return channels
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ResolveKey(string keyName)
+		-- 키 이름을 KeyboardKey 값으로 변환
+		if keyName == "Space" then
+			return KeyboardKey.Space
+		elseif keyName == self.COMMAND_KEY_UP then
+			return KeyboardKey.UpArrow
+		elseif keyName == self.COMMAND_KEY_DOWN then
+			return KeyboardKey.DownArrow
+		elseif keyName == self.COMMAND_KEY_LEFT then
+			return KeyboardKey.LeftArrow
+		elseif keyName == self.COMMAND_KEY_RIGHT then
+			return KeyboardKey.RightArrow
+		elseif keyName == "Enter" then
+			return KeyboardKey.Return
+		end
+
+		return KeyboardKey.Space
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ResolveKeySequence(any keyNames)
+		-- 키 이름 배열을 KeyboardKey 배열로 변환
+		local result = {}
+		for i = 1, #keyNames do
+			result[i] = self:ResolveKey(keyNames[i])
+		end
+
+		return result
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnInputEvent(any event)
+		-- 게임별 전후 처리 사이에서 공통 Model 입력 적용
+		if self.isPlaying == false or self.inputReady == false or event.sessionId ~= self.sessionId then return end
+		if self.tModel.gameKind == _EMiniGameKind.RAPID_PRESS_COUNT
+			or self.tModel.gameKind == _EMiniGameKind.GAUGE_MAINTENANCE then
+			if event.action == _EMiniGameInputAction.Input then
+				self.tModel.tInputProof:AddSample(self.tModel.elapsed, 0, 0)
+			end
+		elseif self.tModel.gameKind == _EMiniGameKind.TIMING_ACCURACY then
+			if (event.action == _EMiniGameInputAction.Hit or event.action == _EMiniGameInputAction.Miss)
+				and event.keyName ~= nil and event.keyName ~= "" then
+				self.tModel.tInputProof:AddSample(_TimingInputLogic.elapsed, 0, 0)
+			end
+		end
+		if self.tBehavior.beforeInput ~= nil then self.tBehavior.beforeInput(self, event) end
+		self.tModel:ApplyInput(event)
+		if self.tBehavior.afterInput ~= nil then self.tBehavior.afterInput(self, event) end
+		if event.isTerminal == true then
+			self:FinishSessionLocally(self.tModel:CheckObjectives(), self.RESULT_REASON_COMPLETE)
+			return
+		end
+		local met = self.tModel:CheckObjectives()
+		self:PushHud()
+		if met and self.tModel:CanFinishOnObjectives() then
+			self:FinishSessionLocally(true, self.RESULT_REASON_OBJECTIVE)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnUpdate(number delta)
+		-- RuleEngine 시간 상태를 진행하고 종료 조건을 판정
+		if self.isPlaying == false then
+			local mapName = self:GetCurrentMapName()
+			if self.presentationMapName ~= "" and mapName ~= "" and mapName ~= self.presentationMapName then
+				self:RetainPresentationBehavior(nil)
+				_MiniGameUIRouter:CloseActive()
+			end
+			return
+		end
+
+		self:CompletePendingPresentation()
+		if not self.isPlaying or self.tModel == nil then return end
+
+		local currentMapName = self:GetCurrentMapName()
+		if self.cancelOnMapChange and self.startMapName ~= ""
+			and currentMapName ~= ""
+			and currentMapName ~= self.startMapName then
+			local leavingSessionId = self.sessionId
+			_MiniGameManager:RequestCancelMiniGame(leavingSessionId)
+			self:StopSession(self.RESULT_REASON_MAP_CHANGE)
+			return
+		end
+
+		if self.awaitingResult then
+			self.resultWaitElapsed += delta
+			if self.resultWaitElapsed >= self.RESULT_RESPONSE_TIMEOUT_SECONDS then
+				_MiniGameManager:RequestCancelMiniGame(self.sessionId)
+				self:StopSession(self.RESULT_REASON_TIMEOUT)
+			end
+			return
+		end
+
+		if self.inputReady == false then
+			return
+		end
+
+		local tResult = self.tModel:Update(delta)
+		if tResult ~= nil then
+			self:FinishWithResult(tResult)
+			return
+		end
+		self:PushHud()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void PushHud()
+		-- 공통 상태 표시와 게임별 추가 연출 갱신
+		local view = self:GetViewCapability(_MiniGameViewRegistry.CAP_HUD)
+		if view ~= nil then
+			local tHudState = MiniGameHudState()
+			tHudState.progress = self.tModel.lastProgress
+			tHudState.timeRemaining = self.tModel.timeRemaining
+			tHudState.showTimer = self.tModel.timeMode == _EMiniGameTimeMode.Countdown and self.tModel.useGauge == false
+			tHudState.gaugeRatio = self.tModel:GetGaugeRatio()
+			tHudState.useGauge = self.tModel.useGauge
+			tHudState.displayText = self.tModel:GetHeadlineText()
+			view:UpdateHud(tHudState)
+		end
+		if self.tBehavior.updateView ~= nil then self.tBehavior.updateView(self) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishSelectionSessionFromServer(string targetSessionId)
+		-- 서버 추첨 결과 표시를 유지한 채 로컬 세션과 이동 잠금 정리
+		if self.isPlaying == false
+			or self.tBehavior.acceptsSelection == false
+			or self.sessionId ~= targetSessionId then
+			return
+		end
+
+		self.isPlaying = false
+		self:DisconnectInput()
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishSessionLocally(boolean success, string reason)
+		-- 로컬 Model 판정 결과로 종료 요청
+		if self.isPlaying == false or self.tModel == nil then return end
+		self:FinishWithResult(self.tModel:BuildResult(success, reason))
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishSessionFromServer(boolean success, string reason)
+		-- 서버 확정 결과 표시 후 제출 없이 로컬 상태 정리
+		if self.isPlaying == false then
+			return
+		end
+
+		self.isPlaying = false
+		self:DisconnectInput()
+		_MiniGameInputHubLogic:StopInputs(reason)
+		self:ShowResult(success, reason, self.tModel:GetResultDetail())
+
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StopSession(string reason)
+		-- 서버 종료, 취소 시 결과 제출 없이 클라이언트 상태 정리
+		if self.isPlaying == false then
+			return
+		end
+
+		self.isPlaying = false
+		self:DisconnectInput()
+		_MiniGameInputHubLogic:StopInputs(reason)
+		_MiniGameUIRouter:CloseActive()
+		self:ClearState()
+
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleSessionStopped(string targetSessionId, string reason)
+		-- 늦게 도착한 다른 세션 종료 응답 폐기
+		if targetSessionId == nil or targetSessionId == "" then
+			return
+		end
+		if self.sessionId ~= targetSessionId then
+			return
+		end
+		self:StopSession(reason)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DisconnectInput()
+		-- 입력 이벤트 구독 해제
+		if self.inputEventHandler ~= nil then
+			_MiniGameInputHubLogic:DisconnectEvent(MiniGameInputEvent, self.inputEventHandler)
+			self.inputEventHandler = nil
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HoldMovementGate()
+		-- 미니게임 진행 중 전용 점유자로 플레이어 이동 잠금
+		if self.gateHeld == true then
+			return
+		end
+		if _NpcInteractionGateLogic == nil then
+			return
+		end
+
+		_NpcInteractionGateLogic:Hold(self.INTERACTION_GATE_HOLDER)
+		self.gateHeld = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReleaseMovementGate()
+		-- 미니게임이 점유한 이동 잠금만 해제
+		if self.gateHeld == false then
+			return
+		end
+
+		self.gateHeld = false
+		if _NpcInteractionGateLogic ~= nil then
+			_NpcInteractionGateLogic:Unhold(self.INTERACTION_GATE_HOLDER)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method string GetCurrentMapName()
+		-- 로컬 플레이어의 현재 맵 이름 반환
+		if _UserService == nil then
+			return ""
+		end
+		local player = _UserService.LocalPlayer
+		if player == nil or isvalid(player.CurrentMap) == false then
+			return ""
+		end
+		return player.CurrentMap.Name or ""
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearState()
+		-- 세션별 Model 참조와 Presenter 수명 상태 정리
+		if self.tBehavior ~= nil and self.tBehavior.endSession ~= nil then self.tBehavior.endSession(self) end
+		self.tRetainedBehavior = self.tBehavior
+		self.tBehavior = nil
+		self.activeInputConfig = {}
+		self:ReleaseMovementGate()
+		self.inputReady = false
+		self.sessionId = ""
+		self.miniGameId = ""
+		self.contextType = _EMiniGameContextType.None
+		self.contextId = ""
+		self.presentationActorId = ""
+		self.betAmount = 0
+		self.balance = 0
+		self.startMapName = ""
+		self.presentationId = ""
+		self.tModel = nil
+		self.pendingPresentationSessionId = ""
+		self.awaitingResult = false
+		self.resultWaitElapsed = 0
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 월드 종료 시 입력 구독과 이동 잠금 정리
+		if self.isPlaying == true then
+			self:StopSession(self.RESULT_REASON_CANCEL)
+		end
+		self:DisconnectInput()
+		self:ReleaseMovementGate()
+		self:RetainPresentationBehavior(nil)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void FinishWithResult(any tResult)
+		-- 입력 수명 정리 후 View와 서버에 결과 전달
+		if self.isPlaying == false or self.awaitingResult or tResult == nil then return end
+		if self.tModel.tInputProof:SupportsGameKind(self.tModel.gameKind) and tResult.reason ~= self.RESULT_REASON_CANCEL then
+			self.awaitingResult = true
+			self.resultWaitElapsed = 0
+			self.inputReady = false
+			self:DisconnectInput()
+			_MiniGameInputHubLogic:StopInputs(tResult.reason)
+			local tProof = self.tModel.tInputProof
+			tProof.elapsed = self.tModel.elapsed
+			if self.tModel.gameKind == _EMiniGameKind.TIMING_ACCURACY then
+				tProof.elapsed = math.max(tProof.elapsed, _TimingInputLogic.elapsed)
+			end
+			local tPlainResult = tResult:ToPlainTable()
+			tPlainResult.inputProof = tProof:ToPlainTable()
+			_MiniGameManager:RequestSubmitMiniGameResult(self.sessionId, tPlainResult)
+			return
+		end
+		self.isPlaying = false
+		self:DisconnectInput()
+		_MiniGameInputHubLogic:StopInputs(tResult.reason)
+		self:ShowResult(tResult.success, tResult.reason, self.tModel:GetResultDetail())
+		local submittedSessionId = self.sessionId
+		if tResult.reason == self.RESULT_REASON_CANCEL then
+			_MiniGameManager:RequestCancelMiniGame(submittedSessionId)
+		else
+			_MiniGameManager:RequestSubmitMiniGameResult(submittedSessionId, tResult:ToPlainTable())
+		end
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleValidatedResult(string targetSessionId, any tResult)
+		-- 일치하는 세션의 서버 수치로 결과 화면 확정
+		if not self.isPlaying or not self.awaitingResult or self.sessionId ~= targetSessionId or tResult == nil then return end
+		self.tModel.successCount = tResult.successCount
+		self.tModel.hitCount = tResult.hitCount
+		self.tModel.shapeRatio = tResult.shapeRatio
+		self.tModel.lastProgress = tResult.progress
+		self.tModel.lastAccuracy = tResult.accuracy
+		self:FinishSessionFromServer(tResult.success, tResult.reason)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleSelectionAccepted(string targetSessionId)
+		-- 현재 세션의 선택 승인만 등록된 처리기로 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.selectionAccepted ~= nil then self.tBehavior.selectionAccepted(self, targetSessionId) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleDrawResult(string targetSessionId, any tDrawResult)
+		-- 현재 세션의 추첨 결과만 등록된 처리기로 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.drawResult ~= nil then self.tBehavior.drawResult(self, targetSessionId, tDrawResult) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleDalgonaRejected(string miniGameId, string reason)
+		-- 시작 전 거절 응답도 프리셋의 처리기로 전달
+		if self.isPlaying and self.miniGameId ~= miniGameId then return end
+		local preset = _MiniGameTable:FindMiniGame(miniGameId)
+		if preset == nil then return end
+		local tBehavior = _MiniGameClientHandlerRegistry:Resolve(preset.gameKind)
+		if tBehavior ~= nil and tBehavior.requestRejected ~= nil then tBehavior.requestRejected(miniGameId, reason) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SubmitSelection(string targetSessionId, string payload)
+		-- 선택 제출을 지원하는 현재 세션의 배치 의도 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.acceptsSelection == false then return end
+		_MiniGameManager:RequestSubmitSelection(targetSessionId, payload)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RequestDraw(string targetSessionId)
+		-- 선택 제출을 지원하는 현재 세션의 추첨 의도 전달
+		if self.isPlaying == false or self.sessionId ~= targetSessionId then return end
+		if self.tBehavior.acceptsSelection == false then return end
+		_MiniGameManager:RequestBlockDraw(targetSessionId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetViewCapability(string capabilityId)
+		-- 현재 View의 기능별 계약 반환
+		return _MiniGameUIRouter:GetCapability(capabilityId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowResult(boolean success, string reason, string detailText)
+		-- 일반 결과 화면을 제공하는 View에 결과 전달
+		local view = self:GetViewCapability(_MiniGameViewRegistry.CAP_RESULT)
+		if view ~= nil then view:ShowResult(success, reason, detailText) end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RetainPresentationBehavior(any tBehavior)
+		-- 로비, 결과 화면의 처리기를 다음 세션 또는 월드 종료까지 보관
+		if self.isPlaying then return end
+		local tPreviousBehavior = self.tRetainedBehavior
+		self.tRetainedBehavior = tBehavior
+		self.presentationMapName = tBehavior ~= nil and self:GetCurrentMapName() or ""
+		-- 화면 해제 중 프레임 재진입 전에 보관 참조부터 분리
+		if tPreviousBehavior ~= nil and tPreviousBehavior.reset ~= nil then
+			tPreviousBehavior.reset()
+		end
+	end
+
+end

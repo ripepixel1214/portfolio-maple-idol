@@ -1,0 +1,151 @@
+---@description "럭키 큐브 입력과 서버 상태의 화면 연결 로직"
+@Logic
+script MiniGameLuckyCubePresenter extends Logic
+	property string TEXT_UI_LUCKY_CUBE_START_FAILED = "ui.lucky_cube.start_failed"
+	property any tModel = nil
+	property any view = nil
+	property any progressChangedHandler = nil
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 로비 잔액 동기화 구독
+		if self.progressChangedHandler == nil then
+			self.progressChangedHandler = _ProgressManager:ConnectEvent(ProgressChangedEvent, self.OnProgressChanged)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnProgressChanged(any progressChangedEvent)
+		-- 진행 중 서버 스냅샷은 유지하고 로비의 재화와 판돈만 재계산
+		if self.tModel == nil or self.tModel.tState.isDebug or self.tModel.requestPending
+			or self.tModel.tState.stage ~= _MiniGameLuckyCubeRule.STAGE_LOBBY then return end
+		local progress = _ProgressManager:ClientGetProgress()
+		if progress == nil then return end
+		self.tModel:UpdateLobbyBalances(math.floor(progress.meso or 0), math.floor(progress.nightMarketCoin or 0))
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- NPC와 콘텐츠에서 사용하는 실제 메소·야시장 코인 잔액으로 로비 진입점
+		local progress = _ProgressManager:ClientGetProgress()
+		self:OpenLobbyWithBalance(progress ~= nil and math.floor(progress.nightMarketCoin or 0) or 0, false,
+			progress ~= nil and math.floor(progress.meso or 0) or 0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenDebugLobby(integer testBalance)
+		-- Maker 전용 가상 야시장 코인 테스트, 실제 진행 데이터 미변경
+		if not Environment:IsMakerPlay() then return end
+		local entry = _MiniGameTable:FindMiniGame(_MiniGameLuckyCubeRule.MINI_GAME_ID).settlementRule
+		self:OpenLobbyWithBalance(testBalance, true, testBalance * entry.entryMeso / entry.entryCoin)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobbyWithBalance(integer balance, boolean debugMode, integer mesoBalance)
+		if _MiniGamePlayLogic.isPlaying then return end
+		local preset = _MiniGameTable:FindMiniGame(_MiniGameLuckyCubeRule.MINI_GAME_ID)
+		local presentationId = _MiniGameUIRouter:ResolvePresentationId(preset.presentations)
+		if not _MiniGameUIRouter:CanPresent(presentationId, preset.gameKind) then return end
+		_MiniGamePlayLogic:RetainPresentationBehavior(_MiniGameClientHandlerRegistry:Resolve(preset.gameKind))
+		_MiniGameUIRouter:SetPresentation(presentationId)
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_DICE)
+		self.tModel = MiniGameLuckyCubeModel()
+		self.tModel:OpenLobby(balance, debugMode, mesoBalance)
+		self.view:OpenLobby()
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void BeginSession(any tContext)
+		-- 시작 응답과 최초 서버 스냅샷 사이에도 두 잔액 표시 유지
+		self.view = _MiniGameUIRouter:GetCapability(_MiniGameViewRegistry.CAP_DICE)
+		self.tModel = MiniGameLuckyCubeModel()
+		self.tModel:OpenLobby(tContext.coinBalance, tContext.isDebug, tContext.mesoBalance)
+		self.tModel.sessionId = tContext.sessionId
+		self.tModel.tState.bet = tContext.betAmount
+		self.tModel.tState.entryCurrency = tContext.entryCurrency
+		self.tModel.tState.entryAmount = tContext.entryAmount
+		self.tModel.tState.stage = _MiniGameLuckyCubeRule.STAGE_READY
+		self.tModel.requestPending = true
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetBet(integer units)
+		if self.tModel == nil then return end
+		self.tModel:SetBet(units)
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Choose(string choice)
+		if self.tModel == nil or not self.tModel:TryChoose(choice) then return end
+		self:Render()
+		if self.tModel.sessionId == "" then
+			local tState = self.tModel.tState
+			_MiniGameManager:RequestStartLuckyCube(tState.bet, choice, tState.isDebug, tState.entryCurrency)
+		else
+			_MiniGameManager:RequestLuckyCubeChoice(self.tModel.sessionId, choice)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ApplyState(string sessionId, any tState)
+		if self.tModel == nil or not self.tModel:ApplyState(sessionId, tState) then return end
+		self:Render()
+		if tState.stage == _MiniGameLuckyCubeRule.STAGE_RESULT then
+			_MiniGamePlayLogic:FinishSelectionSessionFromServer(sessionId)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HandleRejected(string miniGameId)
+		if miniGameId ~= _MiniGameLuckyCubeRule.MINI_GAME_ID or self.tModel == nil then return end
+		self.tModel.requestPending = false
+		self:OnProgressChanged(nil)
+		self.tModel.message = self.TEXT_UI_LUCKY_CUBE_START_FAILED
+		self:Render()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render()
+		-- View에는 Model 대신 복사된 표시 데이터 전달
+		if self.tModel == nil or self.view == nil then return end
+		local tState = MiniGameLuckyCubeState():FromPlainTable(self.tModel.tState:ToPlainTable())
+		self.view:RenderState(tState, self.tModel.requestPending, self.tModel.message)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		if self.tModel == nil or not self.tModel:CanClose() then return end
+		if _MiniGamePlayLogic.isPlaying then
+			_MiniGameManager:RequestCancelMiniGame(self.tModel.sessionId)
+			_MiniGamePlayLogic:StopSession(_MiniGamePlayLogic.RESULT_REASON_CANCEL)
+		end
+		self:ClearState()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EndSession()
+		-- 정상 결과 화면은 확인까지 유지
+		if self.tModel ~= nil and self.tModel.tState.stage ~= _MiniGameLuckyCubeRule.STAGE_RESULT then self:ClearState() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClearState()
+		if self.view ~= nil then self.view:Close() end
+		self.tModel = nil
+		self.view = nil
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 로비 갱신 구독과 보관 상태 해제
+		if self.progressChangedHandler ~= nil then
+			_ProgressManager:DisconnectEvent(ProgressChangedEvent, self.progressChangedHandler)
+			self.progressChangedHandler = nil
+		end
+		self:ClearState()
+	end
+end

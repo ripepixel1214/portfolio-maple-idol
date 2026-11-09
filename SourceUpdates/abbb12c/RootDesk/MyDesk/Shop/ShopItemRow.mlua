@@ -1,0 +1,39 @@
+@Struct
+script ShopItemRow
+
+	property string shopItemId = ""
+
+	property string nameKey = ""
+
+	property string name = ""
+
+	property string category = ""
+
+	-- 캐릭터 영입 상품의 기본 캐릭터 ID, 치장 상품은 빈 값
+	property string characterId = ""
+
+	-- 원본 테이블의 결제 재화 키
+	property string coinType = ""
+
+	property integer price = 0
+
+	property string ruid = ""
+
+	property string grantItemId = ""
+	property string grantCurrencyId = ""
+	property integer grantCount = 0
+
+	-- 패키지에서 지급할 치장 상품 ID 목록
+	property table packageCostumeIds = {}
+
+	property table drawDrops = {}
+
+	-- 단독 구매 없이 패키지로만 지급할 치장 상품
+	property boolean packageOnly = false
+
+	-- 상점에 표시할 크기(px)
+	property number width = 0
+
+	property number height = 0
+
+end

@@ -1,0 +1,873 @@
+---@description "잡아라! 날치왕 화면 표시, 좌표 변환과 연출"
+@Component
+script MiniGameFishingStageView extends Component
+	@HideFromInspector
+	property boolean initialized = false
+	property string TEXT_UI_FISHING_RESULT = "ui.fishing.result"
+	property string TEXT_UI_FISHING_TITLE = "ui.fishing.title"
+	property string TEXT_UI_FISHING_BOMB = "ui.fishing.bomb"
+	property string TEXT_UI_FISHING_SAVING = "ui.fishing.saving"
+	property string TEXT_UI_COMMON_EXIT = "ui.common.exit"
+	property string TEXT_UI_FISHING_READY = "ui.fishing.ready"
+	property string TEXT_UI_FISHING_ENTRY_PENDING = "ui.fishing.entry_pending"
+	property string TEXT_UI_COMMON_CONFIRM = "ui.common.confirm"
+	property string TEXT_UI_RESULT_TITLE = "ui.result_popup.title"
+	property string TEXT_UI_FISHING_RETRY_SAVE = "ui.fishing.retry_save"
+	property string TEXT_UI_COMMON_PAUSE = "ui.common.pause"
+	property string TEXT_UI_FISHING_START = "ui.fishing.start"
+	property string TEXT_UI_COMMON_START = "ui.common.start"
+	property string TEXT_UI_FISHING_HIT_BOMB = "ui.fishing.hit_bomb"
+	property string TEXT_UI_FISHING_STUN_TIME = "ui.fishing.stun_time"
+	property Entity root = nil
+	property Entity background = nil
+	property Entity effectsLayer = nil
+	property Entity hitTemplate = nil
+	property Entity stunEffect = nil
+	property TextGUIRendererComponent stunTimeText = "35fcf72a-8abf-4b33-a065-a10c43378c8c"
+	property Entity bombFlash = nil
+	property string VISUAL_PART_COMPONENT = "script.MiniGameFishingVisualPart"
+	property string HIT_NAME_PREFIX = "FishingHit_"
+	property number HIT_EFFECT_SECONDS = 0.6
+	property number spearIdleY = 0
+	property boolean spearIdleReady = false
+	property number bombFlashRemaining = 0
+	property number BOMB_SHAKE_SECONDS = 0.35
+	property number BOMB_SHAKE_DISTANCE = 18
+	property number REFERENCE_SCREEN_HEIGHT = 1080
+	property number BOMB_SHAKE_FREQUENCY = 14
+	property integer backgroundShakeId = 0
+	property string SPEAR_SFX_RUID = "9925041d48474aeeab6df6e0c4368097"
+	property string CATCH_SFX_RUID = "dd3c14025a4a4966bdbaaf744c2a2d6f"
+	property string BOMB_SFX_RUID = "7eaf9dc3ad3d47f6bff9872da63b9653"
+	property integer lastShotSequence = 0
+	property integer lastHitSequence = 0
+	property any activeHitEffects = {}
+	property Entity board = nil
+	property Entity fishTemplate = nil
+	property Entity spear = nil
+	property Entity entryPopup = nil
+	property Entity entryPopupPanel = nil
+	property Entity entryBalanceRow = nil
+	property Entity entryBetRow = nil
+	property number POPUP_POP_SECONDS = 0.35
+	property number POPUP_START_SCALE = 0.8
+	property number POPUP_CLOSE_SECONDS = 0.2
+	property table popupCloseEffects = {}
+	property Entity startButton = nil
+	property TextGUIRendererComponent introTitleText = "5e7a81d9-f29c-4c38-8625-e4e00f5e962e"
+	property Entity retryButton = nil
+	property Entity entryExitButton = nil
+	property Entity resultPopup = nil
+	property Entity resultPopupPanel = nil
+	property Entity confirmButton = nil
+	property TextGUIRendererComponent resultTitleText = "c06ef898-b736-456c-a11f-d897295d1614"
+	property TextGUIRendererComponent rewardNameText = "fe14e718-0030-4f45-9bf0-655799783e93"
+	property TextGUIRendererComponent rewardCountText = "3b7635e6-0a6b-465c-b7d7-000265901dfe"
+	property TextGUIRendererComponent scoreText = "b9f6e739-f81f-41f6-8b74-84b3c31bc707"
+	property TextGUIRendererComponent timeText = "c25e5283-0838-4576-987b-f9b51aa71770"
+	property TextGUIRendererComponent messageText = "e1e80542-0a86-46ee-b2ef-98d3f48887f2"
+	property TextGUIRendererComponent resultText = "b556bbd4-34a9-407c-bd71-d32fee69b4ec"
+	property SpriteGUIRendererComponent rewardImage = "ed541478-7dac-42ad-bc7f-47b08b6c3626"
+	property SpriteGUIRendererComponent timeGauge = nil
+	-- Model에서 복사한 표시용 스냅샷
+	property any tState = nil
+	property boolean requestPending = false
+	property boolean canClose = false
+	property number snapshotAge = 0
+	property number FISH_CLOCK_CORRECTION_RATE = 2
+	property number FISH_CLOCK_MAX_SPEED_ADJUSTMENT = 0.1
+	-- 서버 스냅샷 교체와 독립적으로 진행하는 물고기 표시 시간
+	property number fishRenderElapsed = 0
+	property number localPlayerX = 550
+	property any tFishPool = nil
+	property any tBombPool = nil
+	property any visualsByFishId = {}
+	property table retiredFishIds = {}
+	property any bindings = {}
+	property string POOL_NAME_PREFIX = "FishingObject_"
+	property Vector2 POOL_POSITION = Vector2(-10000, -10000)
+	property integer FISH_POOL_PREWARM_COUNT = 64
+	property integer BOMB_POOL_PREWARM_COUNT = 64
+	property integer HIT_POOL_PREWARM_COUNT = 16
+	property number LAYOUT_READY_EPSILON = 0.1
+	property integer nextVisualId = 0
+	property any tHitPool = nil
+	property any allFishVisuals = {}
+	property any allHitVisuals = {}
+	property any laneOffsets = {}
+	property number boardWidth = 0
+	property number boardHeight = 0
+	property number boardScaleX = 1
+	property number boardScaleY = 1
+
+	@ExecSpace("ClientOnly")
+	method void Bind(Entity entity, any eventType, any callback)
+		if not isvalid(entity) then return end
+		local handle = entity:ConnectEvent(eventType, callback)
+		table.insert(self.bindings, {entity = entity, eventType = eventType, handle = handle})
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		self:Initialize()
+	end
+
+	@ExecSpace("ClientOnly")
+	method Entity GetStageRoot()
+		-- 낚시 화면 루트 제공
+		return self.root
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean IsVisible()
+		-- 선택된 Stage의 표시 여부 제공
+		return isvalid(self.root) and self.root.Enable
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetCapabilities()
+		if not isvalid(self.root) or not isvalid(self.board) then return {} end
+		return {[_MiniGameViewRegistry.CAP_STAGE] = self, [_MiniGameViewRegistry.CAP_FISHING] = self}
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenLobby()
+		-- 표시용 스냅샷과 이전 연출만 초기화
+		self:Close()
+		self:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OpenForSession(any tContext)
+		self:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowActiveSession()
+		-- 낚시 화면 표시 의도를 공통 Router로 전달
+		self:WarmPools()
+		_MiniGameUIRouter:SetStageVisible(self.root, true)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SelectStage(integer inputType, boolean useGauge)
+		self:ShowActiveSession()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderState(any tViewState)
+		-- Presenter에서 받은 표시용 복사와 서버 적중 연출 반영
+		if tViewState == nil or tViewState.tState == nil then return end
+		local wasPlaying = self.tState ~= nil and self.tState.stage == _MiniGameFishingRule.STAGE_PLAYING
+		self.tState = tViewState.tState
+		if not wasPlaying or self.tState.stage ~= _MiniGameFishingRule.STAGE_PLAYING then
+			self.fishRenderElapsed = self.tState.elapsed
+		end
+		self.requestPending = tViewState.requestPending
+		self.canClose = tViewState.canClose
+		self.snapshotAge = tViewState.snapshotAge
+		-- 참가비와 보유량은 시작 대기 화면에만 표시
+		local ready = self.tState.stage == _MiniGameFishingRule.STAGE_READY
+		self.entryBalanceRow.Enable = ready
+		self.entryBetRow.Enable = ready
+		if ready then
+			local settlement = _MiniGameSettlementRule
+			local amount = self.tState.isDebug and 0 or _MiniGameFishingRule.ENTRY_MESO
+			settlement:SetEntryCurrencyRow(self.entryBalanceRow, settlement.CURRENCY_MESO, tViewState.entryBalance)
+			settlement:SetEntryCurrencyRow(self.entryBetRow, settlement.CURRENCY_MESO, amount)
+		end
+		self.localPlayerX = tViewState.playerX
+		if self.tState.stun > 0 then self:ReturnSpearToIdle() end
+		-- 잡힌 물고기를 먼저 숨긴 뒤 적중 이펙트 생성
+		self:Render()
+		if self.tState.shotSequence > self.lastShotSequence then
+			self.lastShotSequence = self.tState.shotSequence
+			_SoundManager:PlaySfx(self.SPEAR_SFX_RUID, 1)
+		end
+		for _, hit in ipairs(self.tState.hitEffects) do
+			if hit.id > self.lastHitSequence then
+				self.lastHitSequence = hit.id
+				_SoundManager:PlaySfx(hit.kind == _MiniGameFishingRule.KIND_BOMB and self.BOMB_SFX_RUID or self.CATCH_SFX_RUID, 1)
+				if self.tState.elapsed - hit.time <= self.HIT_EFFECT_SECONDS then self:ShowHitEffect(hit) end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any GetPointerX(Vector2 screenPoint)
+		-- UI 배치 기준으로 입력 좌표 변환, 게임 상태 검증은 Model에서 처리
+		if not isvalid(self.board) then return nil end
+		local point = _UILogic:ScreenToLocalUIPosition(screenPoint, self.board.UITransformComponent)
+		local size = self.board.UITransformComponent.RectSize
+		if size.x <= 0 or size.y <= 0 or math.abs(point.x) > size.x / 2 or math.abs(point.y) > size.y / 2 then return nil end
+		return (point.x / size.x + 0.5) * _MiniGameFishingRule.WIDTH
+	end
+
+	@ExecSpace("ClientOnly")
+	method Vector2 ToBoardPosition(number x, number y)
+		-- 서버 판정 좌표를 현재 화면 크기에 맞춰 변환
+		local size = self.board.UITransformComponent.RectSize
+		local rule = _MiniGameFishingRule
+		return Vector2((x / rule.WIDTH - 0.5) * size.x, (0.5 - y / rule.HEIGHT) * size.y)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void CacheSpearIdlePosition()
+		-- 첫 표시 이전의 에디터 대기 위치를 기준으로 사용
+		if self.spearIdleReady or not isvalid(self.spear) then return end
+		self.spearIdleY = self.spear.UITransformComponent.anchoredPosition.y
+		self.spearIdleReady = true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReturnSpearToIdle()
+		-- 스턴 중에는 발사 보간 없이 조준 열의 대기 높이로 즉시 복귀
+		if not isvalid(self.spear) then return end
+		self:CacheSpearIdlePosition()
+		local position = self:ToBoardPosition(self.localPlayerX, _MiniGameFishingRule.IDLE_TIP_Y)
+		self.spear.UITransformComponent.anchoredPosition = Vector2(position.x, self.spearIdleY)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void EnsurePools()
+		-- 클라이언트 낚시 풀마다 독립적인 FIFO 큐 구성
+		if self.tFishPool == nil then self.tFishPool = Queue() end
+		if self.tBombPool == nil then self.tBombPool = Queue() end
+		if self.tHitPool == nil then self.tHitPool = Queue() end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any CreateVisual(boolean hit, boolean bomb)
+		-- 템플릿은 유지하고 복제 개체의 참조와 원래 설정만 캐시
+		local template = hit and self.hitTemplate or self.fishTemplate
+		local parent = hit and self.effectsLayer or self.background
+		if not isvalid(template) or not isvalid(parent) then return nil end
+		-- 복제 전에 생성 계층 고정, 물고기는 배경 위·팝업 아래에 표시
+		if template.Parent ~= parent and template:AttachTo(parent) == false then
+			log_warning("[FishingView] 표시 템플릿의 부모 연결 실패")
+			return nil
+		end
+		self.nextVisualId = self.nextVisualId + 1
+		local prefix = hit and self.HIT_NAME_PREFIX or self.POOL_NAME_PREFIX
+		if template.Enable then template.Enable = false end
+		local entity = template:Clone(prefix .. tostring(self.nextVisualId))
+		entity.Enable = false
+		if entity.CanvasGroupComponent == nil then entity:AddComponent(CanvasGroupComponent) end
+		entity.CanvasGroupComponent.Interactable = false
+		entity.CanvasGroupComponent.BlocksRaycasts = false
+		-- 물고기와 폭탄은 생성 시 이미지를 고정하고 대여 중 교체 금지
+		if not hit then
+			entity.SpriteGUIRendererComponent.ImageRUID = DataRef(bomb and _MiniGameFishingRule.BOMB_RUID or _MiniGameFishingRule.FISH_RUID)
+		end
+		local tVisual = MiniGameFishingVisual()
+		tVisual.isHit = hit
+		tVisual.isBomb = bomb
+		local parts = entity:GetChildComponentsByTypeName(self.VISUAL_PART_COMPONENT, true)
+		local part = parts[1]
+		if part == nil then
+			log_warning("[FishingView] 복제 UI의 표시 컴포넌트 연결 누락")
+			entity:Destroy()
+			return nil
+		end
+		local marker = nil
+		local label = nil
+		if hit then label = part.Entity.TextGUIRendererComponent else marker = part.Entity end
+		tVisual:Initialize(entity, marker, label)
+		if tVisual.canvas == nil then
+			log_error("[FishingView] 표시 대기용 CanvasGroup 연결 누락")
+			entity:Destroy()
+			return nil
+		end
+		tVisual:Reset(self.POOL_POSITION)
+		table.insert(hit and self.allHitVisuals or self.allFishVisuals, tVisual)
+		return tVisual
+	end
+
+	@ExecSpace("ClientOnly")
+	method void WarmPools()
+		-- 종류별 최대 동시 표시량보다 충분한 수량을 화면 밖에서 미리 생성
+		self:EnsurePools()
+		local fishCount = 0
+		local bombCount = 0
+		for _, tVisual in ipairs(self.allFishVisuals) do
+			if isvalid(tVisual.entity) then
+				if tVisual.isBomb then bombCount = bombCount + 1 else fishCount = fishCount + 1 end
+			end
+		end
+		for i = fishCount + 1, self.FISH_POOL_PREWARM_COUNT do
+			local tVisual = self:CreateVisual(false, false)
+			if tVisual == nil then break end
+			tVisual.inPool = true
+			self.tFishPool:Enqueue(tVisual)
+		end
+		for i = bombCount + 1, self.BOMB_POOL_PREWARM_COUNT do
+			local tVisual = self:CreateVisual(false, true)
+			if tVisual == nil then break end
+			tVisual.inPool = true
+			self.tBombPool:Enqueue(tVisual)
+		end
+		for i = #self.allHitVisuals + 1, self.HIT_POOL_PREWARM_COUNT do
+			local tVisual = self:CreateVisual(true, false)
+			if tVisual == nil then break end
+			tVisual.inPool = true
+			self.tHitPool:Enqueue(tVisual)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method any ObtainVisual(boolean hit, boolean bomb)
+		-- 먼저 대기한 개체부터 대여하고 파괴된 개체는 폐기
+		self:EnsurePools()
+		local tPool = hit and self.tHitPool or (bomb and self.tBombPool or self.tFishPool)
+		while not tPool:IsEmpty() do
+			local tVisual = tPool:Dequeue()
+			tVisual.inPool = false
+			if isvalid(tVisual.entity) then return tVisual end
+		end
+		log_warning("[FishingView] 표시 풀 여유 개체 부족")
+		return self:CreateVisual(hit, bomb)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ConfigureFishVisual(any tVisual, any row)
+		-- 대여 또는 종류·행·보드 크기 변경에만 정적 표시 설정 갱신
+		if tVisual.active and tVisual.kind == row.kind and tVisual.lane == row.lane
+			and tVisual.layoutWidth == self.boardWidth and tVisual.layoutHeight == self.boardHeight then return end
+		local rule = _MiniGameFishingRule
+		local bomb = row.kind == rule.KIND_BOMB
+		local gold = row.kind == rule.KIND_GOLD
+		tVisual.canvas.GroupAlpha = 0
+		if not tVisual.active then
+			tVisual.fishId = row.id
+			tVisual.pathOffset = row.x - rule:LaneDirection(row.lane) * rule:LaneDistance(row.lane, 0, self.tState.elapsed)
+		end
+		tVisual.renderer.FlipX = rule:LaneDirection(row.lane) > 0
+		tVisual.renderer.Color = gold and Color(1, 0.8, 0.15, 1) or Color(1, 1, 1, 1)
+		tVisual.transform.RectSize = bomb and Vector2(69 * self.boardScaleX, 69 * self.boardScaleY)
+			or Vector2(144 * self.boardScaleX, 82 * self.boardScaleY)
+		tVisual.y = (rule.HEIGHT / 2 - rule.LANE_Y[row.lane]) * self.boardScaleY
+		local renderTime = self.tState.stage == rule.STAGE_PLAYING and self.fishRenderElapsed or self.tState.elapsed
+		local x = tVisual.pathOffset + rule:LaneDirection(row.lane) * rule:LaneDistance(row.lane, 0, renderTime)
+		tVisual.transform.anchoredPosition = Vector2((x - rule.WIDTH / 2) * self.boardScaleX, tVisual.y)
+		if isvalid(tVisual.marker) then
+			tVisual.markerText.Text = bomb and "X" or (gold and "×1.5" or "")
+			tVisual.markerTransform.anchoredPosition = Vector2(0, bomb and 0 or 48 * self.boardScaleY)
+			tVisual.marker.Enable = bomb or gold
+		end
+		tVisual.kind = row.kind
+		tVisual.lane = row.lane
+		tVisual.layoutWidth = self.boardWidth
+		tVisual.layoutHeight = self.boardHeight
+		tVisual.active = true
+		tVisual.pendingReveal = true
+		-- 투명 상태로 활성화한 뒤 실제 UI 사각형의 배치 반영 확인 후 표시
+		if not tVisual.entity.Enable then tVisual.entity.Enable = true end
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean TryRevealVisual(any tVisual)
+		-- 좌표 속성 대신 엔진의 실제 사각형을 확인, 이전 위치에서의 첫 프레임 노출 차단
+		if not tVisual.pendingReveal then return true end
+		if not isvalid(tVisual.entity) or not tVisual.entity.EnabledInHierarchy then return false end
+		local parentTransform = tVisual.entity.Parent.UITransformComponent
+		local position = tVisual.transform.anchoredPosition
+		local size = tVisual.transform.RectSize
+		local scale = tVisual.transform.UIScale
+		local halfX = size.x * scale.x / 2
+		local halfY = size.y * scale.y / 2
+		local expectedMin = parentTransform:ToWorldPoint(Vector3(position.x - halfX, position.y - halfY, 0))
+		local expectedMax = parentTransform:ToWorldPoint(Vector3(position.x + halfX, position.y + halfY, 0))
+		local corners = tVisual.transform:GetWorldCorners()
+		local epsilon = self.LAYOUT_READY_EPSILON
+		if math.abs(corners[1].x - expectedMin.x) > epsilon or math.abs(corners[1].y - expectedMin.y) > epsilon
+			or math.abs(corners[3].x - expectedMax.x) > epsilon or math.abs(corners[3].y - expectedMax.y) > epsilon then return false end
+		tVisual.pendingReveal = false
+		tVisual.renderer.Enable = true
+		if tVisual.markerText ~= nil then tVisual.markerText.Enable = true end
+		if tVisual.labelText ~= nil then tVisual.labelText.Enable = true end
+		tVisual.canvas.GroupAlpha = tVisual.baseAlpha
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SyncFishVisuals()
+		-- 적중 ID만 즉시 반환하고 새 개체만 경로에 등록, 기존 개체는 화면 밖까지 이동
+		if self.tState == nil or not isvalid(self.fishTemplate) then return end
+		local size = self.board.UITransformComponent.RectSize
+		self.boardWidth = size.x
+		self.boardHeight = size.y
+		self.boardScaleX = size.x / _MiniGameFishingRule.WIDTH
+		self.boardScaleY = size.y / _MiniGameFishingRule.HEIGHT
+		local presentIds = {}
+		for _, row in ipairs(self.tState.fish) do presentIds[row.id] = true end
+		for _, hit in ipairs(self.tState.hitEffects) do
+			if hit.fishId ~= nil and hit.fishId > 0 then
+				self.retiredFishIds[hit.fishId] = true
+				local tVisual = self.visualsByFishId[hit.fishId]
+				if tVisual ~= nil then
+					self.visualsByFishId[hit.fishId] = nil
+					self:ReleaseVisual(tVisual)
+				end
+			end
+		end
+		-- 적중 이력 보관 범위를 넘긴 지연 응답에서도 화면 안에서 제거된 개체 회수
+		local rule = _MiniGameFishingRule
+		for id, tVisual in pairs(self.visualsByFishId) do
+			if not presentIds[id] then
+				local direction = rule:LaneDirection(tVisual.lane)
+				local serverX = tVisual.pathOffset + direction * rule:LaneDistance(tVisual.lane, 0, self.tState.elapsed)
+				local exited = direction > 0 and serverX > rule.WIDTH + rule.FISH_HALF_WIDTH
+					or direction < 0 and serverX < -rule.FISH_HALF_WIDTH
+				if not exited then
+					self.visualsByFishId[id] = nil
+					self:ReleaseVisual(tVisual)
+				end
+			end
+		end
+		for _, row in ipairs(self.tState.fish) do
+			if not self.retiredFishIds[row.id] then
+				local tVisual = self.visualsByFishId[row.id]
+				if tVisual ~= nil and (not isvalid(tVisual.entity) or tVisual.kind ~= row.kind) then
+					self.visualsByFishId[row.id] = nil
+					self:ReleaseVisual(tVisual)
+					tVisual = nil
+				end
+				if tVisual == nil then
+					tVisual = self:ObtainVisual(false, row.kind == rule.KIND_BOMB)
+					self.visualsByFishId[row.id] = tVisual
+				end
+				if tVisual ~= nil then self:ConfigureFishVisual(tVisual, row) end
+			end
+		end
+		for id, _ in pairs(self.retiredFishIds) do
+			if not presentIds[id] then self.retiredFishIds[id] = nil end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReleaseVisual(any tVisual)
+		-- 트윈 취소 후 화면 밖에서 초기화하고 큐 뒤쪽에 한 번만 반환
+		if tVisual == nil or tVisual.inPool then return end
+		if tVisual.isHit then
+			_UITween:Stop(tVisual.tweenId)
+			tVisual.tweenId = 0
+			for i = #self.activeHitEffects, 1, -1 do
+				if self.activeHitEffects[i] == tVisual then table.remove(self.activeHitEffects, i) break end
+			end
+		end
+		if not isvalid(tVisual.entity) then return end
+		tVisual:Reset(self.POOL_POSITION)
+		tVisual.inPool = true
+		self:EnsurePools()
+		local tPool = tVisual.isHit and self.tHitPool or (tVisual.isBomb and self.tBombPool or self.tFishPool)
+		tPool:Enqueue(tVisual)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateSpearClip()
+		-- 회전된 작살의 원본 비율을 유지하고 패널 상하 경계 밖 UV 제거
+		local transform = self.spear.UITransformComponent
+		local boardTransform = self.board.UITransformComponent
+		local padding = self.board.MaskComponent.Padding
+		local length = transform.RectSize.x
+		if length <= 0 then return end
+		local top = transform.anchoredPosition.y + length * transform.Pivot.x
+		local bottom = top - length
+		local clipTop = boardTransform.RectSize.y * (1 - boardTransform.Pivot.y) - padding.top
+		local clipBottom = -boardTransform.RectSize.y * boardTransform.Pivot.y + padding.bottom
+		local renderer = self.spear.SpriteGUIRendererComponent
+		if bottom < clipBottom then
+			renderer.FillOrigin = 0
+			renderer.FillAmount = math.max(0, math.min(1, (top - clipBottom) / length))
+		elseif top > clipTop then
+			renderer.FillOrigin = 1
+			renderer.FillAmount = math.max(0, math.min(1, (clipTop - bottom) / length))
+		else
+			renderer.FillAmount = 1
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void RenderObjects()
+		-- 매 프레임에는 행별 이동량과 위치만 갱신
+		if self.tState == nil or self.boardWidth <= 0 or self.boardHeight <= 0 then return end
+		local rule = _MiniGameFishingRule
+		local age = self.tState.stage == rule.STAGE_PLAYING and math.min(self.snapshotAge, 0.1) or 0
+		local renderTime = self.tState.stage == rule.STAGE_PLAYING and self.fishRenderElapsed or self.tState.elapsed
+		for lane = 1, #rule.LANE_Y do
+			self.laneOffsets[lane] = rule:LaneDirection(lane) * rule:LaneDistance(lane, 0, renderTime)
+		end
+		for id, tVisual in pairs(self.visualsByFishId) do
+			if tVisual.pendingReveal then
+				self:TryRevealVisual(tVisual)
+			else
+				local x = tVisual.pathOffset + self.laneOffsets[tVisual.lane]
+				tVisual.transform.anchoredPosition = Vector2((x - rule.WIDTH / 2) * self.boardScaleX, tVisual.y)
+				if (rule:LaneDirection(tVisual.lane) > 0 and x > rule.WIDTH + rule.FISH_HALF_WIDTH)
+					or (rule:LaneDirection(tVisual.lane) < 0 and x < -rule.FISH_HALF_WIDTH) then
+					self.retiredFishIds[id] = true
+					self.visualsByFishId[id] = nil
+					self:ReleaseVisual(tVisual)
+				end
+			end
+		end
+		local tip = self.tState.tipY
+		local shotX = self.tState.shotPhase == rule.PHASE_IDLE and self.localPlayerX or self.tState.shotX
+		if self.tState.shotPhase == rule.PHASE_UP then
+			tip = tip - age * (rule.IDLE_TIP_Y - rule.TOP_TIP_Y) / rule.UP_SECONDS
+			if tip < rule.TOP_TIP_Y then tip = rule.TOP_TIP_Y + (rule.TOP_TIP_Y - tip) * rule.UP_SECONDS / rule.RETURN_SECONDS end
+		elseif self.tState.shotPhase == rule.PHASE_RETURN then
+			tip = math.min(rule.IDLE_TIP_Y, tip + age * (rule.IDLE_TIP_Y - rule.TOP_TIP_Y) / rule.RETURN_SECONDS)
+		end
+		local spearTransform = self.spear.UITransformComponent
+		self:CacheSpearIdlePosition()
+		if self.tState.stun > 0 then
+			self:ReturnSpearToIdle()
+		else
+			local tipPosition = self:ToBoardPosition(shotX, tip)
+			local idleTipPosition = self:ToBoardPosition(shotX, rule.IDLE_TIP_Y)
+			spearTransform.anchoredPosition = Vector2(tipPosition.x, self.spearIdleY + tipPosition.y - idleTipPosition.y)
+		end
+		local stunned = self.tState.stun > 0
+		if self._T.spearStunned ~= stunned then
+			self.spear.SpriteGUIRendererComponent.Color = stunned and Color(0.6, 0.6, 0.6, 1) or Color(1, 1, 1, 1)
+			self._T.spearStunned = stunned
+		end
+		self:UpdateSpearClip()
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ShowHitEffect(any hit)
+		-- 적중 표시를 공용 상승·페이드로 재생하고 완료 시 풀에 반환
+		local tVisual = self:ObtainVisual(true, false)
+		if tVisual == nil then return end
+		local rule = _MiniGameFishingRule
+		local bomb = hit.kind == rule.KIND_BOMB
+		local gold = hit.kind == rule.KIND_GOLD
+		tVisual.transform.anchoredPosition = self:ToBoardPosition(hit.x, hit.y)
+		tVisual.renderer.Color = bomb and Color(1, 0.25, 0.15, 1)
+			or (gold and Color(1, 0.85, 0.2, 1) or Color(0.6, 1, 1, 1))
+		if tVisual.labelText ~= nil then
+			tVisual.labelText.Text = bomb
+				and _LocaleTextUtil:Format(self.TEXT_UI_FISHING_HIT_BOMB, _MiniGameFishingRule.BOMB_PENALTY, nil, nil, "")
+				or ("+" .. tostring(hit.points))
+		end
+		tVisual.canvas.GroupAlpha = 0
+		table.insert(self.activeHitEffects, tVisual)
+		tVisual.active = true
+		tVisual.pendingReveal = true
+		tVisual.entity.Enable = true
+		if bomb then
+			self.bombFlashRemaining = 0.2
+			self.backgroundShakeId = _UITween:ShakePosition(self.background, self.BOMB_SHAKE_SECONDS,
+				Vector2(self.BOMB_SHAKE_DISTANCE * self.boardHeight / self.REFERENCE_SCREEN_HEIGHT, 0), self.BOMB_SHAKE_FREQUENCY, true)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdateEffects(number delta)
+		-- 외부에서 숨기거나 제거한 적중 개체 회수와 폭탄·스턴 표시 갱신
+		for i = #self.activeHitEffects, 1, -1 do
+			local tVisual = self.activeHitEffects[i]
+			if not isvalid(tVisual.entity) or not tVisual.entity.EnabledInHierarchy then
+				self:ReleaseVisual(tVisual)
+			elseif tVisual.pendingReveal and self:TryRevealVisual(tVisual) then
+				tVisual.tweenId = _UITween:FloatFade(tVisual.entity, self.HIT_EFFECT_SECONDS, 45 * self.boardHeight / self.REFERENCE_SCREEN_HEIGHT, 0, function()
+					self:ReleaseVisual(tVisual)
+				end)
+				if tVisual.tweenId == 0 then self:ReleaseVisual(tVisual) end
+			end
+		end
+		self.bombFlashRemaining = math.max(0, self.bombFlashRemaining - delta)
+		local flashVisible = self.bombFlashRemaining > 0
+		if isvalid(self.bombFlash) then
+			if self._T.flashVisible ~= flashVisible then self.bombFlash.Enable = flashVisible self._T.flashVisible = flashVisible end
+			if flashVisible then self.bombFlash.SpriteGUIRendererComponent.Color = Color(1, 0.15, 0.1, self.bombFlashRemaining) end
+		end
+		local remaining = self.tState ~= nil and self.tState.stage == _MiniGameFishingRule.STAGE_PLAYING
+			and math.max(0, self.tState.stun - self.snapshotAge) or 0
+		local stunVisible = remaining > 0
+		if isvalid(self.stunEffect) then
+			if stunVisible then
+				local tenths = math.floor(remaining * 10 + 0.5)
+				if self._T.stunTenths ~= tenths then
+					self:SetLocalized(self.stunTimeText, self.TEXT_UI_FISHING_STUN_TIME, string.format("%.1f", tenths / 10), nil, nil)
+					self._T.stunTenths = tenths
+				end
+			end
+			if self._T.stunVisible ~= stunVisible then self.stunEffect.Enable = stunVisible self._T.stunVisible = stunVisible end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Render()
+		-- HUD는 값 변경에만 갱신하고 물고기 수명은 스냅샷 단위로 동기화
+		if self.tState == nil or not isvalid(self.root) then return end
+		local rule = _MiniGameFishingRule
+		local stage = self.tState.stage
+		local ready = stage == rule.STAGE_READY
+		local paused = stage == rule.STAGE_PAUSED
+		local finished = stage == rule.STAGE_RESULT
+		local settling = stage == rule.STAGE_SETTLING
+		local cache = self._T.hudCache
+		if cache == nil then cache = {} self._T.hudCache = cache end
+		local resultChanged = cache.stage ~= stage or cache.score ~= self.tState.score
+			or cache.rewardItemId ~= self.tState.rewardItemId or cache.rewardCount ~= self.tState.rewardCount
+			or cache.rewardConfirmed ~= self.tState.rewardConfirmed
+		if cache.stage ~= stage or cache.requestPending ~= self.requestPending or cache.canClose ~= self.canClose
+			or cache.isDebug ~= self.tState.isDebug or cache.rewardConfirmed ~= self.tState.rewardConfirmed then
+			self:SetLocalized(self.introTitleText, self.TEXT_UI_FISHING_TITLE, nil, nil, nil)
+			self.startButton.Enable = ready
+			self:SetLocalized(self.startButton.TextGUIRendererComponent, self.tState.isDebug and self.TEXT_UI_COMMON_START or self.TEXT_UI_FISHING_START, nil, nil, nil)
+			self.startButton.ButtonComponent.Enable = ready and not self.requestPending
+			self.retryButton.Enable = settling
+			self.retryButton.ButtonComponent.Enable = settling
+			self:SetLocalized(self.retryButton.TextGUIRendererComponent, self.TEXT_UI_FISHING_RETRY_SAVE, nil, nil, nil)
+			self.entryExitButton.Enable = ready or paused
+			self.entryExitButton.ButtonComponent.Enable = self.canClose
+			self:SetLocalized(self.entryExitButton.TextGUIRendererComponent, self.TEXT_UI_COMMON_EXIT, nil, nil, nil)
+			self:SetPopupVisible(self.entryPopup, self.entryPopupPanel, ready or paused or settling or stage == rule.STAGE_STARTING)
+			self:SetPopupVisible(self.resultPopup, self.resultPopupPanel, finished and self.tState.rewardConfirmed)
+		end
+		if cache.score ~= self.tState.score then self.scoreText.Text = tostring(self.tState.score) end
+		local remainingSeconds = math.ceil(math.max(0, self.tState.remaining))
+		if cache.remainingSeconds ~= remainingSeconds then
+			self.timeText.Text = string.format("%02d : %02d", math.floor(remainingSeconds / 60), remainingSeconds % 60)
+			cache.remainingSeconds = remainingSeconds
+		end
+		if isvalid(self.timeGauge) and cache.remaining ~= self.tState.remaining then
+			self.timeGauge.FillAmount = math.max(0, math.min(1, self.tState.remaining / rule.START_SECONDS))
+		end
+		local message = self.tState.message
+		if message == "" then
+			if self.requestPending or stage == rule.STAGE_STARTING then message = self.TEXT_UI_FISHING_ENTRY_PENDING
+			elseif ready then message = self.TEXT_UI_FISHING_READY
+			elseif paused then message = self.TEXT_UI_COMMON_PAUSE
+			elseif settling then message = self.TEXT_UI_FISHING_SAVING
+			elseif self.tState.stun > 0 then message = self.TEXT_UI_FISHING_BOMB
+			end
+		end
+		if cache.message ~= message or cache.isDebug ~= self.tState.isDebug then
+			local messageText = message
+			if string.sub(message, 1, 3) == "ui." then messageText = _LocaleTextUtil:GetText(message) end
+			self.messageText.Text = messageText
+			cache.message = message
+		end
+		if finished and resultChanged then
+			self:SetLocalized(self.resultTitleText, self.TEXT_UI_RESULT_TITLE, nil, nil, nil)
+			self:SetLocalized(self.confirmButton.TextGUIRendererComponent, self.TEXT_UI_COMMON_CONFIRM, nil, nil, nil)
+			local badge = self.tState.rewardItemId == rule.BADGE_ID
+			self.rewardImage.ImageRUID = DataRef(badge and rule.BADGE_RUID or rule.COOKIE_RUID)
+			local tItem = _ItemMaster:GetItemById(self.tState.rewardItemId)
+			self.rewardNameText.Text = tItem ~= nil and tItem.name or self.tState.rewardItemId
+			self.rewardCountText.Text = "× " .. tostring(self.tState.rewardCount)
+			local summary = _LocaleTextUtil:Format(self.TEXT_UI_FISHING_RESULT, self.tState.rank, self.tState.score, "", "")
+			self.resultText.Text = string.match(summary, "[^\r\n]+") or summary
+		end
+		cache.stage = stage
+		cache.score = self.tState.score
+		cache.remaining = self.tState.remaining
+		cache.requestPending = self.requestPending
+		cache.canClose = self.canClose
+		cache.isDebug = self.tState.isDebug
+		cache.rewardConfirmed = self.tState.rewardConfirmed
+		cache.rewardItemId = self.tState.rewardItemId
+		cache.rewardCount = self.tState.rewardCount
+		self:SyncFishVisuals()
+		if stage ~= rule.STAGE_PLAYING then self:RenderObjects() end
+		self:UpdateEffects(0)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void UpdatePresentation(number delta, number snapshotAge, number playerX)
+		-- Model이 진행한 보간 값으로 화면과 연출만 갱신
+		if self.tState == nil or not self:IsVisible() then return end
+		self.snapshotAge = snapshotAge
+		self.localPlayerX = playerX
+		self:UpdateEffects(math.max(0, delta))
+		if self.tState.stage == _MiniGameFishingRule.STAGE_PLAYING then
+			-- 응답 간격과 무관하게 진행하고 서버와의 시차는 최대 10% 속도 차이로 보정
+			local step = math.max(0, delta)
+			local nextElapsed = self.fishRenderElapsed + step
+			local clockError = self.tState.elapsed + self.snapshotAge - nextElapsed
+			local adjustment = math.max(-self.FISH_CLOCK_MAX_SPEED_ADJUSTMENT,
+				math.min(self.FISH_CLOCK_MAX_SPEED_ADJUSTMENT, clockError * self.FISH_CLOCK_CORRECTION_RATE))
+			self.fishRenderElapsed = nextElapsed + adjustment * step
+			self:RenderObjects()
+		else
+			for _, tVisual in pairs(self.visualsByFishId) do
+				if tVisual.pendingReveal then self:TryRevealVisual(tVisual) end
+			end
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void SetPopupVisible(Entity popup, Entity panel, boolean show)
+		-- 표시 전환에만 등장·퇴장 효과 재생, 닫는 도중 재진입 시 퇴장 취소
+		if not isvalid(popup) then return end
+		if not show then
+			self:ClosePopup(popup, panel, nil)
+			return
+		end
+		local closeId = self.popupCloseEffects[popup.Id]
+		if closeId ~= nil then
+			_UITween:Stop(closeId)
+			self.popupCloseEffects[popup.Id] = nil
+		elseif popup.Enable then
+			return
+		end
+		popup.Enable = true
+		if isvalid(panel) then panel.Enable = true end
+		_UITween:PopIn(panel, self.POPUP_POP_SECONDS, self.POPUP_START_SCALE)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ClosePopup(Entity popup, Entity panel, any onComplete)
+		-- 퇴장 중 중복 요청 무시, 패널 축소가 끝난 뒤 차단 영역과 화면 종료 처리
+		if not isvalid(popup) then return end
+		local popupId = popup.Id
+		if self.popupCloseEffects[popupId] ~= nil then return end
+		local finish = function()
+			self.popupCloseEffects[popupId] = nil
+			if isvalid(popup) then popup.Enable = false end
+			if type(onComplete) == "function" then onComplete() end
+		end
+		if not popup.EnabledInHierarchy then finish() return end
+		local effectId = _UITween:PopOut(panel, self.POPUP_CLOSE_SECONDS, 0, finish)
+		if effectId == 0 then finish() return end
+		self.popupCloseEffects[popupId] = effectId
+	end
+
+	@ExecSpace("ClientOnly")
+	method void HidePopupImmediately(Entity popup, Entity panel)
+		-- 초기화와 월드 종료 시 지연 콜백 없이 즉시 정리
+		if isvalid(popup) then
+			_UITween:Stop(self.popupCloseEffects[popup.Id] or 0)
+			self.popupCloseEffects[popup.Id] = nil
+			popup.Enable = false
+		end
+		if isvalid(panel) then
+			_UITween:StopEffect(panel, _UITween.EFFECT_POP_IN)
+			_UITween:StopEffect(panel, _UITween.EFFECT_POP_OUT)
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void Close()
+		-- 낚시 연출과 로컬 상태만 정리, 표시 해제는 Router로 전달
+		_UITween:Stop(self.backgroundShakeId)
+		self.backgroundShakeId = 0
+		self:HidePopupImmediately(self.entryPopup, self.entryPopupPanel)
+		self:HidePopupImmediately(self.resultPopup, self.resultPopupPanel)
+		if isvalid(self.stunEffect) then self.stunEffect.Enable = false end
+		if isvalid(self.bombFlash) then self.bombFlash.Enable = false end
+		for i = #self.activeHitEffects, 1, -1 do self:ReleaseVisual(self.activeHitEffects[i]) end
+		self.activeHitEffects = {}
+		self.bombFlashRemaining = 0
+		self.lastShotSequence = 0
+		self.lastHitSequence = 0
+		_MiniGameUIRouter:SetStageVisible(self.root, false)
+		for _, tVisual in pairs(self.visualsByFishId) do self:ReleaseVisual(tVisual) end
+		self.visualsByFishId = {}
+		self.retiredFishIds = {}
+		self._T.hudCache = nil
+		self._T.flashVisible = nil
+		self._T.stunVisible = nil
+		self._T.stunTenths = nil
+		self._T.spearStunned = nil
+		self.tState = nil
+		self.fishRenderElapsed = 0
+		self.requestPending = false
+		self.canClose = false
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		self:ReleaseView()
+	end
+
+	@ExecSpace("ClientOnly")
+	method table GetDynamicPreloadRuids()
+		-- 물고기 종류와 보상에 따라 코드에서 교체하는 이미지 제공
+		local rule = _MiniGameFishingRule
+		return {rule.FISH_RUID, rule.BOMB_RUID, rule.BADGE_RUID, rule.COOKIE_RUID}
+	end
+	@ExecSpace("ClientOnly")
+	method void SetLocalized(any renderer, string key, any value1, any value2, any value3)
+		-- 현재 세션 수치와 번역 키를 함께 연결
+		_LocaleTextUtil:SetLocalizedText(renderer, key, value1, value2, value3)
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean Initialize()
+		-- 숨겨진 스테이지에서도 중복 없이 UI 입력 연결
+		if self.initialized then return true end
+		if not _MiniGameViewRegistry:ValidateBindings("MiniGameFishingStageView", {
+			{"root", self.root},
+			{"board", self.board},
+			{"background", self.background},
+			{"effectsLayer", self.effectsLayer},
+			{"fishTemplate", self.fishTemplate},
+			{"hitTemplate", self.hitTemplate},
+			{"spear", self.spear},
+			{"entryPopup", self.entryPopup},
+			{"entryPopupPanel", self.entryPopupPanel},
+			{"entryBalanceRow", self.entryBalanceRow},
+			{"entryBetRow", self.entryBetRow},
+			{"startButton", self.startButton},
+			{"entryExitButton", self.entryExitButton},
+			{"retryButton", self.retryButton},
+			{"resultPopup", self.resultPopup},
+			{"resultPopupPanel", self.resultPopupPanel},
+			{"confirmButton", self.confirmButton}
+		}) then return false end
+		-- 에디터에서 지정한 창의 대기 높이 보존
+		self:CacheSpearIdlePosition()
+		-- 배경과 그 하위에 생성되는 물고기를 최하단에 배치
+		if isvalid(self.background) then _UILogic:SetSiblingIndex(self.background.UITransformComponent, 1) end
+		self:Bind(self.startButton, ButtonClickEvent, function() _MiniGameFishingPresenter:Start() end)
+		self:Bind(self.retryButton, ButtonClickEvent, function() _MiniGameFishingPresenter:RetrySettlement() end)
+		self:Bind(self.confirmButton, ButtonClickEvent, function()
+			self:ClosePopup(self.resultPopup, self.resultPopupPanel, function() _MiniGameFishingPresenter:ConfirmResult() end)
+		end)
+		local close = function()
+			if not self.canClose then return end
+			if isvalid(self.entryPopup) and self.entryPopup.Enable then
+				self:ClosePopup(self.entryPopup, self.entryPopupPanel, function() _MiniGameFishingPresenter:Close() end)
+			else
+				_MiniGameFishingPresenter:Close()
+			end
+		end
+		self:Bind(self.entryExitButton, ButtonClickEvent, close)
+		self:Bind(self.board, UITouchDownEvent, function(event)
+			local x = self:GetPointerX(event.TouchPoint)
+			if x ~= nil then _MiniGameFishingPresenter:Fire(x) end
+		end)
+		self:Bind(self.board, UITouchDragEvent, function(event)
+			local x = self:GetPointerX(event.TouchPoint)
+			if x ~= nil then _MiniGameFishingPresenter:Move(x) end
+		end)
+		self.initialized = true
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method void ReleaseView()
+		-- 수동 초기화와 엔티티 생명주기 종료의 중복 해제 방지
+		if not self.initialized then return end
+		self.initialized = false
+		-- 이벤트 구독과 생성한 모든 풀 개체 해제
+		self:Close()
+		for _, binding in ipairs(self.bindings) do
+			if isvalid(binding.entity) then binding.entity:DisconnectEvent(binding.eventType, binding.handle) end
+		end
+		self.bindings = {}
+		for _, tVisual in ipairs(self.allFishVisuals) do if isvalid(tVisual.entity) then tVisual.entity:Destroy() end end
+		for _, tVisual in ipairs(self.allHitVisuals) do if isvalid(tVisual.entity) then tVisual.entity:Destroy() end end
+		if self.tFishPool ~= nil then self.tFishPool:Clear() end
+		if self.tBombPool ~= nil then self.tBombPool:Clear() end
+		if self.tHitPool ~= nil then self.tHitPool:Clear() end
+		self.allFishVisuals = {}
+		self.allHitVisuals = {}
+	end
+end

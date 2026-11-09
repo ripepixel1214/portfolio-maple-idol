@@ -1,0 +1,21 @@
+@Struct
+script ItemRow
+
+	property string itemId = ""
+
+	property string type = ""
+
+	property string name = ""
+
+	property string description = ""
+
+	property string image = ""
+
+	property integer sortOrder = 0
+	property string nameKey = ""
+	property string descriptionKey = ""
+	property string effectType = ""
+	property string effectStat = ""
+	property number effectValue = 0
+
+end

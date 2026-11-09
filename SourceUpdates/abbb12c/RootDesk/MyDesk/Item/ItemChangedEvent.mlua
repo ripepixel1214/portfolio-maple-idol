@@ -1,0 +1,7 @@
+@Event
+script ItemChangedEvent extends EventType
+	property integer revision = 0
+	property string useRequestId = ""
+	property string usedItemId = ""
+	property string useResult = ""
+end

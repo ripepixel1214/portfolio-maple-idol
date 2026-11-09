@@ -1,0 +1,62 @@
+@Struct
+script DiamondWalletOperationData
+
+	property string operationId = ""
+	property string kind = ""
+	property string reason = ""
+	property number debit = 0
+	property number credit = 0
+	property string productId = ""
+	property number orderNumber = 0
+	property number beforeBalance = 0
+	property number afterBalance = 0
+	property number revision = 0
+	property string createdAt = ""
+	property table shopItemIds = {}
+	property table characterIds = {}
+	property table consumableGrants = {}
+
+	method table ToPlainTable()
+		-- JSONEncode에서 거부하는 빈 배열은 생략하고 지급 목록만 복사
+		local shopItemIds = {}
+		for _, itemId in ipairs(self.shopItemIds) do table.insert(shopItemIds, itemId) end
+		local characterIds = {}
+		for _, characterId in ipairs(self.characterIds) do table.insert(characterIds, characterId) end
+		local tPlainData = { operationId = self.operationId, kind = self.kind, reason = self.reason,
+			debit = self.debit, credit = self.credit, productId = self.productId,
+			orderNumber = self.orderNumber, beforeBalance = self.beforeBalance,
+			afterBalance = self.afterBalance, revision = self.revision, createdAt = self.createdAt }
+		if #shopItemIds > 0 then tPlainData.shopItemIds = shopItemIds end
+		if #characterIds > 0 then tPlainData.characterIds = characterIds end
+		if next(self.consumableGrants) ~= nil then tPlainData.consumableGrants = self.consumableGrants end
+		return tPlainData
+	end
+
+	method boolean FromPlainTable(any tPlainData)
+		-- 누락되거나 손상된 거래 기록 거부
+		if type(tPlainData) ~= "table" then return false end
+		local strings = { "operationId", "kind", "reason", "productId", "createdAt" }
+		for _, key in ipairs(strings) do
+			if type(tPlainData[key]) ~= "string" then return false end
+			self[key] = tPlainData[key]
+		end
+		local amounts = { "debit", "credit", "orderNumber", "beforeBalance", "afterBalance", "revision" }
+		for _, key in ipairs(amounts) do
+			if _DiamondWalletStorage:IsValidAmount(tPlainData[key]) == false then return false end
+			self[key] = tPlainData[key]
+		end
+		if tPlainData.shopItemIds ~= nil then self.shopItemIds = tPlainData.shopItemIds end
+		if tPlainData.characterIds ~= nil then self.characterIds = tPlainData.characterIds end
+		if tPlainData.consumableGrants ~= nil then self.consumableGrants = tPlainData.consumableGrants end
+		return _DiamondWalletStorage:IsValidOperation(self) and self.revision > 0 and self.createdAt ~= ""
+			and self.beforeBalance >= self.debit
+			and self.credit <= _DiamondWalletStorage.MAX_SAFE_AMOUNT - (self.beforeBalance - self.debit)
+			and self.afterBalance == self.beforeBalance - self.debit + self.credit
+	end
+
+	method boolean HasShopGrants()
+		-- 영구 보유권 또는 수량형 지급 지시 유무 확인
+		return #self.shopItemIds > 0 or next(self.consumableGrants) ~= nil
+	end
+
+end

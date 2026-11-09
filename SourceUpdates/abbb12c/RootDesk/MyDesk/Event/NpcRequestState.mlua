@@ -1,0 +1,42 @@
+@Struct
+script NpcRequestState
+	property string requestId = ""
+	property string sessionId = ""
+	property string stepToken = ""
+	property string eventId = ""
+	property string userId = ""
+	property string npcId = ""
+	property string dialogId = ""
+	property string choiceEventId = ""
+	property string reason = ""
+	property boolean success = false
+	property number elapsed = 0
+	property integer retryCount = 0
+
+	method any ToPlainTable()
+		-- 응답 표시와 복구에 필요한 값만 RPC 테이블로 복사
+		return { sessionId = self.sessionId, stepToken = self.stepToken, eventId = self.eventId,
+			dialogId = self.dialogId, choiceEventId = self.choiceEventId, reason = self.reason, success = self.success }
+	end
+
+	method any FromPlainTable(any tPlainData)
+		-- 서버 응답의 타입을 확인하고 새 요청 상태에 복원
+		if type(tPlainData) ~= "table" then return self end
+		if type(tPlainData.sessionId) == "string" then self.sessionId = tPlainData.sessionId end
+		if type(tPlainData.stepToken) == "string" then self.stepToken = tPlainData.stepToken end
+		if type(tPlainData.eventId) == "string" then self.eventId = tPlainData.eventId end
+		if type(tPlainData.dialogId) == "string" then self.dialogId = tPlainData.dialogId end
+		if type(tPlainData.choiceEventId) == "string" then self.choiceEventId = tPlainData.choiceEventId end
+		if type(tPlainData.reason) == "string" then self.reason = tPlainData.reason end
+		self.success = tPlainData.success == true
+		return self
+	end
+
+	method boolean ShouldRetry(number delta, number timeout)
+		-- 응답 대기 시간을 누적하고 재전송 시점을 한 번 소비
+		self.elapsed += math.max(delta, 0)
+		if self.elapsed < timeout then return false end
+		self.elapsed = 0
+		return true
+	end
+end

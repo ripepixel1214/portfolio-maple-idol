@@ -1,0 +1,157 @@
+---@description "잡아라! 날치왕 서버 시간, 입력 검증과 영속 보상 정산"
+@Logic
+script MiniGameFishingServerHandler extends Logic
+	property string TEXT_UI_FISHING_RETRY_PENDING = "ui.fishing.retry_pending"
+	property string TEXT_UI_FISHING_START_FAILED = "ui.fishing.start_failed"
+	property number BROADCAST_SECONDS = 0.05
+	property number RETRY_SECONDS = 2
+	property any finishing = {}
+
+	@ExecSpace("ServerOnly")
+	method void Configure(any tSession, any preset)
+		local tState = MiniGameFishingState()
+		tState.operationId = _UtilLogic:NewGuid()
+		tState.remaining = _MiniGameFishingRule.START_SECONDS
+		tState.isDebug = tSession.settlement.isDebug == true
+		tSession.tModeState = tState
+		_MiniGameFishingRule:Populate(tState)
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean RequiresPreparation()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean AcceptsClientResult(any tSession)
+		return false
+	end
+
+	@ExecSpace("ServerOnly")
+	method boolean HandlesFinishedFeedback()
+		return true
+	end
+
+	@ExecSpace("ServerOnly")
+	method string GetLaunchCommandPayload(any tSession)
+		return ""
+	end
+
+	@ExecSpace("ServerOnly")
+	method number GetProgress(any tSession)
+		return tSession.tModeState ~= nil and 1 - math.min(1, tSession.tModeState.remaining / 40) or 0
+	end
+
+	@ExecSpace("ServerOnly")
+	method void PushState(any tSession)
+		-- 즉시 전송 후 주기 전송 타이머 초기화로 같은 상태의 연속 전송 방지
+		local tState = tSession.tModeState
+		tState.broadcastElapsed = 0
+		tState.revision = tState.revision + 1
+		_MiniGameManager:PushFishingState(tSession.id, tState:ToPlainTable(), tSession.userId)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void HandleInput(any tSession, any tPlainInput)
+		-- 소유권은 Manager에서 검증, 입력 순서와 값 범위는 처리기에서 검증
+		if type(tPlainInput) ~= "table" or type(tPlainInput.sequence) ~= "number" or tPlainInput.sequence % 1 ~= 0
+			or type(tPlainInput.action) ~= "string" then return end
+		local tInput = MiniGameFishingInputData():FromPlainTable(tPlainInput)
+		local tState = tSession.tModeState
+		local rule = _MiniGameFishingRule
+		if tInput.sequence <= tState.inputSequence or tInput.sequence > tState.inputSequence + 10000 then return end
+		tState.inputSequence = tInput.sequence
+		local x = tInput.x
+		if tInput.action == rule.ACTION_MOVE or tInput.action == rule.ACTION_FIRE then
+			if type(tPlainInput.x) ~= "number" or x ~= x or math.abs(x) == math.huge then return end
+			x = math.max(rule.PLAYER_MARGIN, math.min(rule.WIDTH - rule.PLAYER_MARGIN, x))
+		end
+		if tInput.action == rule.ACTION_START and tState.stage == rule.STAGE_READY then
+			self:Start(tSession)
+		elseif tInput.action == rule.ACTION_MOVE and tState.stage == rule.STAGE_PLAYING and tState.stun <= 0 then
+			tState.playerX = x
+		elseif tInput.action == rule.ACTION_FIRE then
+			if rule:Fire(tState, x) then self:PushState(tSession) end
+		elseif tInput.action == rule.ACTION_RETRY and tState.stage == rule.STAGE_SETTLING then
+			self:Finish(tSession)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Start(any tSession)
+		-- 참가비 저장 확인 후에만 게임 시간 시작
+		local tState = tSession.tModeState
+		if not tState.isDebug and not _MiniGameManager:CanStartNightMarketMiniGame(tSession.userId, tSession.miniGameId) then
+			_MiniGameSessionService:AbortSession(tSession, _MiniGameSessionService.SESSION_REASON_CANCEL)
+			return
+		end
+		tState.stage = _MiniGameFishingRule.STAGE_STARTING
+		tSession.settlement.status = _MiniGameSettlementRule.STATUS_PROCESSING
+		self:PushState(tSession)
+		if not tState.isDebug and (not _FishingRewardLogic:Load(tSession.userId)
+			or not _MiniGameManager:CanStartNightMarketMiniGame(tSession.userId, tSession.miniGameId)
+			or not _ProgressManager:TrySpendMesoConfirmed(_MiniGameFishingRule.ENTRY_MESO, tSession.userId)) then
+			tSession.settlement.status = _MiniGameSettlementRule.STATUS_VALIDATED
+			tState.stage = _MiniGameFishingRule.STAGE_READY
+			tState.message = self.TEXT_UI_FISHING_START_FAILED
+			self:PushState(tSession)
+			return
+		end
+		tSession.settlement.status = _MiniGameSettlementRule.STATUS_SETTLED
+		tSession.settlement.balance = _ProgressManager:GetCurrencyBalance(_MiniGameSettlementRule.CURRENCY_MESO)
+		tState.stage = _MiniGameFishingRule.STAGE_PLAYING
+		tState.message = ""
+		tSession.status = _MiniGameSessionService.SESSION_STATUS_RUNNING
+		self:PushState(tSession)
+	end
+
+	@ExecSpace("ServerOnly")
+	method void UpdateSession(any tSession, number delta)
+		-- 진행 상태만 주기 전송, 준비 및 저장 중에는 중복 스냅샷 생성 생략
+		local tState = tSession.tModeState
+		local rule = _MiniGameFishingRule
+		if tState == nil or self.finishing[tSession.id] then return end
+		if tState.stage ~= rule.STAGE_PLAYING and tState.stage ~= rule.STAGE_SETTLING then return end
+		local elapsed = math.max(0, delta)
+		if tState.stage == rule.STAGE_PLAYING then rule:Advance(tState, elapsed) end
+		tState.broadcastElapsed = tState.broadcastElapsed + elapsed
+		if tState.stage == rule.STAGE_SETTLING then
+			if tState.message == "" or tState.broadcastElapsed >= self.RETRY_SECONDS then self:Finish(tSession) end
+		elseif tState.broadcastElapsed >= self.BROADCAST_SECONDS then
+			self:PushState(tSession)
+		end
+	end
+
+	@ExecSpace("ServerOnly")
+	method void Finish(any tSession)
+		-- 영속 보상 성공 전 결과 완료 금지, 동일 거래 ID로 실패 재시도
+		local tState = tSession.tModeState
+		if self.finishing[tSession.id] or tState.stage ~= _MiniGameFishingRule.STAGE_SETTLING then return end
+		self.finishing[tSession.id] = true
+		tSession.settlement.status = _MiniGameSettlementRule.STATUS_PROCESSING
+		local receipt = nil
+		if tState.isDebug then
+			receipt = {itemId = _MiniGameFishingRule.COOKIE_ID, count = _MiniGameFishingRule:CookiesForRank(tState.rank)}
+		else receipt = _FishingRewardLogic:GrantResult(tSession.userId, tState.operationId, tState.score) end
+		tSession.settlement.status = _MiniGameSettlementRule.STATUS_SETTLED
+		self.finishing[tSession.id] = nil
+		if receipt == nil then
+			tState.message = self.TEXT_UI_FISHING_RETRY_PENDING
+			self:PushState(tSession)
+			return
+		end
+		tState.rewardItemId = receipt.itemId
+		tState.rewardCount = receipt.count
+		tState.rewardConfirmed = true
+		tState.stage = _MiniGameFishingRule.STAGE_RESULT
+		tState.message = ""
+		self:PushState(tSession)
+		local tResult = MiniGameResultData()
+		tResult.success = true
+		tResult.score = tState.score
+		tResult.progress = 1
+		tResult.reason = _MiniGameSessionService.SESSION_REASON_OBJECTIVE
+		_MiniGameSessionService:ConfirmSessionResult(tSession, tResult)
+		log("[Fishing] 정산 완료 score=" .. tostring(tState.score) .. " rank=" .. tostring(tState.rank))
+	end
+end

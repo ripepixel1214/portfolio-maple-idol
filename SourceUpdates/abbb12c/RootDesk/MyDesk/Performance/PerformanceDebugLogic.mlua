@@ -1,0 +1,156 @@
+---@description "메이커 공연 테스트. F8=공연 주차, F9/F10/F11=1/2/3 스테이지 미리보기, F12=현재 스테이지 종료, Ctrl+6=현재 점수로 즉시 공연 결과 확인."
+@Logic
+script PerformanceDebugLogic extends Logic
+
+	property string DEBUT_PERFORMANCE_ID = "perf_01"
+	property string SECOND_PERFORMANCE_ID = "perf_02"
+	property string THIRD_PERFORMANCE_ID = "perf_03"
+
+	-- 키 입력 구독 핸들러
+	property any keyDownHandler = nil
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Public API
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void OnKeyDown(KeyDownEvent event)
+		-- 메이커에서만 공연 테스트 키를 처리합니다.
+		if Environment:IsMakerPlay() == false or event == nil then return end
+		local isControlPressed = _InputService:IsKeyPressed(KeyboardKey.LeftControl) or _InputService:IsKeyPressed(KeyboardKey.RightControl)
+		if isControlPressed and event.key == KeyboardKey.Alpha6 then self:DebugFinishPerformance(); return end
+
+		if event.key == KeyboardKey.F8 then
+			-- 현재 선택한 스테이지의 공연 주차로 이동
+			if self:CanStartPerformance() == false then return end
+			local tStage = _StageMaster:GetStage(_ProgressManager:ClientGetCurrentStage())
+			_ProgressManager:RequestDebugMoveToPerformanceWeek(tStage ~= nil and tStage.performanceId or self.DEBUT_PERFORMANCE_ID)
+		elseif event.key == KeyboardKey.F9 then
+			self:StartPreview(self.DEBUT_PERFORMANCE_ID)
+		elseif event.key == KeyboardKey.F10 then
+			self:StartPreview(self.SECOND_PERFORMANCE_ID)
+		elseif event.key == KeyboardKey.F11 then
+			self:StartPreview(self.THIRD_PERFORMANCE_ID)
+		elseif event.key == KeyboardKey.F12 then
+			self:DebugCompleteStage()
+		end
+	end
+
+	@ExecSpace("Server")
+	method void RequestDebugCompleteStage()
+		-- 메이커에서 현재 스테이지를 보상 없이 종료하고 실제 StageSelect 전환 이벤트를 발생시킵니다.
+		if Environment:IsMakerPlay() == false or _ProgressManager:CanUseProgress(senderUserId) == false then return end
+		local progress = _ProgressManager.tCurrentProgress
+		if progress == nil or progress.eCurrentStage == "" or progress.eCurrentStep == _EProgressStep.StageSelect then return end
+
+		progress.eCurrentStage = ""
+		progress.eCurrentStep = _EProgressStep.StageSelect
+		_ProgressManager:ClearProgressLocation()
+		_PerformanceResultManager:ClearStageAttempt()
+		_TagTrainingManager:ClearState()
+		_CharacterManager:ResetAllCharacterTags()
+		_CharacterManager:PushCharactersToClient(senderUserId)
+		_UserDataManager:SaveCoreData()
+		_ProgressManager:PushProgressToClient(senderUserId)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnBeginPlay()
+		-- 메이커 플레이에서만 테스트용 키 입력을 구독합니다.
+		if Environment:IsMakerPlay() == false then return end
+		self.keyDownHandler = _InputService:ConnectEvent(KeyDownEvent, self.OnKeyDown)
+	end
+
+	@ExecSpace("ClientOnly")
+	method void OnEndPlay()
+		-- 키 입력 구독을 해제합니다.
+		if self.keyDownHandler ~= nil then
+			_InputService:DisconnectEvent(KeyDownEvent, self.keyDownHandler)
+			self.keyDownHandler = nil
+		end
+	end
+
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+	-- Private Methods
+	------------------------------------------------------------------------------------------------------------------------------------------------------
+
+	@ExecSpace("ClientOnly")
+	method void DebugFinishPerformance()
+		-- 공연 주차에서 현재 편성으로 실제 결과·보상 흐름을 즉시 테스트합니다.
+		if Environment:IsMakerPlay() == false then return end
+		if _ProgressManager:ClientGetCurrentStep() ~= _EProgressStep.Performance then
+			_UIToast:ShowMessage("먼저 스테이지를 편성하고 F8로 공연 주차에 이동해주세요.")
+			return
+		end
+		if _PerformanceConductor.pendingPerformanceId ~= "" then
+			_UIToast:ShowMessage("공연 맵 진입이 끝난 뒤 다시 눌러주세요.")
+			return
+		end
+
+		local stage = _StageMaster:GetStage(_ProgressManager:ClientGetCurrentStage())
+		if stage == nil then return end
+		local assignment = _PerformanceConductor.tRoleAssignment
+		if _PerformanceConductor.currentPerformanceId == "" or assignment == nil then assignment = self:BuildTempAssignment() end
+		_PerformanceConductor.tRoleAssignment = assignment
+		_PerformanceConductor:StopPerformance()
+		_PerformanceResultManager:RequestDebugCompletePerformance(stage.performanceId, assignment:ToPlainTable())
+	end
+
+	@ExecSpace("ClientOnly")
+	method void DebugCompleteStage()
+		-- 현재 스테이지의 보상·결과 화면을 건너뛰고 종료 상태와 스튜디오 복귀를 테스트합니다.
+		if _ProgressManager:ClientGetCurrentStage() == "" then
+			_UIToast:ShowMessage("현재 진행 중인 스테이지가 없습니다.")
+			return
+		end
+
+		_PerformanceConductor.pendingPerformanceId = ""
+		_PerformanceConductor.pendingRoleAssignment = nil
+		_PerformanceConductor:StopPerformance()
+		_PerformanceConductor:SetHudHidden(false)
+		self:RequestDebugCompleteStage()
+
+		local player = _UserService.LocalPlayer
+		if isvalid(player) and isvalid(player.CurrentMap) and player.CurrentMap.Name == _PerformanceConductor.performanceMapName then
+			_PerformancePostFlowLogic:GoToStudio()
+		end
+	end
+
+	@ExecSpace("ClientOnly")
+	method void StartPreview(string performanceId)
+		-- 임시 편성으로 해당 공연 연출 미리보기
+		_PerformanceConductor:StartPerformancePreview(performanceId, self:BuildTempAssignment())
+	end
+
+	@ExecSpace("ClientOnly")
+	method boolean CanStartPerformance()
+		-- 메이커에서 진행·진입 중인 공연을 중복 시작하지 않게 합니다.
+		if Environment:IsMakerPlay() == false then return false end
+		if _PerformanceConductor.isPlaying or _PerformanceConductor.isWaitingToStart or _PerformanceConductor.isRequestingStart
+			or _PerformanceConductor.pendingPerformanceId ~= "" then
+			_UIToast:ShowMessage("공연이 진행 중이에요.")
+			return false
+		end
+		return true
+	end
+
+	@ExecSpace("ClientOnly")
+	method PerformanceRoleAssignment BuildTempAssignment()
+		-- 임시 편성은 activeCharacterIds를 센터/서브L/서브R 슬롯에 순서대로 배정합니다.
+		local assignment = PerformanceRoleAssignment()
+		if _CharacterManager == nil then
+			log_warning("[PerformanceDebug] CharacterManager 없음")
+			return assignment
+		end
+
+		local ids = _CharacterManager:ClientGetActiveCharacterIds()
+		if ids ~= nil then
+			if ids[1] ~= nil then assignment.center = ids[1] end
+			if ids[2] ~= nil then assignment.subL = ids[2] end
+			if ids[3] ~= nil then assignment.subR = ids[3] end
+		end
+
+		return assignment
+	end
+
+end

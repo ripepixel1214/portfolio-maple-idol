@@ -1,0 +1,29 @@
+---@description "달팽이 사다리 클라이언트 계약 연결"
+@Logic
+script MiniGameSnailLadderClientHandler extends Logic
+	@ExecSpace("ClientOnly")
+	method any CreateBehavior()
+		-- 전용 선택 화면을 공통 MiniGamePlay 진입점에 연결
+		local tBehavior = MiniGameClientBehavior()
+		tBehavior.requiredCapabilities = {_MiniGameViewRegistry.CAP_STAGE, _MiniGameViewRegistry.CAP_SNAIL_LADDER}
+		tBehavior.usesInputHub = false
+		tBehavior.acceptsSelection = true
+		-- 서버 경주만 수신하고 공통 클라이언트 판정 시작 차단
+		tBehavior.startPresentation = function(presenter, sessionId, config)
+			return true
+		end
+		tBehavior.openLobby = function() _MiniGameSnailLadderPresenter:OpenLobby() end
+		tBehavior.openDebugLobby = function(testBalance)
+			_MiniGameSnailLadderPresenter:OpenDebugLobby(testBalance)
+		end
+		tBehavior.prepareView = function(presenter, tContext)
+			_MiniGameSnailLadderPresenter:BeginSession(tContext)
+		end
+		tBehavior.requestRejected = function(miniGameId, reason)
+			_MiniGameSnailLadderPresenter:HandleRejected(miniGameId, reason)
+		end
+		tBehavior.reset = function() _MiniGameSnailLadderPresenter:ClearState() end
+		tBehavior.endSession = function(presenter) _MiniGameSnailLadderPresenter:EndSession() end
+		return tBehavior
+	end
+end
