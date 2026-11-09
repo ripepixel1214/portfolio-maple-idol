@@ -4,17 +4,17 @@
 
 ## 타임라인 편집 도구
 
-기획자가 시간 순서에 따라 복잡한 연출 데이터를 직접 편집할 수 있도록 웹 기반 [시퀀서](../SourceUpdates/abbb12c/tools/performance-sequencer/index.html)를 제작했습니다. 연출의 시점과 속성을 화면에서 편집하고 게임에서 사용하는 데이터로 연결해, 데이터를 직접 수정하는 작업을 줄였습니다. 실제 기획자와 팀원이 사용했습니다.
+공연을 고칠 때 연출 데이터를 직접 수정하는 작업을 줄이려고 웹 [시퀀서](../SourceUpdates/abbb12c/tools/performance-sequencer/index.html)를 만들었습니다. 기획자와 팀원은 타임라인에서 카메라, 캐릭터 표정과 효과음의 시점을 바꾸고 편집한 공연을 게임에 넣었습니다.
 
-연동 규칙의 설계, 검토와 게임 통합을 담당했으며 웹 UI 코드 작성에는 AI 보조를 활용했습니다. 지원되는 연출 유형의 편집은 도구에서 처리하지만 새로운 연출 기능에는 런타임 구현이 필요합니다.
+웹 UI를 만들 때 AI를 활용했습니다. 편집 기능과 저장 규칙을 정하고, 코드를 검토해 게임에 연결하는 작업을 맡았습니다. 새로운 연출 종류를 추가할 때는 게임 쪽 재생 코드도 필요합니다.
 
-### 편집 결과가 게임 데이터로 이어지는 경로
+### 편집한 연출을 게임에 넣기
 
-`index.html`의 `gatherHeader`, `gatherCues`가 편집 내용을 구성하고 `saveToProject`가 로컬 서버의 `/api/save`에 전달합니다. [serve.cjs](../SourceUpdates/abbb12c/tools/performance-sequencer/serve.cjs)가 요청을 받고, [csv-store.cjs](../SourceUpdates/abbb12c/tools/performance-sequencer/csv-store.cjs)가 `PerformanceTable.csv`와 `PerformanceCueTable.csv`에서 같은 공연 ID의 행을 교체합니다. 불러왔을 때와 저장 직전의 공연 데이터가 다르면 저장을 중단해 다른 편집 내용을 덮어쓰지 않도록 했습니다. 이 경우 편집한 큐를 CSV로 내보낸 뒤 최신 공연을 다시 불러올 수 있습니다.
+저장 버튼을 누르면 두 CSV에서 같은 공연 ID의 행만 바꿉니다. 불러온 뒤 원본 공연이 바뀌었으면 저장을 멈춰 다른 사람의 편집을 덮어쓰지 않게 했습니다. 이때 작업한 큐를 먼저 내보낸 다음 최신 공연을 다시 불러올 수 있습니다. 프로젝트에 저장한 결과는 Maker에서 Refresh로 반영합니다.
 
-Node.js 22 이상에서 [start-sequencer.bat](../SourceUpdates/abbb12c/tools/performance-sequencer/start-sequencer.bat) 또는 `node serve.cjs`로 실행하고 `http://127.0.0.1:7788`을 엽니다. 게임 프로젝트에서는 로컬 CSV에 저장한 뒤 Maker의 Refresh로 반영합니다. 발췌본은 CSV 가져오기와 내보내기로 편집 화면을 확인할 수 있고, 프로젝트에 저장하려면 `RootDesk/MyDesk/Performance/Data`의 원본 CSV 두 개가 필요합니다.
+`gatherHeader`와 `gatherCues`가 편집 내용을 모으고, `saveToProject`가 `/api/save`로 보냅니다. [serve.cjs](../SourceUpdates/abbb12c/tools/performance-sequencer/serve.cjs)에서 요청을 받습니다. [csv-store.cjs](../SourceUpdates/abbb12c/tools/performance-sequencer/csv-store.cjs)는 `PerformanceTable.csv`와 `PerformanceCueTable.csv`를 임시 파일에 쓴 뒤 하나씩 교체합니다. 도중에 실패하면 이미 바꾼 파일을 백업에서 되돌리게 했습니다.
 
-두 CSV는 임시 파일에 쓴 뒤 순차적으로 교체합니다. 도중에 교체가 실패하면 먼저 교체한 파일을 백업에서 되돌리는 경로를 두었습니다.
+Windows에서는 [start-sequencer.bat](../SourceUpdates/abbb12c/tools/performance-sequencer/start-sequencer.bat)을 실행합니다. [실행 안내](../SourceUpdates/abbb12c/tools/performance-sequencer/README.md)대로 Node.js 22 이상에서 `node serve.cjs`를 실행하고 `http://127.0.0.1:7788`을 열 수도 있습니다. 공개본에서도 CSV를 가져와 편집하고 내보낼 수 있습니다. 프로젝트에 직접 저장하려면 `RootDesk/MyDesk/Performance/Data`에 원본 CSV 두 개가 필요합니다.
 
 ![공연 연출을 트랙별로 배치한 시퀀서 화면](../Media/sequencer-timeline.jpg)
 
@@ -24,19 +24,19 @@ Node.js 22 이상에서 [start-sequencer.bat](../SourceUpdates/abbb12c/tools/per
 
 ## 게임의 연출 실행과 결과
 
-[PerformanceCueRow](../SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/Data/PerformanceCueRow.mlua)와 [EPerformanceCueType](../Source/RootDesk/MyDesk/Performance/Data/EPerformanceCueType.mlua)에 연출 데이터와 유형을 정의하고, [PerformanceConductor](../SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceConductor.mlua)에서 실행하도록 연결했습니다.
+연출 시점과 종류는 [PerformanceCueRow](../SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/Data/PerformanceCueRow.mlua)와 [EPerformanceCueType](../Source/RootDesk/MyDesk/Performance/Data/EPerformanceCueType.mlua)에 담습니다. [PerformanceConductor](../SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/PerformanceConductor.mlua)가 게임에서 이 큐를 읽습니다.
 
-`PerformanceConductor.OnUpdate`는 로컬 재생 시간과 다음 큐 인덱스를 기준으로 실행 시점이 된 큐를 `DispatchCue`에 넘깁니다. 연출 유형별 처리는 핸들러로 분기합니다. 편집 도구의 미리보기와 게임 엔티티, 카메라를 사용하는 실제 공연 재생은 구분됩니다.
+`PerformanceConductor.OnUpdate`는 로컬 재생 시간과 다음 큐의 순번을 확인합니다. 시작 시점이 된 큐는 `DispatchCue`에서 종류에 맞는 핸들러로 넘겨 게임의 캐릭터, 카메라와 UI에 반영합니다. 위의 영상은 게임에서 재생한 장면입니다.
 
 | 역할 | 코드 |
 | --- | --- |
 | 연출 효과 | [PerformanceEffectLogic](../Source/RootDesk/MyDesk/Performance/PerformanceEffectLogic.mlua) |
-| 결과 계산과 표시 연결 | [PerformanceResultManager](../Source/RootDesk/MyDesk/Performance/PerformanceResultManager.mlua), [PerformanceScoreUILogic](../Source/RootDesk/MyDesk/Performance/PerformanceScoreUILogic.mlua) |
-| 결과 이후 화면과 이동 | [PerformancePostFlowLogic](../Source/RootDesk/MyDesk/Performance/PerformancePostFlowLogic.mlua), [PerformancePhotocardUILogic](../Source/RootDesk/MyDesk/Performance/PerformancePhotocardUILogic.mlua) |
+| 점수 계산과 결과 화면 | [PerformanceResultManager](../Source/RootDesk/MyDesk/Performance/PerformanceResultManager.mlua), [PerformanceScoreUILogic](../Source/RootDesk/MyDesk/Performance/PerformanceScoreUILogic.mlua) |
+| 공연이 끝난 뒤 포토카드와 이동 | [PerformancePostFlowLogic](../Source/RootDesk/MyDesk/Performance/PerformancePostFlowLogic.mlua), [PerformancePhotocardUILogic](../Source/RootDesk/MyDesk/Performance/PerformancePhotocardUILogic.mlua) |
 | 반복 연출 컴포넌트 | [AudienceJumpComponent](../Source/RootDesk/MyDesk/Performance/AudienceJumpComponent.mlua), [LightStickSwayComponent](../Source/RootDesk/MyDesk/Performance/LightStickSwayComponent.mlua), [SpotlightSwayComponent](../Source/RootDesk/MyDesk/Performance/SpotlightSwayComponent.mlua) |
 
 ## 언어 표시와 화면 연동
 
-현재 텍스트 조회는 [LocaleTextUtil](../Source/RootDesk/MyDesk/Utils/LocaleTextUtil.mlua)에서 플랫폼 `LocalizationService`에 연결합니다. [LocalizedFormatTextComponent](../Source/RootDesk/MyDesk/UI/LocalizedFormatTextComponent.mlua)는 실행 중 값을 텍스트 인자에 적용하고, [LocalizedNameTagComponent](../Source/RootDesk/MyDesk/Localization/LocalizedNameTagComponent.mlua)는 캐릭터 이름표를 갱신합니다.
+[LocaleTextUtil](../Source/RootDesk/MyDesk/Utils/LocaleTextUtil.mlua)은 플랫폼의 `LocalizationService`에서 현재 언어에 맞는 문구를 가져옵니다. [LocalizedFormatTextComponent](../Source/RootDesk/MyDesk/UI/LocalizedFormatTextComponent.mlua)는 문구에 게임 중 바뀌는 값을 채우고, [LocalizedNameTagComponent](../Source/RootDesk/MyDesk/Localization/LocalizedNameTagComponent.mlua)는 이름표를 갱신합니다.
 
-초기 다국어 연동 이후 공동 수정된 구조를 수록했습니다. 대화 표시와 서식 처리는 [Dialog](../Source/RootDesk/MyDesk/Dialog/)와 [TemplateTextFormatter](../Source/RootDesk/MyDesk/Utils/TemplateTextFormatter.mlua)에서 확인할 수 있습니다.
+다국어를 처음 연결한 뒤 팀에서 함께 수정했습니다. 대화에 문구를 표시하는 코드는 [Dialog](../Source/RootDesk/MyDesk/Dialog/)에 있고, 문구에 값을 넣는 처리는 [TemplateTextFormatter](../Source/RootDesk/MyDesk/Utils/TemplateTextFormatter.mlua)에서 합니다.

@@ -4,17 +4,17 @@
 
 ## 튜토리얼 시작과 완료
 
-[TutorialStepMaster](../Source/RootDesk/MyDesk/Tutorial/TutorialStepMaster.mlua)와 [TutorialStepData](../Source/RootDesk/MyDesk/Tutorial/TutorialStepData.mlua)에 튜토리얼 정보를 연결하고, [TutorialManager](../Source/RootDesk/MyDesk/Tutorial/TutorialManager.mlua)에서 맵과 진행 상태를 확인해 시작하도록 구현했습니다.
+플레이어가 정해진 맵에 도착하고 진행 조건을 충족하면 튜토리얼이 시작됩니다. [TutorialStepMaster](../Source/RootDesk/MyDesk/Tutorial/TutorialStepMaster.mlua)와 [TutorialStepData](../Source/RootDesk/MyDesk/Tutorial/TutorialStepData.mlua)에서 단계 정보를 읽습니다. [TutorialManager](../Source/RootDesk/MyDesk/Tutorial/TutorialManager.mlua)의 `BuildRegistry`에서 이를 준비하고 `EvaluateTriggers`와 `MeetsCondition`에서 시작 조건을 확인합니다.
 
-대화 종료와 시나리오 완료를 진행에 연결하고, [TutorialUILogic](../Source/RootDesk/MyDesk/Tutorial/TutorialUILogic.mlua)에서 안내를 표시합니다. 이벤트 구독과 해제는 시작, 종료 수명주기에 맞춰 처리했습니다.
+`StartTrigger`에서 안내를 시작해 [TutorialUILogic](../Source/RootDesk/MyDesk/Tutorial/TutorialUILogic.mlua)에 표시합니다. `OnDialogClosed`와 `OnScenarioFinished`에서 대화나 시나리오가 끝났을 때 완료를 기록합니다. 시작 때 붙인 이벤트 구독은 `OnEndPlay`와 `DisconnectDialogClosed`에서 해제합니다.
 
-`TutorialManager.BuildRegistry`에서 정의를 준비하고 `EvaluateTriggers`, `MeetsCondition`에서 현재 진행과 맵 조건을 확인합니다. `StartTrigger`에서 시작한 대화의 종료는 `OnDialogClosed`, 시나리오 종료는 `OnScenarioFinished`에서 받아 완료 처리로 연결합니다. `OnEndPlay`와 `DisconnectDialogClosed`에서 구독을 해제합니다. [ProgressChangedEvent](../Source/RootDesk/MyDesk/Progress/ProgressChangedEvent.mlua), [DialogClosedEvent](../Source/RootDesk/MyDesk/Dialog/DialogClosedEvent.mlua), [UIVisibilityChangedEvent](../Source/RootDesk/MyDesk/UI/UIVisibilityChangedEvent.mlua)는 콜백으로 전달하는 이벤트 데이터입니다.
+[진행 상태 변경](../Source/RootDesk/MyDesk/Progress/ProgressChangedEvent.mlua), [대화 닫기](../Source/RootDesk/MyDesk/Dialog/DialogClosedEvent.mlua), [화면 표시 변경](../Source/RootDesk/MyDesk/UI/UIVisibilityChangedEvent.mlua)은 각 콜백에 넘기는 이벤트입니다.
 
 ## 스케줄과 정산 화면
 
-[ScheduleUILogic](../Source/RootDesk/MyDesk/Progress/Schedule/ScheduleUILogic.mlua)의 주간 선택 화면, [ScheduleProgressUILogic](../Source/RootDesk/MyDesk/Progress/Schedule/ScheduleProgressUILogic.mlua)의 진행 표시, [SettlementCardUILogic](../Source/RootDesk/MyDesk/Progress/Schedule/SettlementCardUILogic.mlua)의 정산 표현을 연결했습니다.
+[주간 스케줄 선택](../Source/RootDesk/MyDesk/Progress/Schedule/ScheduleUILogic.mlua), [실행 중 표시](../Source/RootDesk/MyDesk/Progress/Schedule/ScheduleProgressUILogic.mlua), [정산 카드](../Source/RootDesk/MyDesk/Progress/Schedule/SettlementCardUILogic.mlua) 화면을 게임 진행에 연결했습니다.
 
-[WeeklyPlanData](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklyPlanData.mlua)와 [WeeklySequenceScheduler](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklySequenceScheduler.mlua)는 주간 계획 데이터와 실행 순서를 관리합니다. Progress와 Activity는 팀 공동 구현이며, 초기 UI 작업과 이후 화면 연동을 담당했습니다.
+활동과 진행 기능은 팀과 함께 개발했고, 초기 UI를 만들고 이후 화면을 연결하는 일을 맡았습니다. [WeeklyPlanData](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklyPlanData.mlua)에 주간 계획을 담고 [WeeklySequenceScheduler](../Source/RootDesk/MyDesk/Progress/Schedule/WeeklySequenceScheduler.mlua)가 실행 순서를 관리합니다.
 
 ## 입력, 대화와 화면 효과
 
@@ -23,6 +23,6 @@
 | 플레이어 조작 제한 | [PlayerDisableComponent](../Source/RootDesk/MyDesk/Player/PlayerDisableComponent.mlua), [PlayerControlUIComponent](../Source/RootDesk/MyDesk/PlayerControlUIComponent.mlua) |
 | 대화 표시와 다국어 연결 | [DialogUILogic](../Source/RootDesk/MyDesk/Dialog/DialogUILogic.mlua), [DialogRichTextPlayer](../Source/RootDesk/MyDesk/Dialog/DialogRichTextPlayer.mlua) |
 | 전환과 안내 화면 | [LoadingUILogic](../Source/RootDesk/MyDesk/UI/LoadingUILogic.mlua), [ScreenEffectUILogic](../Source/RootDesk/MyDesk/UI/ScreenEffectUILogic.mlua), [UIToast](../Source/RootDesk/MyDesk/UI/UIToast.mlua) |
-| 소리와 표현 보조 | [SoundManager](../Source/RootDesk/MyDesk/Sound/SoundManager.mlua), [EntityFadeComponent](../Source/RootDesk/MyDesk/Utils/EntityFadeComponent.mlua) |
+| 소리와 페이드 효과 | [SoundManager](../Source/RootDesk/MyDesk/Sound/SoundManager.mlua), [EntityFadeComponent](../Source/RootDesk/MyDesk/Utils/EntityFadeComponent.mlua) |
 
-Actor, Item, Shop, Progress는 공동 모듈이며 수정과 연동을 담당했습니다. [파일별 작성 이력](SourceMap.md)
+`Actor`, `Item`, `Shop`, `Progress`는 팀 공동 모듈입니다. 화면에 연결하는 데 필요한 코드를 수정했습니다. [파일별 Git 기록](SourceMap.md)

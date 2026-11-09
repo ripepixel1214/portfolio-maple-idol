@@ -2,13 +2,20 @@
 
 [프로젝트](../README.md) / [전체 코드](CodeIndex.md)
 
-`Source/`는 포트폴리오에서 연결한 원본 `jw/polishing` 커밋 `15dbc768b27869b8d4baaa682e82eb93e71ec044`의 발췌입니다. [후속 구현](../SourceUpdates/abbb12c/)에는 원본 `main` 커밋 `abbb12c4ec378f33fd46c36bb152d4a666773035`에서 바뀐 미니게임, NPC, 결제와 공연 도구의 관련 파일을 수록했습니다. 두 디렉터리 모두 원본 상대 경로를 유지하며 파일별 기준 커밋, 해시와 작성 이력은 [파일별 출처 목록](SourceManifest.json)에서 확인할 수 있습니다.
+제출한 포트폴리오의 코드 링크는 `Source/`로 연결됩니다. 이후 수정한 미니게임, NPC, 결제와 공연 도구 코드는 [SourceUpdates/abbb12c](../SourceUpdates/abbb12c/)에 있습니다.
 
-미니게임, NPC와 이벤트 연결, 공연 제작 도구, 구매 재화 저장을 담당했습니다. 공동 모듈에는 다른 팀원의 작성과 수정이 포함되며 Git 작성자 목록만으로 단독 설계나 구현을 뜻하지 않습니다. 웹 시퀀서 UI는 AI의 도움으로 구현하고 편집 기능과 데이터 규칙 설계, 검토와 게임 통합을 맡았습니다.
+| 공개 코드 | 원본 브랜치와 커밋 |
+| --- | --- |
+| 제출본 코드 | `jw/polishing`, `15dbc768b27869b8d4baaa682e82eb93e71ec044` |
+| 이후 수정한 코드 | `main`, `abbb12c4ec378f33fd46c36bb152d4a666773035` |
 
-게임 에셋, 플랫폼 SDK, DataSet 원본과 에디터 엔티티 설정을 제외한 소스 발췌본으로 단독 실행을 지원하지 않습니다. 코드의 기준 버전과 서비스 배포 버전은 구분됩니다.
+두 폴더 모두 원본의 폴더 구조를 따릅니다. 파일별 커밋, 해시와 Git 작성자는 [SourceManifest.json](SourceManifest.json)에 있습니다. 표의 커밋은 공개한 소스의 버전이며 서비스 배포 버전은 따로 관리합니다.
 
-| 파일 | Git 작성자 |
+미니게임 실행과 입력 처리, NPC 대화와 이벤트, 구매 재화의 저장과 복구를 맡았습니다. 공연에서는 [편집 도구를 만들고 게임 재생에 연결했습니다](ToolsAndLocalization.md). 파일 표에는 팀이 함께 수정한 코드도 포함되어 있습니다.
+
+원본 프로젝트를 Maker에서 실행하려면 게임 에셋, 플랫폼 SDK, DataSet과 엔티티 설정이 필요합니다. 공개된 게임은 [프로젝트 페이지](../README.md)의 실행 링크에서 열 수 있습니다.
+
+| 파일 | Git 기록의 작성자 |
 | --- | --- |
 | [RootDesk/MyDesk/Activity/ActivityHandler.mlua](../Source/RootDesk/MyDesk/Activity/ActivityHandler.mlua) | HGM2695, Jinwon |
 | [RootDesk/MyDesk/Activity/ActivityManager.mlua](../Source/RootDesk/MyDesk/Activity/ActivityManager.mlua) | HGM2695, Jinwon |

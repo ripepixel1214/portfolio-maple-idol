@@ -2,9 +2,9 @@
 
 [프로젝트](../README.md) / [소스 출처](SourceMap.md)
 
-담당 기능과 연동에 사용한 공동 모듈을 원본 경로에 맞춰 정리했습니다. 미니게임은 [구조와 입력 흐름](MiniGames.md), 구매와 저장은 [거래 처리](Payments.md)에서 주요 함수로 이동할 수 있습니다.
+미니게임은 [실행과 입력 처리](MiniGames.md), 결제는 [거래 저장과 복구](Payments.md)에서 주요 함수를 볼 수 있습니다.
 
-## 후속 구현
+## 이후 수정한 코드
 
 | 기능 | 코드 |
 | --- | --- |
@@ -13,7 +13,7 @@
 | 지갑 저장과 수량형 상품 지급 | [재화](../SourceUpdates/abbb12c/RootDesk/MyDesk/Currency/), [상점](../SourceUpdates/abbb12c/RootDesk/MyDesk/Shop/), [아이템](../SourceUpdates/abbb12c/RootDesk/MyDesk/Item/) |
 | 공연 재생과 데이터 편집 | [공연](../SourceUpdates/abbb12c/RootDesk/MyDesk/Performance/), [시퀀서](../SourceUpdates/abbb12c/tools/performance-sequencer/) |
 
-아래 목록은 포트폴리오의 코드 링크가 가리키는 발췌입니다.
+아래는 제출한 포트폴리오에서 연결한 `Source/`의 파일입니다.
 
 ## Activity
 

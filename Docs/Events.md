@@ -4,32 +4,30 @@
 
 ## NPC 요청 검증
 
-NPC 대화는 한 번의 입력으로 끝나지 않고 대화, 선택지, 미니게임과 결과 적용으로 이어집니다. 진행 중 입력이 반복되거나 이전 단계의 요청이 늦게 도착해도 같은 상태를 다시 변경하지 않도록 서버에서 요청과 진행 상태를 확인하도록 했습니다.
+NPC 대화 중 같은 버튼을 두 번 누르거나 이전 단계의 요청이 늦게 도착할 수 있습니다. 대화에서 선택지나 미니게임으로 넘어갈 때 서버가 현재 단계를 확인하게 해, 같은 이벤트가 두 번 진행되지 않도록 했습니다.
 
-[NpcEventTriggerComponent](../Source/RootDesk/MyDesk/Event/NpcEventTriggerComponent.mlua)가 상호작용을 시작하고, [NpcEventManager](../Source/RootDesk/MyDesk/Event/NpcEventManager.mlua)가 요청자, 맵, 사용자 세션과 현재 단계를 검증합니다.
+[NpcEventTriggerComponent](../Source/RootDesk/MyDesk/Event/NpcEventTriggerComponent.mlua)가 상호작용을 시작하면 [NpcEventManager](../Source/RootDesk/MyDesk/Event/NpcEventManager.mlua)가 요청자, 맵과 세션을 확인합니다.
 
-- 요청 ID: 이미 처리한 요청인지 식별하는 값입니다.
-- 단계 토큰: 현재 대화 단계에서 발급한 식별값으로, 이전 단계의 요청을 구분합니다.
-- 세션 상태: 해당 사용자가 진행할 수 있는 상태인지 확인하고, 다음 단계 처리 중에는 같은 진행을 반복하지 않도록 합니다.
-
-식별값만 확인하는 것이 아니라 상태 전환까지 연결해 다음 요청의 허용 여부를 결정하도록 구현했습니다. 첫 이벤트 실행 전 내부 오류에 대해서는 활동 시작에 소모한 자원을 복구하고, 이미 진행된 실행과 구분했습니다.
+- 요청 ID로 이미 처리한 요청을 찾습니다.
+- 대화 단계마다 토큰을 발급해 이전 단계에서 온 요청을 거릅니다.
+- 다음 단계를 처리 중이면 세션 상태를 확인해 같은 진행을 다시 시작하지 않습니다.
 
 ### 함수와 실패 조건
 
-| 함수 | 처리 조건과 동작 |
+| 함수 | 서버에서 하는 일 |
 | --- | --- |
-| `RequestBeginNpcInteraction` | 서버 요청자와 준비된 맵, NPC 후보, 진행 조건을 확인한 뒤 행동력을 차감하고 세션을 생성합니다. |
-| `RequestAdvanceNpcInteraction` | 소유자, 대화 종료 대기 상태와 단계 토큰이 일치할 때만 `advancing`으로 전환하고 완료 기록과 다음 이벤트 실행으로 넘어갑니다. |
-| `TryRollbackFailedSessionActionPoint` | 실행 실패 사유, 행동력 차감 여부와 실행한 이벤트 수를 확인합니다. 첫 실행 전 내부 실패만 복구하며 정상 취소에는 환불하지 않습니다. |
-| `TryRecordProcessedRequestId` | 집합으로 중복을 확인하고 FIFO 목록으로 최근 32개 요청 ID만 보관합니다. 영구적인 재처리 방지 기록은 아닙니다. |
+| `RequestBeginNpcInteraction` | 요청자, 맵, NPC와 진행 조건이 맞으면 행동력을 차감하고 세션을 엽니다. |
+| `RequestAdvanceNpcInteraction` | 세션 소유자와 단계 토큰이 맞고 대화가 끝나길 기다리던 상태이면 `advancing`으로 바꿉니다. 완료를 기록하고 다음 이벤트를 실행합니다. |
+| `TryRollbackFailedSessionActionPoint` | 행동력을 차감한 뒤 첫 이벤트 실행 전에 내부 오류가 난 경우에만 돌려줍니다. 정상 취소에는 돌려주지 않습니다. |
+| `TryRecordProcessedRequestId` | 집합에서 중복 ID를 찾고 FIFO 목록에 최근 32개를 보관합니다. |
 
-세션은 `NpcEventManager`의 활성 필드 한 묶음으로 관리하도록 구현했습니다. 최근 32개 요청 ID로 중복을 확인하고, 현재 세션 상태와 진행 조건도 함께 검사하도록 했습니다. 보관 범위를 벗어난 요청은 ID 이력만으로 중복 여부를 판단할 수 없습니다. FIFO 앞 원소 삭제 시 이동할 원소 수도 보관 개수로 제한됩니다.
+`NpcEventManager`가 활성 세션의 상태를 한곳에서 관리합니다. 목록에서 오래된 요청을 지울 때 옮기는 항목은 최대 32개입니다. 목록에서 빠진 요청은 ID만으로 중복 여부를 알 수 없어, 서버에서 세션 상태와 진행 조건을 함께 확인합니다.
 
 ## 대화 분기와 응답 복구
 
-후속 버전에서는 [분기 요청](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua#L975)에 세션 ID와 단계 토큰, 요청 ID를 함께 전달합니다. [NpcDialogGuard](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcDialogGuard.mlua)가 대화별로 연결된 이벤트를 찾아 검증에 사용하고, 서버는 실제로 실행한 분기에서만 보상 요청을 받아 이미 처리한 보상이 다시 지급되지 않도록 합니다.
+[대화 분기를 요청](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua#L975)할 때 세션 ID, 단계 토큰, 요청 ID를 같이 보냅니다. [NpcDialogGuard](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcDialogGuard.mlua)가 현재 대화에 연결된 이벤트인지 확인합니다. 서버는 실제로 실행한 분기의 보상만 지급하고, 이미 지급한 보상은 건너뜁니다.
 
-클라이언트는 [NpcRequestState](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcRequestState.mlua)에 응답을 기다리는 요청을 보관합니다. 응답이 없으면 같은 요청을 제한된 횟수만 다시 보내고, 받은 응답으로 [유실된 대화나 선택지를 복원](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua#L1156)합니다. 재시도 한도를 넘으면 세션을 닫고 조작 제한을 해제합니다.
+응답을 기다리는 요청은 [NpcRequestState](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcRequestState.mlua)에 보관했습니다. 응답이 없으면 같은 요청을 정해 둔 횟수만큼 다시 보냅니다. 응답을 받으면 [유실된 대화나 선택지를 다시 표시](../SourceUpdates/abbb12c/RootDesk/MyDesk/Event/NpcEventManager.mlua#L1156)하고, 재시도 한도를 넘으면 세션을 닫고 조작 제한을 풉니다.
 
 ## 이벤트 선택, 실행과 완료 기록
 
@@ -41,10 +39,10 @@ NPC 대화는 한 번의 입력으로 끝나지 않고 대화, 선택지, 미니
 | 완료 상태 관리와 저장 | [EventCompletionManager](../Source/RootDesk/MyDesk/Event/EventCompletionManager.mlua), [EventCompletionStorage](../Source/RootDesk/MyDesk/Event/EventCompletionStorage.mlua) |
 | 데이터 구조 | [EventRow](../Source/RootDesk/MyDesk/Event/EventRow.mlua), [EventMaster](../Source/RootDesk/MyDesk/Event/EventMaster.mlua) |
 
-판정 조건을 바꾸는 일과 실행 유형을 추가하는 일을 구분해 처리했습니다. 이벤트 전체를 단일 함수에서 끝내기보다 각 단계가 다음 단계에 전달할 결과를 나눠 구성했습니다. 데이터와 캐릭터 상태 등 공동 모듈의 연동도 포함됩니다.
+조건을 바꿀 때 대화나 미니게임을 여는 코드까지 손대지 않도록, 이벤트 선택과 실행, 결과 반영을 나눴습니다. 필요한 결과를 다음 단계에 넘겨 캐릭터 상태와 완료 기록에 반영합니다.
 
 ## NPC 배치와 맵 이동
 
-[NpcSpawnComponent](../Source/RootDesk/MyDesk/Event/NpcSpawnComponent.mlua)와 [DowntownEventContextManager](../Source/RootDesk/MyDesk/Event/DowntownEventContextManager.mlua)는 현재 맵에서 실행할 NPC 상호작용을 연결하고, [NpcTileBlockerComponent](../Source/RootDesk/MyDesk/Event/NpcTileBlockerComponent.mlua)는 접근 위치를 제어합니다.
+[NpcSpawnComponent](../Source/RootDesk/MyDesk/Event/NpcSpawnComponent.mlua)와 [DowntownEventContextManager](../Source/RootDesk/MyDesk/Event/DowntownEventContextManager.mlua)에서 현재 맵의 NPC가 어떤 이벤트를 열지 정합니다. NPC에게 다가갈 수 있는 위치는 [NpcTileBlockerComponent](../Source/RootDesk/MyDesk/Event/NpcTileBlockerComponent.mlua)에서 정합니다.
 
-외출 이동은 [OutdoorMapTransitionUILogic](../Source/RootDesk/MyDesk/OutdoorMapTransitionUILogic.mlua)의 선택 화면, [OutdoorMapTransitionLogic](../Source/RootDesk/MyDesk/OutdoorMapTransitionLogic.mlua)의 요청 처리, [MapTransitionHelper](../Source/RootDesk/MyDesk/Utils/MapTransitionHelper.mlua)의 전환으로 나눴습니다. 입력 화면과 실제 이동 처리를 분리한 코드입니다.
+외출 장소를 고르면 [선택 화면](../Source/RootDesk/MyDesk/OutdoorMapTransitionUILogic.mlua)이 [이동을 요청](../Source/RootDesk/MyDesk/OutdoorMapTransitionLogic.mlua)합니다. 실제 맵 이동은 [MapTransitionHelper](../Source/RootDesk/MyDesk/Utils/MapTransitionHelper.mlua)에서 처리합니다.
